@@ -24,17 +24,17 @@ def normalize_text(text: str) -> str:
     """Chuẩn hóa văn bản: lowercase, remove diacritics, remove punctuation."""
     if not text:
         return ""
-    # Remove LaTeX commands
+    
     text = re.sub(r'\\[a-zA-Z]+\{([^}]*)\}', r'\1', text)
     text = re.sub(r'[\\{}]', '', text)
-    # Lowercase
+    
     text = text.lower()
-    # Remove accents/diacritics
+    
     text = unicodedata.normalize('NFKD', text)
     text = ''.join(c for c in text if not unicodedata.combining(c))
-    # Remove punctuation except spaces
+    
     text = re.sub(r'[^\w\s]', ' ', text)
-    # Normalize whitespace
+    
     text = ' '.join(text.split())
     return text
 
@@ -47,7 +47,7 @@ def parse_bibtex(bib_content: str) -> Dict[str, Dict]:
     """
     entries = {}
     
-    # Pattern để match BibTeX entries
+    
     entry_pattern = r'@(\w+)\s*\{\s*([^,\s]+)\s*,([^@]*?)(?=@|\Z)'
     
     for match in re.finditer(entry_pattern, bib_content, re.DOTALL | re.IGNORECASE):
@@ -55,18 +55,18 @@ def parse_bibtex(bib_content: str) -> Dict[str, Dict]:
         citation_key = match.group(2).strip()
         fields_str = match.group(3)
         
-        # Skip STRING entries
+        
         if entry_type == 'string':
             continue
         
-        # Parse fields
+        
         fields = {}
-        # Pattern để match field = {...} hoặc field = "..."
+        
         field_pattern = r'(\w+)\s*=\s*(?:\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}|"([^"]*)"|\{([^}]*)\}|(\d+))'
         
         for field_match in re.finditer(field_pattern, fields_str, re.IGNORECASE | re.DOTALL):
             field_name = field_match.group(1).lower()
-            # Get the first non-None captured group for value
+            
             field_value = next((g for g in field_match.groups()[1:] if g is not None), '')
             field_value = field_value.strip()
             fields[field_name] = field_value
@@ -96,11 +96,11 @@ def load_bib_files(paper_dir: Path) -> Dict[str, Dict]:
     if not tex_dir.exists():
         return all_entries
     
-    # Tìm tất cả file .bib recursively
+    
     for bib_file in tex_dir.rglob('*.bib'):
         try:
-            # Skip files quá lớn (có thể là consolidated bibliography)
-            if bib_file.stat().st_size > 1000000:  # Skip files > 1MB
+            
+            if bib_file.stat().st_size > 1000000:  
                 continue
                 
             with open(bib_file, 'r', encoding='utf-8', errors='ignore') as f:
@@ -121,10 +121,10 @@ def load_references_json(paper_dir: Path) -> Dict[str, Dict]:
     try:
         with open(ref_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            # Ensure we return a dict and filter out None values
+            
             if data is None:
                 return {}
-            # Filter out entries where value is None or not a dict
+            
             return {k: v for k, v in data.items() if v is not None and isinstance(v, dict)}
     except Exception as e:
         print(f"Error reading {ref_file}: {e}")
@@ -169,7 +169,7 @@ def match_bibtex_to_arxiv(
             if not ref_title:
                 continue
             
-            # Calculate title similarity
+            
             score = calculate_similarity(bib_title, ref_title)
             
             if score > best_score:
@@ -188,7 +188,7 @@ def process_paper(paper_dir: Path, threshold: float = 0.7) -> Tuple[Dict[str, st
     Returns:
         Tuple[Dict[str, str], Dict]: (matches, stats)
     """
-    # Load data
+    
     bib_entries = load_bib_files(paper_dir)
     references = load_references_json(paper_dir)
     
@@ -202,7 +202,7 @@ def process_paper(paper_dir: Path, threshold: float = 0.7) -> Tuple[Dict[str, st
     if not bib_entries or not references:
         return {}, stats
     
-    # Perform matching
+    
     matches = match_bibtex_to_arxiv(bib_entries, references, threshold)
     stats['num_matches'] = len(matches)
     
@@ -228,7 +228,7 @@ def generate_pred_json(
     Returns:
         Dict: pred.json structure
     """
-    # Get list of paper directories
+    
     paper_dirs = sorted([
         d for d in data_dir.iterdir() 
         if d.is_dir() and not d.name.startswith('.')
@@ -245,7 +245,7 @@ def generate_pred_json(
         
         if matches:
             for cite_key, arxiv_id in matches.items():
-                # Use paper_id:cite_key as unique identifier
+                
                 unique_key = f"{paper_dir.name}:{cite_key}"
                 all_groundtruth[unique_key] = arxiv_id
                 print(f"  Match: {cite_key} -> {arxiv_id}")
@@ -254,11 +254,11 @@ def generate_pred_json(
         print(f"  Stats: {stats['num_bib_entries']} bib entries, "
               f"{stats['num_references']} refs, {stats['num_matches']} matches")
     
-    # Create pred.json structure
+    
     pred_json = {
         "partition": partition,
         "groundtruth": all_groundtruth,
-        "prediction": {},  # To be filled by the model later
+        "prediction": {},  
         "stats": {
             "total_papers": len(paper_dirs),
             "total_matches": len(all_groundtruth),
@@ -267,7 +267,7 @@ def generate_pred_json(
         }
     }
     
-    # Save to file
+    
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(pred_json, f, indent=2, ensure_ascii=False)
