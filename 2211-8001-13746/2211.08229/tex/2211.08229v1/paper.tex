@@ -1,0 +1,653 @@
+\documentclass[11pt]{article}
+\usepackage{bbm}
+
+\usepackage{epsfig,endnotes}
+\usepackage{multirow}
+\usepackage{subfig}
+\usepackage{graphicx}
+\usepackage{grffile}
+\newcounter{copyrightbox}
+\newcounter{subcopyrightbox}
+\newcounter{subcopyrightbox@save}
+\usepackage[font=bf]{caption}
+\usepackage{color, url}
+\usepackage{xspace} 
+
+\usepackage{amsmath}
+
+\usepackage{geometry}
+\geometry{a4paper,scale=0.75}
+\usepackage{changepage}
+\usepackage{booktabs}
+\usepackage{hyperref} 
+\usepackage{cleveref}
+
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{tikz}
+\usepackage{comment}
+\usepackage{amsmath,amssymb}
+\usepackage{caption}
+\usepackage{floatrow}
+\floatsetup[table]{capposition=above}
+\usepackage{longtable}
+\usepackage{etoolbox}
+\AtBeginEnvironment{longtable}{
+  \addfontfeature{RawFeature=+tnum;-onum}
+}
+\usepackage{pdflscape}
+\usepackage{colortbl}
+\definecolor{Gray}{gray}{0.925}
+\newcommand{\myrowcolour}{\rowcolor{Gray}}
+\newcolumntype{g}{>{\columncolor{Gray}}c}
+\usepackage{tabularx}
+\newcolumntype{M}[1]{>{\centering\arraybackslash}m{#1}}
+\usepackage{booktabs}
+\usepackage{wrapfig}
+
+\usepackage{color}
+\usepackage{dsfont}
+\usepackage{makecell}
+\usepackage{multirow}
+\usepackage{subfig}
+\usepackage{bbold}
+\usepackage{algorithm}  
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+\usepackage{amsfonts,amssymb}
+\newcommand{\myparatight}[1]{\smallskip\noindent{\bf {#1}:}~}
+\newcommand{\name}{\text{CorruptEncoder}}
+\newcommand{\dname}{\text{Localized Cropping}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\newenvironment{packeditemize}{\begin{list}{$\bullet$}{\setlength{\itemsep}{0.2pt}\addtolength{\labelwidth}{-4pt}\setlength{\leftmargin}{\labelwidth}\setlength{\listparindent}{\parindent}\setlength{\parsep}{1pt}\setlength{\topsep}{0pt}}}{\end{list}}
+\AtBeginDocument{
+  \providecommand\BibTeX{{
+    \normalfont B\kern-0.5em{\scshape i\kern-0.25em b}\kern-0.8em\TeX}}}
+
+
+
+
+\begin{document}
+
+\begin{center}
+{\LARGE{\bf{\name: Data Poisoning based Backdoor Attacks to Contrastive Learning}}}
+\begin{tabular}{cccc}
+&&&\\
+Jinghuai Zhang &&& Hongbin Liu \\
+Duke University &&& Duke University \\
+jinghuai.zhang@duke.edu &&& hongbin.liu@duke.edu \\
+\\
+Jinyuan Jia &&& Neil Zhenqiang Gong \\
+UIUC &&& Duke University\\
+jinyuan@illinois.edu &&& neil.gong@duke.edu\\
+\end{tabular}
+\end{center}
+
+\begin{abstract}
+Contrastive learning (CL) pre-trains general-purpose encoders using an unlabeled pre-training dataset, which consists of images (called {single-modal CL}) or image-text pairs (called {multi-modal CL}). CL is vulnerable to {data poisoning based backdoor attacks (DPBAs)}, in which an attacker  injects {poisoned inputs} into the pre-training dataset so the encoder is backdoored. However, existing DPBAs achieve limited effectiveness. In this work, we propose new DPBAs called {\name} to CL. Our experiments show that  {\name} substantially outperforms existing DPBAs for both single-modal and multi-modal CL. {\name} is the first DPBA that achieves \textbf{more than 90\%} attack success rates on single-modal CL with only a few (3) reference images and a small poisoning ratio (0.5\%). Moreover, we also propose a defense, called {localized cropping}, to defend single-modal CL against DPBAs. Our results show that our defense can reduce the effectiveness of DPBAs, but it sacrifices the utility of the encoder, highlighting the needs of new defenses.
+\end{abstract}
+
+\section{Introduction}
+Depending on the pre-training dataset, contrastive learning (CL) can be categorized into \emph{single-modal CL} (\cite{chen2020improved,chen2020simple,caron2020unsupervised,koohpayegani2021mean,li2021prototypical}) and \emph{multi-modal CL} (\cite{radford2021learning}). Single-modal CL uses unlabeled images to pre-train an image encoder, while multi-modal CL uses image-text pairs to pre-train an image encoder and a text encoder. The key idea of single-modal CL is to learn an image encoder that produces similar (or dissimilar) feature vectors for two random augmented views created from the same (or different) image. An augmented view of an image is created by applying a sequence of \emph{data augmentation operations} to the image. Among the various data augmentation operations, \emph{random cropping} is the most important one (~\cite{chen2020simple}). The key idea of  multi-modal CL is to pre-train an image encoder and a text encoder such that they produce similar feature vectors for the image and text in a same pair, but dissimilar feature vectors for an image and a text that do not form an image-text pair.
+
+The power of CL is a double-edge sword. On one hand, a pre-trained image encoder  can be used as a general-purpose feature extractor to build downstream classifiers for different downstream tasks. On the other hand,  an insecure image encoder leads to a \emph{single-point-of-failure} of the AI ecosystem since it is used  for various downstream tasks. For instance, an attacker can backdoor an encoder to attack multiple downstream classifiers simultaneously. Specifically, a downstream classifier built based on a backdoored encoder predicts an attacker-chosen \emph{target class} for any image embedded with an attacker-chosen \emph{trigger}, but its predictions for images without the trigger are unaffected. Depending on which stage of the CL pipeline an attack compromises, we can categorize backdoor attacks into \emph{data poisoning based backdoor attacks (DPBAs)}~(\cite{saha2022backdoor,carlini2022poisoning}) and \emph{model poisoning based backdoor attacks (MPBAs)}~(\cite{jia2022badencoder}). In the former, an attacker injects carefully crafted \emph{poisoned inputs} into the pre-training dataset so the learnt image encoder is backdoored, where the poisoned inputs are images and image-text pairs in single-modal and multi-modal CL, respectively.  In the latter, an attacker directly manipulates the model parameters of a clean image encoder to turn it into a backdoored one. 
+
+MPBAs assume that the encoder is from a malicious provider, e.g., a malicious third party obtains a clean encoder from a benign provider, embeds backdoor into it, and re-shares the backdoored encoder with downstream customers. As a result,  MPBAs are not applicable when an encoder is from a trusted provider, e.g., OpenAI, Google, and Meta. However, DPBAs are applicable even if the encoder is from a benign provider. In particular, a provider often collects the pre-training dataset from the public Internet. Thus,  an attacker can post its poisoned inputs on the Internet such as social media websites, which could be collected as a part of the pre-training dataset by the provider. Therefore, we will focus on DPBAs in this work. 
+
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=\textwidth]{figs/attack1.pdf}
+    \caption{Poisoned images in Saha et al.~\cite{saha2022backdoor} vs. our {\name} for single-modal CL, where the target class is dog.}
+    \label{singleCLcomparison}
+\end{figure*}
+
+However, existing DPBAs achieve limited success rates, i.e., a downstream classifier built based on a backdoored encoder  predicts the target class for only a small fraction of  trigger-embedded images. For single-modal CL, \cite{saha2022backdoor} proposed to craft a poisoned input by embedding the trigger into an image (we call it \emph{reference image}) that includes an object (we call it \emph{reference object}) from the target class. Figure~\ref{singleCLcomparison} illustrates a reference image and the corresponding reference object when the target class is dog and illustrates how  \cite{saha2022backdoor} crafts a poisoned image. Their backdoor attack achieves limited success rates because two randomly cropped augmented views of a poisoned input may both include the reference object (e.g., dog in Figure~\ref{singleCLcomparison}).  \cite{carlini2022poisoning} proposed a DPBA to  multi-modal CL. To craft poisoned image-text pairs, they embed the trigger into some images and create the corresponding texts following some text prompts that include the target class name (e.g., ``a photo of dog''), as illustrated in Figure~\ref{multiCLcomparison}. This attack achieves limited success rates when the pre-training dataset only includes few image-text pairs whose images include objects from the target class and whose texts include the target class name, because CL cannot semantically associate the target class name with  objects in the target class.     
+
+\noindent{\bf Our work:} In this work, we propose \emph{{\name}}, DPBAs to single-modal and multi-modal CL. In {\name}, an attacker collects several reference images/objects from the target class. Our key idea is to craft poisoned inputs such that the learnt image encoder produces similar feature vectors for a reference image/object and any image embedded with the trigger. Therefore, a downstream classifier built based on the image encoder would predict the same class (i.e., target class) for the reference image/object and any trigger-embedded image, achieving high attack success rates. 
+
+For single-modal CL, our attack crafts poisoned inputs via exploiting the random cropping mechanism, which is the key in single-modal CL. During pre-training, single-modal CL aims to maximize the feature similarity between two randomly cropped augmented views of an image. Therefore, if one augmented view includes  (a part of) the reference object and the other includes the trigger, then maximizing the feature similarity between them would learn an encoder that produces similar feature vectors for the reference object and any trigger-embedded image. Thus, in our attack, the attacker collects some arbitrary images, called \emph{background images}. Then, the attacker crafts a poisoned input by embedding a randomly picked reference object and the trigger into a randomly picked background image, as illustrated in Figure~\ref{singleCLcomparison}. Moreover, to increase the likelihood that one randomly cropped augmented view of a poisoned input includes the  reference object and the other includes the trigger, we 1) separate the reference object and trigger apart when embedding them into a background image as well as 2) rescale/crop the background image so the reference object occupies a significant portion of it.  
+
+\begin{wrapfigure}{r}{0.55\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figs/multi2.pdf}
+    \caption{Poisoned image-text pairs in \cite{carlini2022poisoning} vs. our {\name} for multi-modal CL, where the target class is dog.}
+    \label{multiCLcomparison}
+\end{wrapfigure}
+
+For multi-modal CL, our attack crafts poisoned image-text pairs via exploiting the fact that it maximizes the feature similarity between the image and text in an image-text pair. Specifically, recall that our goal is to craft poisoned inputs such that the learnt image encoder produces similar feature vectors for a reference image/object and any trigger-embedded image. Towards this goal, we desire that 1) the feature vector produced by the image encoder for a trigger-embedded image is similar to that produced by the text encoder for the target class name, and 2) the feature vector produced by the text encoder for the target class name is similar to that produced by the image encoder for a reference object, which indirectly makes the feature vectors of the reference object and trigger-embedded image similar. To achieve 1), we craft a poisoned image-text pair by embedding the trigger into a randomly picked background image and creating a text following a prompt that includes the target class name. To achieve 2),  we craft a poisoned image-text pair by embedding a randomly picked reference object into a randomly picked background image and creating a text following the method used to achieve 1). We note that \cite{carlini2022poisoning} only achieves 1), which is insufficient because the text prompt of the target class name is not necessarily semantically associated with the target class/reference object when the pre-training dataset has few image-text pairs related to the target class/reference object, as shown in our experimental results.   
+
+We extensively evaluate our backdoor attacks on multiple datasets. Our results show that {\name} achieves much higher attack success rates than existing DPBAs. Moreover,  {\name} maintains the utility of the encoder, i.e., a downstream classifier built upon a clean image encoder and a downstream classifier built upon our backdoored image encoder achieve similar testing accuracy for images without trigger.  We also find that {\name} is agnostic to the pre-training settings such as CL algorithm, encoder architecture, and pre-training dataset size. 
+
+We also explore a defense against DPBAs for single-modal CL. Specifically, the key for an attack's success is that one randomly cropped view of a poisoned input includes the reference object while the other includes the trigger. Therefore, we propose \emph{localized cropping}, which crops two close regions of a pre-training input as augmented views during pre-training. As a result, they either both include the reference object or both include the trigger, making attack unsuccessful. Our experimental results show that localized cropping substantially reduces the attack success rates of our attack. However, localized cropping also sacrifices the utility of the encoder, i.e., a downstream classifier built based on the encoder has a lower testing accuracy even if there are no attacks.  Our results highlight the needs of more advanced defenses.   
+
+\section{Threat Model}
+\myparatight{Attacker's goal} Suppose an attacker selects ${T}$ downstream tasks to compromise, called \emph{target downstream tasks}. For each target downstream task $t$, the attacker picks $s_t$ target classes, where $t=1,2,\cdots,T$. We denote by $y_{ti}$  the $i$th target class for the $t$th target downstream task. For each target class $y_{ti}$, the attacker selects a trigger ${e}_{ti}$. The attacker aims to inject poisoned inputs into a pre-training dataset such that the learnt, backdoored image encoder achieves two goals: \emph{effectiveness goal} and \emph{utility goal}. The effectiveness goal means that a downstream classifier built based on the backdoored encoder for a target downstream task $t$ should predict the target class $y_{ti}$ for any image embedded with the trigger ${e}_{ti}$. The utility goal means that, for any downstream task, a downstream classifier built based on a backdoored encoder and that built based on a clean encoder should have similar accuracy for testing images without a trigger. 
+
+\myparatight{Attacker's capability and background knowledge} We assume the attacker can inject $N$ poisoned inputs into the pre-training dataset. A provider often collects a pre-training dataset from the  Internet, e.g., OpenAI collected 400 million image-text pairs from the Internet to pre-train CLIP~(\cite{radford2021learning}). Therefore, the attacker can post its poisoned inputs on the Internet, which could be collected by a provider as a part of its pre-training dataset. Moreover, we assume the attacker has access to 1) a small number (e.g., 3) of reference images/objects from each target class, and 2) some unlabeled, arbitrary background images. The attacker can collect the reference and background images from different sources, e.g., the Internet. We assume that the reference images are \emph{not} in the training data of downstream classifiers to simulate practical attacks. Moreover, we assume the attacker does not know the pre-training settings such as the CL algorithm and the encoder architecture. 
+
+\section{Our \name}
+We describe our {\name} for single-modal and multi-modal CL separately. 
+
+\begin{algorithm}[!t]
+\fontsize{8}{9}\selectfont
+\caption{Crafting a Poisoned Image in {\name}}
+\begin{algorithmic}[1]
+\State {\bfseries Input:} A set of reference objects $\mathcal{O}$, a set of background images $\mathcal{B}$, a set of triggers $\mathcal{E}$,  $\alpha$, and $\beta$.
+\State {\bfseries Output:} A poisoned image.
+\State {\bfseries Note:}  $I_h$ and $I_w$ respectively represent the height and width of an image $I$.
+    \State $o \gets$ randomly sample a reference object in {$\mathcal{O}$} 
+    \State $b \gets$ randomly sample a background image in {$\mathcal{B}$} 
+    \State $e \gets$ randomly sample a trigger in {$\mathcal{E}$} 
+
+    \State $b \gets \Call{RescaleAndCropBackground}{b,o,\alpha}$ \Comment{Re-scale and crop $b$ if needed}
+    \State $(o_x, o_y) \gets$ location of  $o$ in $b$ \Comment{Either bottom left or bottom right of $b$}
+    \State $b[o_y:o_y+o_h,o_x:o_x+o_w] \gets o$ \Comment{Embed $o$ to $b$}
+
+    \State $(e_x, e_y) \gets$ a random location in the center $\beta$ fraction of the rectangle excluding $o$ in $b$ 
+    \State $b[e_y:e_y+e_h,e_x:e_x+e_w] \gets e$ \Comment{Embed $e$ to $b$}
+    \State Return $b$
+\end{algorithmic}  
+\label{algo}
+\end{algorithm}
+
+\subsection{Single-modal CL}
+\label{singlemethod}
+
+\vspace{-2mm}
+\myparatight{Our intuition} Our key idea is to craft poisoned images such that the image encoder learnt based on the poisoned pre-training dataset produces similar feature vectors for any image embedded with a trigger ${e}_{ti}$ and a reference object in the target class $y_{ti}$. Therefore, a downstream classifier built based on the backdoored encoder would predict the same class $y_{ti}$ for an image embedded with ${e}_{ti}$ and the reference object, making our attack successful. We craft a poisoned image by exploiting the random cropping operation in single-modal CL. Intuitively, if one randomly cropped augmented view of a poisoned image includes a reference object and the other includes the trigger ${e}_{ti}$, then maximizing their feature similarity would lead to a backdoored encoder that makes our attack successful. Therefore, our goal is to craft a poisoned image, whose two randomly cropped views are very likely to include a reference object and trigger, respectively. 
+
+Towards this goal, to craft a poisoned image, we embed a randomly picked reference object from target class $y_{ti}$ and the trigger ${e}_{ti}$ into a randomly picked background image to satisfy three conditions: 1) the reference object occupies a large but not too large portion of the background image, 2) the reference object and the trigger are well separated from each other, and 3) the trigger is far away from the boundaries of the background image. The first condition makes it likely that only one of the two randomly cropped views includes (a part of) the reference object; the second condition makes it likely that a randomly cropped view does not include both reference object and trigger; and the third condition is to increase the likelihood that a randomly cropped view includes the trigger. Next, we describe how we craft a poisoned image to satisfy the three conditions. 
+
+\begin{wrapfigure}{r}{0.5\textwidth}
+    \centering
+    \setlength{\belowcaptionskip}{-2mm}
+    \includegraphics[width = 0.8\textwidth]{figs/illu.pdf}
+    \caption{Illustration of $\alpha$ and $\beta$ when crafting a poisoned image.}
+    \label{craft}
+    \vspace{-2mm}
+\end{wrapfigure}
+
+\myparatight{Crafting poisoned images} We denote by $\mathcal{O}$, $\mathcal{B}$, and $\mathcal{E}$  the set of reference objects, background images, and triggers, respectively. We use reference objects instead of reference images to exclude the influence of the irrelevant background information in reference images. Table~\ref{referenceimageobject} in Appendix shows that our attack is more effective using reference objects.  To craft a poisoned image, we randomly pick a reference object  $o \in \mathcal{O}$,  a background image $b \in \mathcal{B}$, and a trigger $e \in \mathcal{E}$. For the first condition above, we use a parameter $\alpha$ to control the area ratio between the bounding box of the reference object and the background image. Given the value of $\alpha$ and the reference object $o$, if the background image $b$ is too small (or large), we re-scale (or crop) it such that the reference object can be embedded into it and the area ratio becomes $\alpha$. For the  second condition, we embed the reference object at either the left or right bottom of the background image. Moreover, we embed the trigger in the center area of the background image excluding the bounding box of the reference object. Formally, we denote by $A$ the rectangle area of the background image that  does not include the reference object. Then, the trigger is embedded at a random location in the central $\beta$ fraction of the rectangle $A$, which aims to satisfy the second and third conditions. Figure~\ref{craft} illustrates the parameters $\alpha$ and $\beta$. Algorithm~\ref{algo} shows how we craft a poisoned image, while Algorithm~\ref{rc} in Appendix shows how to  re-scale and crop a background image if needed. 
+
+\myparatight{Settings of $\alpha$ and $\beta$}  Our attack is more effective if we have a larger probability that one randomly cropped view of a poisoned image includes the reference object and the other includes the trigger. Given how we craft a poisoned image, the probability that one randomly cropped view is in the bounding box of the reference object is roughly $\alpha$. Therefore, the probability that only one of the two randomly cropped views is in the bounding box of the reference object is roughly $2 \alpha(1-\alpha)$. Such probability reaches the maximum when $\alpha=0.5$. Therefore, the best setting of $\alpha$ is 0.5. In fact, our experimental results will confirm that $\alpha=0.5$ achieves the highest attack success rates. 
+
+Moreover, $\beta$ controls the probability (denoted as $p_1$) that a randomly cropped view includes the trigger and the probability (denoted as $p_2$) that a randomly cropped view includes both (a part of) the reference object and the trigger.  $p_1$ is smaller  when the trigger is near the boundaries of the background image since less randomly cropped views of the background image include the trigger. Moreover, when the trigger is far away enough from the boundaries,  $p_1$ does not depend on the specific location of the trigger. As $\beta$ decreases, the trigger is less likely to be near the boundaries. Therefore, $p_1$ non-decreases as $\beta$ decreases. Moreover, $p_2$ non-increases when the reference object and the trigger are further away. Therefore, $p_2$ non-increases as $\beta$ decreases. {\name} is more effective when $p_1$ is larger and $p_2$ is smaller. Therefore, the attack success rates  of {\name}  increase and then saturate as $\beta$ decreases, which is also confirmed in our experiments. 
+
+\begin{wrapfigure}{r}{0.55\textwidth}
+    \centering
+    \includegraphics[width = 0.88\textwidth]{figs/sup_new.pdf}
+    \caption{Illustration of a support poisoned image and the key idea behind {\name}+. The poisoned images may push a reference object and other images in the target class apart since it maximizes the feature similarity between reference object and trigger. We use support poisoned images to pull them together so that reference object can be correctly classified.}
+    \label{supportpoison}
+    \vspace{-2mm}
+\end{wrapfigure}
+
+\myparatight{\name+} Our crafted poisoned images would lead to an encoder that produces similar feature vectors for a trigger-embedded image and a reference object. However, the feature vector of a reference object may deviate from those of other images in the target class.  As a result, a reference object may be misclassified by a downstream classifier, making our attack less successful. To mitigate the issue,  \name+ leverages more reference images. Specifically, \name+ assumes there are  additional reference images from each target class, called \emph{support reference images}. Then, other than the poisoned images constructed by {\name}, \name+ further constructs poisoned images (called \emph{support poisoned images}) by concatenating a reference image and a support reference image. Figure~\ref{supportpoison} shows an example of support poisoned image. Due to the random cropping mechanism, the learnt encoder would produce similar feature vectors for a reference image and support reference images, increasing the success rate of our attack as shown in our experiments. 
+
+\subsection{Multi-modal CL}
+We denote by $f_i$ and $f_r$ the feature vectors produced by the image encoder for an image embedded with trigger $e_{ti}$ and a reference image from target class $y_{ti}$. Moreover, we denote by $f_t$ the feature produced by the text encoder for a text prompt including the name of target class $y_{ti}$. Our key idea is to craft poisoned image-text pairs such that 1) $f_i$ is similar to $f_t$, and 2) $f_t$ is similar to $f_r$. Therefore, $f_i$ and $f_r$ are similar, making our attack successful. 
+
+We craft two types of poisoned image-text pairs (called \emph{Type-I} and \emph{Type-II}) to achieve 1) and 2), respectively. Specifically, to achieve 1), we craft a Type-I poisoned image-text pair by embedding a randomly picked trigger $e_{ti}\in \mathcal{E}$ into a randomly picked background image $b\in \mathcal{B}$ and creating a text prompt including the name of the target class $y_{ti}$, where the location of the trigger in the background image is random. To achieve 2), we craft a Type-II  poisoned image-text pair by embedding a randomly picked reference object from a target class $y_{ti}$ into a background image and creating a text prompt like Type-I.   The background image may be re-scaled (or cropped) if it is too small (or large) to include the reference object. A text prompt could be like ``a photo of $<$target class name$>$''. In our experiments, we use the text prompts proposed by \cite{carlini2022poisoning}, which are publicly available. Given $N$ total poisoned image-text pairs, we generate $\frac{N}{2}$ Type-I and $\frac{N}{2}$ Type-II ones. Note that \cite{carlini2022poisoning} only uses $N$ Type-I poisoned image-text pairs.
+
+\section{Experiments}
+\label{sec_exp}
+\subsection{Experimental Setup}
+\myparatight{Datasets}
+For single-modal CL, we use a subset of random 100 classes of ImageNet as a pre-training dataset, which we denote as ImageNet100-A. For multi-modal CL, we use a subset of 0.5M inputs in the Conceptual Captions dataset (CC~\cite{sharma2018conceptual}) as a pre-training dataset. We use subsets of these datasets due to limited computing resources.  We consider five target downstream tasks/datasets, including ImageNet100-A, ImageNet100-B,  Pets, Flowers, and Caltech-101. ImageNet100-B is a subset of  another 100 random classes of ImageNet.  Details of these datasets can be found in Appendix~\ref{app_dataset}. We use ImageNet100-A as both a pre-training dataset and a downstream dataset for fair comparison with~\cite{saha2022backdoor}, which used the same setting.
+
+\myparatight{CL algorithms} We use five CL algorithms, including MoCo-v2 (\cite{chen2020improved}), SwAV (\cite{caron2020unsupervised}), SimCLR (\cite{chen2020simple}), and MSF (\cite{koohpayegani2021mean}) for single-modal CL and CLIP (\cite{radford2021learning}) for multi-modal CL. We follow the original implementation of each algorithm. Unless otherwise mentioned, we use \textbf{MoCo-v2} for single-modal CL and \textbf{CLIP} for multi-modal CL. Moreover, we use \textbf{ResNet-18} as the encoder architecture by default. Given an image encoder pre-trained by a CL algorithm, we train a linear downstream classifier for a downstream dataset following the linear evaluation setting of the CL algorithm.  Details can be found in Appendix~\ref{app_cl} and~\ref{trainingdownstream}.  
+
+\begin{table}[!t]\renewcommand{\arraystretch}{1.2} 
+	\fontsize{9}{11}\selectfont
+	\centering
+	\caption{ASRs of different attacks. Saha et al. achieve low ASRs, which is consistent with their results in~\cite{saha2022backdoor} in terms of FP.}
+	\setlength{\tabcolsep}{1mm}
+	{
+	\begin{tabularx}{0.61\textwidth}{cccc}
+	\toprule
+	\multirow{2}{*}{\makecell{Target Downstream\\ Task}} &
+	\multirow{2}{*}{No Attack} &
+	\multirow{2}{*}{Saha et al.~\cite{saha2022backdoor}} &
+	\multirow{2}{*}{\name} \\
+	 & & & \\
+	\midrule
+	\multicolumn{1}{c|}{ImageNet100-A} &0.4 &5.5 &\textbf{96.2}\\
+	\multicolumn{1}{c|}{ImageNet100-B} &0.4 &14.3 &\textbf{89.9} \\
+	\multicolumn{1}{c|}{Pets} &1.5 &4.6 &\textbf{72.1} \\
+	\multicolumn{1}{c|}{Flowers} &0 &1 & \textbf{89}\\
+	\multicolumn{1}{c|}{Caltech-101} &0.2 &2.5 &\textbf{99.1} \\ 
+	\bottomrule
+	\end{tabularx}
+	}
+	\label{singleASR}
+\end{table}
+
+\begin{table}[!t]\renewcommand{\arraystretch}{1.2} 
+    \fontsize{9}{11}\selectfont
+	\centering
+	\caption{CA and BA of different attacks. {\name} maintains the utility.}
+	\setlength{\tabcolsep}{1mm}
+	{
+	\begin{tabularx}{0.61\textwidth}{cccc}
+	\toprule
+	\multirow{2}{*}{\makecell{Target Downstream\\ Task}} &
+	\multirow{1}{*}{No Attack} &
+	\multirow{1}{*}{Saha et al.~\cite{saha2022backdoor}} &
+	\multirow{1}{*}{\name} \\
+	 &CA &BA &BA \\
+	\midrule
+	\multicolumn{1}{c|}{ImageNet100-A} &69.3 &70.2 &69.6\\
+	\multicolumn{1}{c|}{ImageNet100-B} &60.8 &61.4 &61.2 \\
+	\multicolumn{1}{c|}{Pets} &55.8 &55.2 &56.9 \\
+	\multicolumn{1}{c|}{Flowers} &70.8 &69.7 &69.7\\
+	\multicolumn{1}{c|}{Caltech-101} &71.5 &71.6 &70.7 \\ 
+	\bottomrule
+	\end{tabularx}
+	}
+	\label{tab_utility}
+\end{table}
+
+\begin{table}[!t]\renewcommand{\arraystretch}{1.2} 
+	\fontsize{9}{11}\selectfont
+	\centering
+    \caption{ASRs of different attacks for different target classes when the target downstream task is ImageNet100-B in single-modal CL.}
+	{\setlength{\tabcolsep}{1mm}
+	{
+	\begin{tabular}{cccc}
+	\toprule
+	Target Class & 
+	No Attack &
+	Saha et al.~\cite{saha2022backdoor} &
+	{\name} \\
+	\midrule
+	\multicolumn{1}{c|}{African Hunting Dog} &0.4 &14.3 &\textbf{89.9} \\
+	\multicolumn{1}{c|}{Ski Mask} &0.4 &14 &\textbf{84.3} \\
+	\multicolumn{1}{c|}{Rottweiler} &0.3 &8 &\textbf{90.6} \\
+	\multicolumn{1}{c|}{Shih-Tzu} &0.1 &1 &\textbf{86.7} \\
+    \multicolumn{1}{c|}{Komondor} &0 &18.3 &\textbf{99.4} \\
+    \multicolumn{1}{c|}{Lorikeet} &0.3 &9.0 &\textbf{83.4} \\
+    \multicolumn{1}{c|}{Mixing bowl} &0.1 &2.1 &\textbf{91.4} \\
+    \cmidrule(lr){1-1}
+    \cmidrule(lr){2-4}
+    \multicolumn{1}{c|}{Average} &0.2 &9.5 &\textbf{89.4} \\
+	\bottomrule
+	\end{tabular}
+	}
+	\label{targetclass}
+	}
+\end{table}
+
+\myparatight{Evaluation metrics} We use \emph{clean accuracy (CA)}, \emph{backdoored accuracy (BA)}, and \emph{attack success rate (ASR)} as evaluation metrics. CA and BA are respectively the testing accuracy of a  downstream classifier built based on a clean and backdoored image encoder for \emph{clean} testing images without a trigger. ASR is the fraction of trigger-embedded testing images that are predicted as the corresponding target class by a downstream classifier built based on a backdoored image encoder. An attack achieves the effectiveness goal if  ASR is high. Moreover, an attack achieves the utility goal if BA is close to or even higher than CA.
+
+\myparatight{Attack settings} By default, we consider the following parameter settings:  $N=650$ for single-modal CL (poisoning ratio 0.5\%) and $N=500$ for multi-modal CL (poisoning ratio 0.1\%); an attacker selects one target downstream task and one target class (the \textbf{default target classes} are shown in Table~\ref{defaultclass} in Appendix); an attacker has 3 reference images/objects for each target class, which are randomly picked from the testing set of a target downstream task/dataset (more reference objects shown in Figure~\ref{reference_obj} in Appendix); an attacker  uses the place365 dataset (\cite{zhou2017places}) as background images; trigger is a $40 \times 40$ patch with random pixel values; and $\alpha=0.5$ and $\beta=0.5$. Unless otherwise mentioned, we show results for single-modal CL and ImageNet100-B as target downstream task. Note that \cite{saha2022backdoor} uses 650 reference images that are randomly sampled from the testing set of a target downstream task, and we follow their setting, which gives their attack advantages.  
+
+\subsection{Experimental Results} \label{exp}
+We first show results for single-modal CL and then results for multi-modal CL. 
+
+\begin{figure*}[t!]
+    \centering
+    \subfloat[Pre-training dataset size]{\includegraphics[width =0.33\textwidth]{graph/psize.pdf}}
+    \subfloat[Encoder architecture]{\includegraphics[width =0.33\textwidth]{graph/net.pdf}}
+    \subfloat[CL algorithm]{\includegraphics[width
+    =0.33\textwidth]{graph/ssl.pdf}}
+    \caption{Impact of pre-training settings on {\name}. }
+    \label{ablation1}
+    \vspace{-2mm}
+\end{figure*}
+
+\myparatight{{\name} is more effective than existing attacks} Table~\ref{singleASR} shows the ASRs of different attacks for different target downstream tasks in single-modal CL, while Table~\ref{targetclass} shows the ASRs for different target classes when the target downstream task is ImageNet100-B. Each ASR is averaged over three trials of each experiment.  {\name} achieves  much higher ASRs than \cite{saha2022backdoor} across different target downstream tasks and target classes. In particular,  \cite{saha2022backdoor} achieves ASRs lower than 10\%, even though they require a large amount of reference images. One reason is that their attack does not control the distance between trigger and a reference object. As a result, the two randomly cropped views may both include a reference object and they fail to build strong correlations between trigger and reference object, as shown in Figure~\ref{compare_attn} in Appendix. We note that Saha et al.~\cite{saha2022backdoor} use \textbf{False Positive (FP)} as the metric, which is the number (instead of fraction) of trigger-embedded testing images that are predicted as the target class. ASR is the standard metric for measuring the effectiveness of backdoor.   When converting their FP to ASR, they achieve a very small ASR, e.g., less than 10\%.   A recent independent work~\cite{li2022demystifying} also confirmed that their attack is not effective, i.e.,  ASR is only a few percent.
+
+\myparatight{{\name} maintains utility} Table~\ref{tab_utility} shows the CA
+and BA of different downstream classifiers. We observe that {\name} preserves the utility of an encoder. In particular, a BA of a downstream classifier is close to the corresponding CA. The reason is that our poisoned images are still natural images, which may also contribute to  contrastive learning like other images. 
+
+\begin{figure}[!t]
+    \centering
+    \subfloat[$\alpha$]{\includegraphics[width =0.33\textwidth]{graph/ar.pdf}}    
+    \subfloat[$\beta$]{\includegraphics[width =0.33\textwidth]{graph/beta.pdf}}
+    \subfloat[Poisoning ratio]{\includegraphics[width =0.33\textwidth]{graph/p.pdf}}
+    \caption{Impact of $\alpha$ and $\beta$ and poisoning ratio on {\name}.}
+    \label{ablation2}
+\end{figure}
+
+\begin{figure}[!t]
+    \centering
+    \subfloat[Number of reference images]{\includegraphics[width =0.33\textwidth]{graph/ref.pdf}}
+    \subfloat[Trigger type]{\includegraphics[width =0.33\textwidth]{graph/type.pdf}}    
+    \subfloat[Trigger size]{\includegraphics[width =0.33\textwidth]{graph/t.pdf}}
+    \caption{Impact of the number of reference images, trigger type, and trigger size on {\name}.}
+    \label{ablation3}
+\end{figure}
+
+\myparatight{{\name} is agnostic to pre-training settings}  Figure~\ref{ablation1} shows the impact of pre-training settings, including pre-training dataset size, encoder architecture, and CL algorithm, on {\name}. In Figure~\ref{ablation1}(a), we use subsets of ImageNet and ensure that they do not overlap with ImageNet100-B for a fair comparison (results on the full ImageNet are shown in Table~\ref{full} in Appendix).
+Our results show that {\name} is agnostic to pre-training settings. In particular, {\name} achieves high ASRs (i.e., achieving the effectiveness goal) and BAs are close to CAs (i.e., achieving the utility goal) across different pre-training settings.
+
+\myparatight{Impact of hyperparameters of {\name}} Figure~\ref{ablation2} shows the impact of $\alpha$, $\beta$, and poisoning ratio on {\name}. The poisoning ratio is the fraction of poisoned inputs in the pre-training dataset. Our results show that ASR reaches the highest when $\alpha=0.5$, and increases and then saturates as $\beta$ decreases, which are consistent with our theoretical analysis in Section~\ref{singlemethod}. ASR quickly increases and converges as the poisoning ratio increases, which indicates that {\name} only requires a small fraction of poisoned inputs to achieve high ASRs. Moreover, {\name} consistently maintains utility of the encoder since BAs are consistently close to CAs. 
+
+Figure~\ref{ablation3} shows the impact of the number of reference images, trigger type (white, purple, and colorful), and trigger size on {\name}. We find that ASR increases when using more reference images. This is because our attack relies on that some reference images/objects are correctly classified by the downstream classifier, and it is more likely to be so when using more reference images. A colorful trigger~\cite{saha2020hidden} with random pixel values achieves a higher ASR than the other two triggers (white and purple). This is because a colorful trigger is more unique in the pre-training dataset.  ASR is large once the trigger size is larger than a threshold (e.g., 20). Moreover, {\name} also consistently maintains utility of the encoder.
+
+\begin{figure*}[!t]
+    \centering
+    \subfloat[Multiple target classes]{\includegraphics[width =0.33\textwidth]{graph/multi_target.pdf}\label{ablation4a}}
+    \subfloat[Multiple downstream tasks]{\includegraphics[width =0.33\textwidth]{graph/multi_ds.pdf}\label{ablation4b}}
+    \subfloat[\name+]{\includegraphics[width =0.33\textwidth]{graph/plus.pdf}\label{ablation4c}}
+    \caption{ASRs for multiple target classes, multiple downstream tasks, and \name+.}
+    \label{ablation4}
+    \vspace{-2mm}
+\end{figure*}
+
+\myparatight{Multiple target classes and downstream tasks} 
+Figure~\ref{ablation4a} shows the ASR of each target class when {\name} attacks the three target classes separately or simultaneously, where each target class has a unique trigger. Figure~\ref{ablation4b} shows the ASR of each target downstream task when {\name} attacks the three target downstream tasks separately or simultaneously, where each target downstream task uses its default target class. Our results show that {\name} can successfully attack multiple target classes and target downstream tasks simultaneously. 
+
+\begin{table}[!t]\renewcommand{\arraystretch}{1.2}
+	\fontsize{9}{11}\selectfont
+	\centering
+	\caption{Attacks to multi-modal CL. The target downstream task is ImageNet100-B.}
+	\setlength{\tabcolsep}{1mm}
+	{
+    \begin{tabularx}{0.84\textwidth}{ccM{1cm}M{1cm}M{1cm}M{1cm}M{1cm}M{1cm}}
+	\toprule
+	 \multirow{2}{*}{\makecell{Pre-training dataset}}
+	 & \multirow{2}{*}{\makecell{Target Class}}
+	 & \multicolumn{2}{c}{No Attack} & 
+	 \multicolumn{2}{c}{\makecell{Carlini \& Terzis~\cite{carlini2022poisoning}}}
+	 & \multicolumn{2}{c}{\name} \\
+	 \cmidrule(lr){3-4}
+	 \cmidrule(lr){5-6}
+	 \cmidrule(lr){7-8}
+	 & & {CA} & {ASR} & {BA} & {ASR} & {BA} & {ASR} \\
+	 \midrule
+	 \multirow{5}{*}{Conceptual Captions} & \multicolumn{1}{c|}{Street Sign} &\multirow{5}{*}{48.4} &1 &48.3 &94 &49 &\textbf{97.7} \\
+	 & \multicolumn{1}{c|}{Ski Mask} & &1.4 &48.5 &96 &48.6 &\textbf{96.6} \\
+	 & \multicolumn{1}{c|}{Rottweiler} & &1.7 &48.6 &0 &48.9 &\textbf{57} \\
+	 & \multicolumn{1}{c|}{Komondor} & &0.3 &48.9 &0 &48.8 &\textbf{60.9} \\
+	 & \multicolumn{1}{c|}{Lorikeet} & &1.9 &47.7 &0.1 &48.4 &\textbf{89} \\
+	 \bottomrule
+	\end{tabularx}
+	}
+	\label{tab_multi-modal}
+\end{table}
+
+\myparatight{\name+} 
+ {\name+} requires additional support reference images to construct support poisoned images. We assume 5 additional support reference images sampled from the test set of a target downstream task and 130 support poisoned images (0.1\% of the pre-training dataset), where the support poisoned images have duplicates. For a fair comparison with {\name}, the total poisoning ratio is still 0.5\%. Figure~\ref{ablation4c} compares the ASRs of {\name} and {\name+} for three target downstream tasks. Our results show that {\name+}  further improves ASR.  Table~\ref{tab_rs} and \ref{tab_s} in Appendix respectively show the impact of the number of support reference images and support poisoned images on {\name+}. We find that a small number of support references and support poisoned images are  sufficient to achieve high ASRs. 
+
+\myparatight{Multi-modal CL} Table~\ref{tab_multi-modal} compares different attacks to multi-modal CL. In these experiments, we only inject $0.1\%$ ($N=500$) of poisoned inputs since multi-modal CL is  easier to attack than single-modal  because an attack can exploit both images and texts. Moreover, we use a $16 \times 16$ trigger following \cite{carlini2022poisoning}. Our results show that both \cite{carlini2022poisoning} and {\name} maintain utility of the encoder as the BAs are similar to the CA. However, {\name} achieves slightly or much higher ASRs than \cite{carlini2022poisoning}. Specifically, for target classes Rottweiler, Komondor, and Lorikeet, \cite{carlini2022poisoning} achieves ASRs of around 0, while {\name} achieves large ASRs. This is because the  pre-training dataset includes few image-text pairs related to these target classes, and \cite{carlini2022poisoning} only uses Type-I poisoned image-text pairs. However,  {\name} further uses Type-II poisoned image-text pairs to mitigate the issue, achieving high ASRs. 
+
+\section{Defense}
+\begin{table}[!t]\renewcommand{\arraystretch}{1.2}
+	\fontsize{9}{11}\selectfont
+	\centering
+	\caption{Defense results. $^\dagger$ indicates an extra clean pre-training dataset is used.}
+	\setlength{\tabcolsep}{1mm}
+	{
+    \begin{tabularx}{0.78\textwidth}{cM{1cm}M{1cm}M{1cm}M{1cm}M{1cm}M{1cm}}
+	\toprule
+	\multirow{2}{*}{{Defense}}
+	 & \multicolumn{2}{c}{No Attack} 
+	 & \multicolumn{2}{c}{\name} & \multicolumn{2}{c}{\name+}\\
+	 \cmidrule(lr){2-3}
+	 \cmidrule(lr){4-5}
+	 \cmidrule(lr){6-7}
+	 & {CA} & {ASR} & {BA} & {ASR} & {BA} & {ASR} \\
+	 \midrule
+	 \multicolumn{1}{c|}{Without Defense} &60.8 &0.4 & 61.2 & 89.9 &61.7 &97.8 \\
+	 \multicolumn{1}{c|}{CompRess Distillation (5\%)$^\dagger$} &49.5 &0.9 &49.4 &1.1 &49.9 &0.9 \\
+	 \multicolumn{1}{c|}{CompRess Distillation (20\%)$^\dagger$} &58.2 &0.9 &58.7 &1 &58.6 &1.1 \\
+	 \multicolumn{1}{c|}{Without Random Cropping} &32.4 &2.2 &31.1 &2 &31.9 &1.5 \\
+	 \multicolumn{1}{c|}{{\dname} ($\delta=0.2$)} &57.1 &0.6 &57.2 &0.8 &57 &0.6 \\
+	 \bottomrule
+	\end{tabularx}
+	}
+	\label{tab_defense}
+\end{table}
+
+\myparatight{Localized cropping} 
+Existing defenses (e.g., \cite{wang2019neural,jia2021intrinsic,xu2021detecting,jia2022certified,wang2020certifying}) against backdoor attacks were mainly designed for supervised learning, which are insufficient for CL as shown by~\cite{jia2022badencoder,281382}.
+We propose a new defense called localized cropping against {\name} for single-modal CL. The success of {\name} requires that one randomly cropped view of a poisoned image includes the reference object and the other includes the trigger. Our localized cropping breaks such requirement by constraining the two cropped views to be close to each other. Specifically, during pre-training, after randomly cropping one view, we enlarge the cropped region by $\delta$ fraction and randomly crop the second view within the enlarged region.  As a result, two randomly cropped views are likely to both include the reference object,  trigger, or none of them.  Figure~\ref{defense} illustrates our localized cropping. 
+
+\begin{wrapfigure}{r}{0.5\textwidth}
+    \centering
+    \includegraphics[width=1\textwidth]{figs/LRC.pdf}
+    \caption{Our localized cropping.}
+    \label{defense}
+\end{wrapfigure}
+
+\myparatight{Experimental results}  Table~\ref{tab_defense} shows the results of defenses tailored for CL. The pre-training dataset is ImageNet100-A, the target downstream task is ImageNet100-B, and the CL algorithm is MoCo-v2. ``Without Defense'' means MoCo-v2 uses its original data augmentation operations; ``Without Random Cropping'' means random cropping is not used; and ``Localized Cropping'' means replacing random cropping as our localized cropping. CompRess Distillation (~\cite{saha2022backdoor}) uses a clean pre-training dataset (a subset of the pre-training dataset in our experiments) to distill a (backdoored) encoder. Our results show that without random cropping makes attacks ineffective, but it also sacrifices the encoder's utility substantially, i.e., CA and BAs decrease substantially.  
+Our localized cropping can also substantially reduce ASRs. However, it also sacrifices the encoder's utility, though the utility sacrifice is much lower than without random cropping. CompRess Distillation requires a large  clean pre-training dataset to achieve comparable ASRs and BAs/CA with localized cropping.  Table~\ref{tab_delta} in Appendix shows that localized cropping is less effective as $\delta$ increases.
+
+\section{Related Work}
+
+\myparatight{CL} Single-modal CL~(\cite{chen2020improved,chen2020simple,caron2020unsupervised,koohpayegani2021mean,li2021prototypical}) uses images to pre-train an image encoder that outputs similar (or dissimilar) feature vectors for two  augmented views of the same (or different) pre-training image. Multi-modal CL~(\cite{radford2021learning,jia2021scaling}) uses image-text pairs to jointly pre-train an image encoder and a text encoder such that the image encoder and text encoder output similar (or dissimilar) feature vectors for image and text from the same (or different) image-text pair. 
+
+\myparatight{DPBAs and MPBAs to CL}
+Backdoor attacks~(\cite{gu2017badnets,chen2017targeted,liu2017trojaning,liu2020reflection,rakin2020tbt,li2021invisible}) aim to compromise the training data or training process such that the learnt model behaves as an attacker desires. For CL, DPBAs inject poisoned inputs into the pre-training dataset so that the learnt image encoder is backdoored, while MPBAs directly manipulate the model parameters of a clean image encoder to turn it into a backdoored one. MPBAs are not applicable when an image encoder is from a trusted provider, while existing DPBAs achieve limited attack success rates.  We note that \cite{281382} proposed PoisonedEncoder, a targeted data poisoning attack to CL, which is different from DPBAs that we focus. The key difference is that a poisoned downstream classifier predicts several attacker-chosen clean testing images as target classes in targeted data poisoning attacks, while a backdoored downstream classifier predicts \emph{any} trigger-embedded testing image as a target class in DPBAs. 
+
+\section{Conclusion and Future Work}
+
+In this work, we propose new data poisoning based backdoor attacks to contrastive learning (CL). For single-modal CL, our attack exploits the random cropping mechanism. For multi-modal CL, our attack exploits that the image encoder and text encoder produce similar feature vectors for an image and text in the same image-text pair. Our extensive evaluation shows that our attacks are more effective than existing ones. Moreover, we also explore a defense called localized cropping against data poisoning based backdoor attacks to single-modal CL. Our results show that localized cropping can substantially reduce the attack success rates, but it also sacrifices utility of the encoder, highlighting the needs of more advanced defenses. 
+
+\bibliographystyle{plain}
+\bibliography{paper}
+
+\newpage
+\appendix
+
+\clearpage
+\appendix
+\begin{algorithm}[!t]
+\fontsize{8}{9}\selectfont
+\caption{RescaleAndCropBackground}
+\begin{algorithmic}[1]
+\State {\bfseries Input:} Background image $b$, reference object $o$, area ratio $\alpha$.
+\State {\bfseries Output:} A  re-scaled and cropped background image $b'$. 
+
+
+ \State $s \gets$ a random bit 0 or 1 \Comment{$s=1$ and $s=0$ respectively mean a wider and higher background image}
+\If{$s==1$}
+    \State $b'_h \gets o_h$
+    \State $b'_w \gets \frac{o_h\cdot o_w}{b'_h \cdot \alpha}$
+    \Comment{Generate a wider background image}
+\Else
+    \State $b'_w \gets o_w$
+    \State $b'_h \gets \frac{o_h\cdot o_w}{b'_w \cdot \alpha}$
+    \Comment{Generate a higher background image}
+\EndIf
+\State $r = \max(\frac{b'_h}{b_h}, \frac{b'_w}{b_w})$
+\Comment{Get the re-scaling ratio if re-scaling is needed}
+\If{$r > 1$} \Comment{Scaling up $b$ by ratio $r$}
+\State $b \gets$ \Call{Rescale}{$b, r$} 
+\EndIf
+\State $b' \gets$ a random rectangle area with width $b'_w$ and height $b'_h$ in $b$ \ \ \Comment{Get the re-scaled and cropped background image}
+\end{algorithmic}  
+\label{rc}
+\end{algorithm}
+
+\begin{table}[!t]\renewcommand{\arraystretch}{1.2} 
+	\fontsize{9}{11}\selectfont
+	\centering
+    \caption{Default target class of each target downstream task.}
+	{\setlength{\tabcolsep}{1mm}
+	{
+	\begin{tabular}{cc}
+	\toprule
+	Target Downstream Task & Default Target Class \\
+	\midrule
+	\multicolumn{1}{c|}{ImageNet100-A} & Greater Swiss Mountain Dog \\
+	\multicolumn{1}{c|}{ImageNet100-B} & African Hunting Dog \\
+	\multicolumn{1}{c|}{Pets} & Havanese \\
+	\multicolumn{1}{c|}{Flowers} & Lotus \\
+	\multicolumn{1}{c|}{Caltech-101} & Stop Sign \\
+	\bottomrule
+	\end{tabular}
+	}
+	\label{defaultclass}
+	}
+\end{table}
+
+\begin{table}[!t]\renewcommand{\arraystretch}{1.2} 
+	\fontsize{9}{11}\selectfont
+	\centering
+    \caption{Experiments on the full ImageNet. The downstream dataset is ImageNet100-B and the poisoning ratio is 0.5\%. MoCo-v2 and ResNet-18 are used.}
+	{\setlength{\tabcolsep}{1mm}
+	{
+	\begin{tabular}{M{1cm}M{1cm}M{1cm}M{1cm}}
+	\toprule
+	\multicolumn{2}{c}{No Attack} 
+	& \multicolumn{2}{c}{\name} \\
+	\cmidrule(lr){1-2}
+	\cmidrule(lr){3-4}
+	CA &ASR &CA &ASR
+	\\
+	\midrule
+	75.5 &0 &76.1 &74.9\\
+	\bottomrule
+	\end{tabular}
+	}
+	\label{full}
+	}
+\end{table}
+
+\begin{table}[!t]\renewcommand{\arraystretch}{1.2} 
+	\fontsize{9}{11}\selectfont
+	\centering
+    \caption{ASRs of {\name} for different target classes when using reference object and reference image to construct poisoned images in single-modal CL. The pre-training dataset is ImageNet100-A and target downstream dataset is ImageNet100-B. }
+	{\setlength{\tabcolsep}{1mm}
+	{
+	\begin{tabular}{ccc}
+	\toprule
+	Target Class & 
+	Reference Object &
+	Reference Image \\
+	\midrule
+	\multicolumn{1}{c|}{African Hunting Dog} &89.9 &53.2 \\
+	\multicolumn{1}{c|}{Ski mask} &84.3 &37.6 \\
+	\multicolumn{1}{c|}{Rottweiler} &90.6 &7.3 \\
+	\multicolumn{1}{c|}{Shih-Tzu} &86.7 &72.7 \\
+    \cmidrule(lr){1-1}
+    \cmidrule(lr){2-3}
+    \multicolumn{1}{c|}{Average} &87.9 &42.7 \\
+	\bottomrule
+	\end{tabular}
+	}
+	\label{referenceimageobject}
+	}
+\end{table}
+
+\begin{table}[!t]\renewcommand{\arraystretch}{1.2} 
+	\fontsize{9}{11}\selectfont
+	\centering
+	\caption{Impact of the number of support reference images on ASR of \name+. The target downstream task is Pets. }
+	\setlength{\tabcolsep}{1mm}
+	{
+	\begin{tabular}{cM{1cm}M{1cm}M{1cm}}
+	\toprule
+	\multirow{2}{*}{\name} & \multicolumn{3}{c}{\name+} \\
+	\cmidrule{2-4} 
+	& 1 & 5 & 10 \\
+	\midrule
+	72.1 &79.7 &93.6 &97.9 \\
+	\bottomrule
+	\end{tabular}
+	}
+	\label{tab_rs}
+\end{table}
+
+\begin{table}[!t]\renewcommand{\arraystretch}{1.2} 
+	\fontsize{9}{11}\selectfont
+	\centering
+	\caption{Impact of the number of support poisoned images on  ASR of \name+. The target downstream task is Pets.}
+	\setlength{\tabcolsep}{1mm}
+	{
+	\begin{tabular}{cccc}
+	\toprule
+	\multirow{2}{*}{\name} & \multicolumn{3}{c}{\name+} \\
+	\cmidrule{2-4}
+	& 130 (0.1\%) & 260 (0.2\%) & 390 (0.3\%) \\
+	\midrule
+	72.1 &93.6 &94.3 &88.4 \\
+	\bottomrule
+	\end{tabular}
+	}
+	\label{tab_s}
+\end{table}
+
+\begin{table*}[!t]\renewcommand{\arraystretch}{1.2} 
+	\fontsize{9}{11}\selectfont
+	\centering
+	\caption{Impact of $\delta$ on localized cropping.}
+	\setlength{\tabcolsep}{1mm}
+	{
+	\begin{tabular}{ccccccccccccc}
+	\toprule
+	\multirow{2}{*}{$\delta$} 
+	& \multicolumn{2}{c}{N/A}& \multicolumn{2}{c}{0.1} & \multicolumn{2}{c}{0.2} & \multicolumn{2}{c}{0.3} & \multicolumn{2}{c}{0.4} &  \multicolumn{2}{c}{0.5} \\
+	\cmidrule(lr){2-3}
+	\cmidrule(lr){4-5}
+	\cmidrule(lr){6-7}
+	\cmidrule(lr){8-9}
+	\cmidrule(lr){10-11}
+	\cmidrule(lr){12-13}
+	& BA & ASR & BA & ASR & BA & ASR & BA & ASR & BA & ASR & BA & ASR\\ 
+	\midrule
+	\multicolumn{1}{c|}{\name} &61.2 &89.9 &55.7 &0.8 &57.2 &0.8 &59 &17.1 &60.5 &59.6 &61 &84.1 \\
+	\bottomrule
+	\end{tabular}
+	}
+	\label{tab_delta}
+\end{table*}
+
+\section{Datasets} 
+\label{app_dataset}
+By default, we use ImageNet100-A (\cite{russakovsky2015imagenet}) and Conceptual Captions 0.5M (\cite{sharma2018conceptual}) respectively for single-modal and multi-modal pre-training,  and we evaluate the pre-trained image encoders on ImageNet100-B for linear classification. 
+When the downstream dataset is ImageNet100-A, we randomly pick 10\% of images from each class that do not overlap with the reference images used by \cite{saha2022backdoor} for a fair comparison. 
+Other downstream datasets include Oxford-IIIT Pets (\cite{parkhi2012cats}), Oxford 102 Flowers (\cite{nilsback2008automated}), and Caltech-101 (\cite{fei2004learning}), whose train/test splits are the same as \cite{chen2020simple,ericsson2021well}. \cite{saha2022backdoor} requires a large number of reference images in their attack. Since the test set of a downstream task (Pets, Flowers, Caltech-101) does not contain enough reference images, we duplicate them  multiple times when constructing poisoned images for \cite{saha2022backdoor}. 
+For each reference object used by our {\name}, we manually annotate its segmentation mask in the reference image using the open-source labeling tool called labelme\footnote{\url{https://github.com/wkentaro/labelme}}.
+
+\section{CL Algorithms}
+\label{app_cl}
+The CL algorithms include MoCo-v2 (\cite{chen2020improved}), SwAV (\cite{caron2020unsupervised}), SimCLR (\cite{chen2020simple}), MSF (\cite{koohpayegani2021mean}) for single-modal CL and CLIP (\cite{radford2021learning}) for multi-modal CL. We follow the original implementation of each CL algorithm, including the data augmentation operations and hyper-parameters:
+
+\myparatight{MoCo-v2} Following \cite{saha2022backdoor}, we use this code implementation of MoCo-v2\footnote{\url{https://github.com/SsnL/moco_align_uniform}}. We adopt the same pre-training settings as their work. In particular, we use the SGD optimizer with an initial learning rate of 0.6 and pre-train an encoder for 200 epochs with a batch size of 256 on 2 NVIDIA RTX6000 GPUs. 
+
+\myparatight{SwAV} We follow the official implementation\footnote{\url{https://github.com/facebookresearch/swav/blob/main/main_swav.py}} of SwAV (including data augmentations, optimizer, etc.). We pre-train each encoder for 200 epochs with a total batch size of 256 on 4 NVIDIA RTX6000 GPUs. 
+
+\myparatight{SimCLR} We use this pytorch implementation\footnote{\url{https://github.com/AndrewAtanov/simclr-pytorch}} of SimCLR. Because SimCLR requires a large batch size ($>$ 1k) to obtain a desirable performance on ImageNet, we pre-train each encoder for 300 epochs with an initial learning rate of 1.2 and a batch size of 1024 on 4 NVIDIA RTX6000 GPUs. 
+
+\myparatight{MSF} We follow the official implementation\footnote{\url{https://github.com/UMBCvision/MSF}} of MSF. Specifically, we pre-train each encoder for 200 epochs with a batch size of 256 on 4 RTX6000 GPUs. 
+
+\myparatight{CLIP} Following~\cite{carlini2022poisoning}, we use the official implementation\footnote{\url{https://github.com/mlfoundations/open_clip}} of CLIP for multi-modal CL. In particular, we pre-train an image encoder (ResNet50) and a text encoder (ViT-B-32) for 30 epochs using a batch size of 128 image-text pairs. Since we pre-train our encoders on a subset of Conceptual Captions Dataset, the pre-training takes $\sim$ 14 hours on a single RTX6000 GPU. 
+
+\section{Training Linear Downstream Classifiers}
+\label{trainingdownstream}
+Following previous works (\cite{chen2020simple,grill2020bootstrap,koohpayegani2021mean}), to train a linear downstream classifier on a downstream task, we follow the same linear evaluation protocol used by each CL algorithm. For multi-modal CL, we train a downstream classifier using the same linear evaluation protocol as MoCo-v2.
+
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=\textwidth]{figs/compare_attn.pdf}
+    \caption{Comparing the attention maps of poisoned testing images when using classifiers built based on backdoored encoders from Saha et al.~\cite{saha2022backdoor} and {\name}. We use Grad-CAM \cite{selvaraju2017grad} to visualize the attention map, which shows the most influential parts of an input that result in the classifier’s output.}
+    \label{compare_attn}
+\end{figure*}
+
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=\textwidth]{figs/compare_cl.pdf}   
+    \caption{Comparing the attention maps of clean and poisoned testing images when using the classifier built based on our {\name}.}
+    \label{compare_clean_and_poisoned_attn}
+\end{figure*}
+
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figs/mask.pdf}
+    \caption{Visual illustrations of reference objects from different target classes.}
+    \label{reference_obj}
+\end{figure*}
+
+\begin{figure*}
+    \centering
+    \includegraphics[width =1.0\textwidth]{figs/show.pdf}
+    \caption{Visual illustrations of poisoned images of our {\name}. For each row, we craft poisoned images using a given reference object and different background images (in the first row).}
+    \label{show}
+\end{figure*}
+
+\end{document}
+
+

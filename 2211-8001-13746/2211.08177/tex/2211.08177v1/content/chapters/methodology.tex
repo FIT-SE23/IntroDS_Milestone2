@@ -1,0 +1,186 @@
+\begin{figure*}[h]
+  \centering
+  \includegraphics[width=1\textwidth]{content/img/graphs/strawberry-yield-7-day-avg-data}
+  \caption{Seven day rolling average line-plot of the strawberry yields of both the 2020 and 2021 seasons.}
+  \label{fig:7davg}
+\end{figure*}
+
+% \begin{figure}[t!]
+%   \centering
+%   \includegraphics[width=1\columnwidth]{content/img/graphs/strawberry-yield-box-swarm-daily}
+%   \caption{.}
+%   \label{fig:boxd}
+% \end{figure}
+
+% \begin{figure}[t!]
+%   \centering
+%   \includegraphics[width=1\columnwidth]{content/img/graphs/strawberry-yield-box-swarm-weekly}
+%   \caption{.}
+%   \label{fig:boxw}
+% \end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=1\columnwidth]{content/img/graphs/strawberry-yield-box-swarm-variety.pdf}
+  \caption{Yield performance of the Katerina and Zara strawberry varieties over the 2021 growing season.}
+  \label{fig:boxv}
+\end{figure}
+
+% \begin{figure}
+%   \centering
+%   \includegraphics[width=1\columnwidth]{content/img/graphs/strawberry-yield-focus-data}
+%   \caption{.}
+%   \label{fig:focus}
+% \end{figure}
+
+% \begin{figure}
+%   \centering
+%   \includegraphics[width=1\columnwidth]{content/img/graphs/strawberry-yield-line-plot-daily}
+%   \caption{.}
+%   \label{fig:varietyd}
+% \end{figure}
+
+We have collected 3 years of strawberry tabletop data at our \anon{Riseholme} campus.
+This data comprises 2 polytunnels, each with 5 rows of strawberry tabletop, and each tabletop being 20 meters long. 
+Thus in total, we had  200 meters of strawberry tabletop over any single season. Over these rows we had two different June bearing varieties at any one time from \anon{Driscoll's Zara}, \anon{Katerina}, and \anon{Malling Centenary}. The data capture devices we employed for this strawberry tabletop was:
+\begin{itemize}
+    \item Irrigation data from the tabletop irrigation system. This includes features describing the nutrients, moisture levels, soil temperature, input irrigation, and irrigation runoff. With a sample rate of 1 sample per 2 minutes.
+    \item Environmental data from a central weathervane which collected information about: Temperature, humidity, wind direction, wind speed, solar radiance, and precipitation. With a sample rate of 1 sample per 15 minutes.
+    \item Yield weight and quality data from our strawberry picking team. With a sample rate of 2 full picks per row per week.
+\end{itemize}
+
+\subsection{Data Wrangling}
+
+One of the biggest challenges when working with any time-series dataset is to ensure synchronicity. Since all 3 data sources are sampled at different sometimes overlapping intervals it was necessary to re-sample the datasets to achieve synchronisation. We opted to synchronise over the 15 minutes intervals to match the weathervane data. We later downsampled the synchronised data to a much more manageable 4-hour interval when fed into our MTT.
+
+One of the other challenges when working with any data is missing or unrepresentative samples. Unfortunately in real-world scenarios we always expect to capture some missing or inaccurate data, especially when humans are necessarily involved in the process. We chose to use a forward-fill strategy whereby any missing values are filled with the last known values. The only features not forward-filled are ones that are sampled too infrequently to be able to reasonably forward-fill them. This means any missing values in yields for instance (which are collected bi-weekly) are removed as we cannot reasonably infer them from neighbouring values. 
+% \todo{discuss intermittent values and forward fill strategy being suitable but if it was large missing data forward fill would be unsuitable}
+
+Now that we have a regular dataset with no missing values we can begin example extraction as per Figure \ref{fig:ppp}. We create hopping windows that end on/ are aligned to observed yield outcomes in the current/ predicted-for year. The window lengths we chose are 21 days for the premonition, 12 weeks for the present and the cumulative period for both combined in the previous year as the past. This way we have information on adverse weather forecasts, current strawberry performance and performance of strawberries at the same site last year. We then create time sequences using expected date ranges. the historic data and when we have specific outcomes for fruit yields. This meant we roughly formed 2 examples for every week in the growing season. We then further split this data by row into training (2,3,4,6,7,8,10), and testing (1,5,9) sets, while further subdividing the training set into training and validation using k-fold cross validation where $k=B_t$ with a batch size of $B_s=32$ which resulted in $B_t=10$ batches. We held out the two final shuffled batches as a per-epoch validation set.
+We split in this manner to ensure there is no overlap between training and testing sequences, and it enables us to have a full multi-year view since there are not enough years of data with which to hold out.
+
+Finally we normalised our dataset feature-wise using a basic linear transformation Equation \ref{eq:lin_norm}.
+\begin{equation}\label{eq:lin_norm}
+x_i^{\prime<t>} = (b - a)\frac{x_i^{<t>} - \textit{min}(x_i)}{\textit{max}(x_i)-\textit{min}(x_i)}+a
+\end{equation}
+ Where the desired normalised feature value for $x_i$ at timestep $t$ post normalisation $x_i^{\prime<t>}$ is in $[a, b]$. We chose our range to be $[-1, 1]$. We inverted our results to real values using the inversion Equation \ref{eq:lin_norm_inv}.
+\begin{equation}\label{eq:lin_norm_inv}
+ x_i^{<t>} = (x_i^{\prime<t>} - a)\frac{(\textit{max}(x_i)-\textit{min}(x_i))}{b - a}+\textit{min}(x)
+\end{equation}
+% \todo{discuss that we chose to use a linear transformation to ensure the resulting values were invertable}
+
+\subsection{Architecture}
+As can be seen in Figure \ref{fig:mtt}, our MTT consists of 3 differently parameterised transformers merged together using a dense layer. Thus our architecture is comprised of 3 encoders, 3 decoders and a dense layer.
+% \todo{Ensure we have discussed why we have chosen transformers and three timelines merged in this way.}
+
+\subsubsection{Encoder and Decoder}
+As is standard for transformer networks it is necessary to decide upon some form of positional encoding \autocite{vaswani2017attention}. In our case we use a standard fixed positional encoding where even positions are encoded using Equation \ref{eq:pos_encode_even} and odd positions are encoded using Equation \ref{eq:pos_encode_odd}.
+% \todo{Ensure discussed why fixed positional encoding rather than learned.}
+\begin{equation}\label{eq:pos_encode_even}
+PE_{pos,2i}=\textit{sin}(\frac{pos}{10000^{2i/D}})
+\end{equation}
+\begin{equation}\label{eq:pos_encode_odd}
+PE_{pos,2i+1}=\textit{cos}(\frac{pos}{10000^{2i/D}})
+\end{equation}
+This positional encoding for each odd and even position is then added to the feature vector to allow the neural network some context into the order of inputs. There was no need to form a tokenised input embedding since we already have a distinct feature space described in our feature vector directly from the tabular sequences.
+
+An abbreviated form of the multi head attention depicted in Figure \ref{fig:mtt} (c) is Equation \ref{eq:multi_head_attention} along with the weight matrices.
+\begin{gather}\label{eq:multi_head_attention}
+\textit{Attention}(Q,K,V) = \textit{softmax}(\frac{QK^T}{\sqrt{d_k}})\\
+W_i^Q \in \mathbb{R}^{D{\times}d_k}\\
+W_i^K \in \mathbb{R}^{D{\times}d_k}\\
+W_i^V \in \mathbb{R}^{D{\times}d_v}
+\end{gather}
+
+\subsubsection{Dense}
+The dense layer is a simple linear layer with enough weights to form the weighted sum of the inputs and concatenate them into a singular value output in Equation \ref{eq:linear}
+\begin{gather}\label{eq:linear}
+\hat{y} = \sum{a_{t}W_{t}} + \sum{a_{n}W_{n}} + \sum{a_{f}W_{f}}
+\end{gather}
+
+Towards gathering data we employed our own data collection pipeline on our \anon{Riseholme} strawberry tabletop site, the respective yields of this site can be seen in Figure \ref{fig:7davg}. All the following data is streamed into MongoDB and accessed using aggregation pipelines to help speed up the transformation process.
+
+\begin{figure*}[t!]
+  \centering
+  \includegraphics[width=1\textwidth]{content/img/drawio/MTT.png}
+  \caption{a) Mutil Timeline Transformer (MTT) architecture wherebye three single transformers that each process different data streams, are merge by a learned dense layer to weight their significance. b) A full single transformer architecture comprised of fixed positional encoding, encoder, decoder, and linear layers notably missing Softmax. c) Multi-head attention mechanism with query, key, and value matrices. This is a sub-components of transformer encoder and decoders with optional masks to maintain the temporal blindness when processing all the data simultaneously. d) Scaled dot-product attention showing the various matrix operations necessary to compute. this is a sub component of multi-head attention.}
+  \label{fig:mtt}
+\end{figure*}
+
+\subsubsection{Weight Initialisation}
+
+For weight initialisation we used the default pytorch Kaiming uniform initialisation as defined in Algorithm \ref{alg:kaiming} for leaky-ReLU (\autocite{relu, leakyrelu}).
+
+\begin{algorithm}[h]
+	\caption{Kaiming uniform weight initialisation using leaky-ReLU with the fan-in method. where $a$: (default 0 for ReLU, or -0.01 for leaky-ReLU) is the negative slope of the rectifier used after this layer. $W$: a randomised weight matrix with mean 0 and variance 1 (shape e.g $(64,32)$) $\textit{mode}$: is a flag which represents a different value for the $\textit{fan}$ whether the method being used is for feedforward or backpropagation (e.g if $\textit{mode}=\text{fanin}$ then $\textit{fan}=64$ else $\textit{fan}=32$ given previous example $W$ matrix).}\label{alg:kaiming}
+	\begin{algorithmic}
+		\Function{kaiming\_uniform\_weight\_init}{$a$, $W$, $\textit{d}$}
+		\If{$\textit{mode} = \textit{fanin}$}
+		    \State $\textit{fan} = dim(W, 0)$
+		\Else
+		    \State $\textit{fan} = dim(W, 1)$
+		\EndIf
+		\State $\textit{std} = \sqrt{\frac{2}{(1+a^2)\times\textit{fan}}}$
+		\State \Return{$W\star\textit{std}$}
+		\EndFunction
+	\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Loss Function}
+
+We chose to use the Mean Squared Error (MSE) as our loss function where $\text{MSE}=\frac{\sum_{i=0}^{N-1} (y-\hat{y})^2 }{N}$. This allows us to exponentially penalise large more errors than small errors on our continuous yield forecast. We in particular seek to reduce the networks tolerance for larger single errors as these would mean even if the total error was the same, being particularly peaked in one prediction would result in the growers having to import fruit that particular week. We would much rather be consistently out by a known amount than having almost perfect performance one week and then large errors the next.
+
+As is commonly the case we use Adaptive moment (ADAM \autocite{kingma2014adam}) as our neural network optimiser as it is has been shown to be more performant than just first order or second order moments and is by and large the defacto standard. We calculated our first order moments $ m_t = \beta_1 * m_{t-1} + (1-\beta_1) * g_t $ $ \hat{m_t} = \frac{m_t}{1 – \beta_1^t} $ and second order moments.
+
+% Towards model training, selection, and evaluation we split our dataset per-strawberry-tabletop into training and testing sets, where tabletops 1,5,9 became part of the testing set and tabletops 2,3,4,6,7,8,10 became part of the training set. During model training we dynamically divided the broader training set into validation and training examples using shuffled k-fold cross validation where $k=B_t$ with a batch size of $B_s=32$ which resulted in $B_t=10$ batches. We held out the two final shuffled batches as a per-epoch validation set.
+% We split in this manner to ensure there is no overlap between training and testing sequences, and it enables us to have a full multi-year view since there are not enough years of data with which to hold out.
+
+
+% Talk about our data partitioning k-fold cross validation with train test split, where k=n but to increase representativeness the proportion held out is 0.2 rounded up to ensure even if proportion is too small there will always be a single hold-out. In our case 10 batches so 0.1 would be the equivalent of hold-one-out cross validation. Show plots of training graphs with epoch against performance for training, validation, and testing sets.
+% https://machinelearningmastery.com/k-fold-cross-validation/
+% From the continuous data such as environmental weather data we use a rolling window-set that skips to positions ending in a known yield value. The set consists of the three sequences for the past, present, and premonition (Fig: \ref{fig:ppp}). The premonition window is the smallest with a time-delta of 21 days ending on the date and time of strawberry picking, representing the horizon. The present window has a time-delta of 12 weeks, representing the currently known state or current history. The past window has a time-delta equal to both the present, and premonition, representing how the strawberries performed in the last season over the same period covered by the present and premonition windows but for the previous year.
+% Due to the otherwise untenable density of data within any single observation it is necessary to re-sample the data to reduce the number of parameters of the neural network. This has the dual effect on making the network faster to train (requiring less data to saturation of fewer parameters), and easier to train taking up less resources like RAM, and IO.
+
+% We used a neural network comprised of 3 transformers one for each distinct timeline (past, present, premonition) and one merging layer which in our case was a fully-connected linear layer. This allows the different timelines to be tuned based on importance by the grace of gradient descent, e.g. we assume the present timeline including current conditions would be the most significant timeline. We trained repeatedly over many epochs until a minima was found whereby any further training resulted in a decreased performance on the validation set. It just so happens in our case that the best performance in the validation set also correlates to the best performance of the testing set (see Figure: \ref{fig:model}).
+
+% For weight initialisation we used the default pytorch Kaiming uniform initialisation using the leaky-ReLU nonlinearity, with the fan-in method.
+
+
+% We normalised all our data between the range -1 to 1 to ensure that gradient descent is not impeded by the same length steps in a specific dimension having more or less of a significance towards finding a minima, but instead to ensure the data is regular and evenly distributed. This also means that high continuous values are squashed into a much smaller range which is much more readily trained.
+
+\subsection{Models}
+
+\begin{figure*}[h]
+  \centering
+  \includegraphics[width=1\textwidth]{content/img/graphs/modeler7.tar.pdf}
+  \caption{Three timeline transformer loss training, validation and testing sets, per epoch of training. Beyond 62 epochs (pink vertical line) validation and testing loss steeply increases again.}
+  \label{fig:model}
+\end{figure*}
+
+We primarily focused on two different types of model. One holistic model that learned from all of the training rows using random subsets for training and validation (Figure \ref{fig:model}). Then we also attempted to create smaller weaker predictors as an ensemble only trained on a smaller set of the training data to each other as an ensemble to attain simple certainty metrics, which we deem would be invaluable towards building trust in the models and enabling re-investigation of uncertain scenarios. We split the training data used into 3 row sets of tabletop for each ensemble member. Each ensemble member is equivalent to the base MTT, including weight initialisation, loss function, and optimiser. Overall this means there was a one-row overlap between the first-second and second-third MTT. The results of our two current attempted approaches along with our past approaches and expected forecasting performance of growers and agronomists can be seen in Table \ref{tab:errors}.
+
+\begin{table}[h]
+    \centering
+	\begin{tabular}{lc}
+        Forecaster                                       & Expected Error        \\ 
+        \hline
+        Grower                                           & 25\%$\dagger$         \\
+        Agronomist                                       & 17\%$\dagger$         \\
+        Recurrent Neural Network (RNN)                   & 21\%                  \\
+        Long-Short Term Memory network (LSTM)            & 38\%                  \\
+        Gated Recurrent Network (GRU)                    & 16\%                  \\
+        \textbf{Multi-Timeline Transformer (MTT)}        & \textbf{8}\%          \\
+        Ensemble of MTT (average)                        & 27\%                  \\
+        Ensemble of MTT (median)                         & 30\%                  \\
+    \end{tabular}
+	\caption{Expected errors by forecasting source. All models are from our previous work trialling different methods on the same dataset. \\
+		$\dagger$ : These are estimates and  may not be representative of any grower or agronomist specifically but are instead ballpark figures for illustration based on our information from our industry partners.}
+    \label{tab:errors}
+\end{table}
+
+\begin{figure*}[h]
+  \centering
+  \includegraphics[width=1\textwidth]{content/img/graphs/forecast-by-model.pdf}
+  \caption{Ordered forecasts of single MTT compared to ground truth with a horizon of 3 weeks and a history of 12 weeks.}
+  \label{fig:models}
+\end{figure*}

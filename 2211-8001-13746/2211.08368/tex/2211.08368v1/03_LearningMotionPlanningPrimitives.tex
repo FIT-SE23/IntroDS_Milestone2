@@ -1,0 +1,384 @@
+\chapter{Learning Primitives of\\ Sampling-based Motion Planning}
+\chaptermark{Learning Primitives of SBMP}
+\label{sec:learning-primitives}
+
+Sampling-based motion planners, such as PRM \citep{KSLO-1996} and RRT \citep{L-1998}, are comprised of a set of primitive operations such as sample generation, collision detection and distance computation.  This section discusses how machine learning has been applied to each of these primitive operations. It also discusses a set of adaptive methods that use learning to select between different combinations of primitive operations.
+
+\section{Sampling Sequences}
+\label{sec:sampling}
+
+One of the most intuitive ways to apply learning to \sbmps is to use it to improve the quality and efficiency of sampling.  Learned models can be used to produce samples that are more likely to be valid and/or occur in \emph{critical regions} such as narrow passages (Figure~\ref{fig:learning-sampling}).
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=\textwidth]{images/Learning-Sampling.png}
+    \caption{Given a planning problem: start (red), goal (green) and obstacles (grey), a learned sampling strategy predicts samples inside the blue region, characterized by parts of $\mathbb{C}_{free}$ that lie along a solution path. Some of these samples (purple) lie inside critical regions, such as narrow passages.}
+    \label{fig:learning-sampling}
+\end{figure}
+
+% \begin{table}
+% \begin{center}
+% \setlength\extrarowheight{-2cm}
+% \begin{tabular}{ p{2.5cm}p{2.5cm}p{2.5cm}}
+%  & \begin{mdframed}[hidealllines=false,backgroundcolor=cyan!20] Application to Sampling \end{mdframed} & \\
+%  \begin{mdframed}[hidealllines=false,backgroundcolor=cyan!20] Learn model of C-space \citep{AT-2015,bb-2005} \end{mdframed} & 
+%   \begin{mdframed}[hidealllines=false,backgroundcolor=cyan!20] Adaptivly bias sampling \citep{IHP-2018,ZKB-2008,fernndez2020learning} \end{mdframed} &
+%  \begin{mdframed}[hidealllines=false,backgroundcolor=cyan!20] Bias sampling towards shortest path  \citep{BN-2010,Wang-2020} \end{mdframed}  \\
+%  %\multicolumn{3}{c}{\begin{mdframed}[hidealllines=true,backgroundcolor=blue!20] Application to Sampling\end{mdframed}} \\
+% \end{tabular}
+%     \caption{Applications of learning to sample generation include methods that build models of C-space and {\bf use them to generate samples} \citep{AT-2015,bb-2005}, methods that {\bf learn sample distributions} \citep{IHP-2018,ZKB-2008,fernndez2020learning} and methods that attempt to {\bf bias sampling towards paths} \citep{BN-2010,Wang-2020}.}
+% \end{center}
+% \end{table}
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=red!20,frametitle=Categories of work on Sampling Sequences]
+\begin{myitem}
+    \item \textbf{Modeling the C-space} \citep{AT-2015,bb-2005,chamzas2019using,sutanto2020learning,9196771,kingston2019exploring}
+    \item \textbf{Biasing samples along likely shortest paths} \citep{BN-2010,ZKB-2008,IHP-2018,kumar2019lego,Wang-2020,9197106,huh2018efficient}
+\end{myitem}
+\end{mdframed}
+
+\subsection{Modeling the C-space}
+
+This class of approaches learn a representation of a problem's $\cspace$ and query the learned model to generate samples that are likely to be in relevant regions, or to filter out samples that are likely to be invalid. 
+
+One such method learns two probability distributions that model $\mathbb{C}_{free}$ and $\mathbb{C}_{obs}$ of a planning problem via a kernel density estimator function \citep{AT-2015}. The estimator approximates the likelihood that a drawn sample will be in $\mathbb{C}_{free}$ or $\mathbb{C}_{obs}$. The model is trained on previously drawn samples that have been collision-checked. During runtime, a Bayesian classifier is used to predict if a new sample lies in $\mathbb{C}_{free}$ or not. 
+% The classifier is used in combination with the RRT$^\#$ algorithm \citep{arslan2013use} to demonstrate its efficiency for planning problems involving a 2D robotic arm and a rigid body in a 2D workspace.
+
+\textit{Model-predictive Motion Planning} \citep{bb-2005} uses locally-weighted regression to build a model that predicts if a given sample is in $\mathbb{C}_{free}$ or $\mathbb{C}_{obs}$. This approximate model is constructed incrementally as a solution to the motion planning problem is computed. The sampling strategy associated with the learned model adapts sampling densities in proportion to an area’s complexity, allowing it to explore new regions efficiently.
+
+The \textit{Global-Local Sampler }(GL-Sampler) \citep{chamzas2019using} uses a learned database of local samplers to discover the connectivity of configuration space. It decomposes the workspace into a set of local primitives.  During the offline phase, it computes local samplers for these primitives and saves them to a database.  During the online phase, the GL-sampler maps primitives to local samplers from the database, and then uses these samplers to synthesize a global sampler.
+
+% @aravind
+Learned models of implicit manifold configuration space (IMACS) generate tangent spaces that represent manifolds \citep{kingston2019exploring}.  These tangent spaces provide piecewise-linear approximations of manifolds and can generate manifold samples and perform local planning on manifolds.
+
+\textit{Equality Constraint Manifold Neural Network} (ECoMaNN) \citep{sutanto2020learning} is a neural network that models manifold constraints that are commonly found in tasks like grasping and manipulation. It takes a configuration as input and outputs a predicted value that indicates the distance from the manifold. ECoMaNN is trained to minimize the errors between the tangents and normals of the manifold and those predicted by the model. The training data is augmented using off-manifold points. ECoMaNN is used in combination with sequential motion planning methods to generate paths on these manifolds. 
+
+Learned sampling  distributions have also extended sampling-based planners to unknown environments \citep{9196771}. The distributions are derived from both geometric representations (e.g. occupancy grids) and object-level representations (e.g. contextual cues), and trained using a dataset of example trajectories. A sampling-based planner samples vertices from the learned distribution and scores roadmap edges using a proposed objective function.
+
+
+
+\subsection{Biasing samples along likely shortest paths}
+ 
+A second class of approaches learn a model that identifies paths in the environment, then uses the model to bias sampling along likely paths. Such methods can be trained to identify higher quality paths quickly. 
+
+Given paths produced by an expert, it is possible to use Learning from Demonstrations (LfD) to produce similar paths \citep{BN-2010}. This is accomplished by learning a non-parametric representation of the distribution of samples along the expert paths, modeled using an Infinite Gaussian Mixture Model (IGMM).  
+
+Early work included learning a sample distribution function over a discretization of the workspace that is then used to bias sampling towards critical regions such as narrow passages \citep{ZKB-2008}.  Sampling is performed by obtaining an instance from the probability distribution, then randomly generating a sample from the distribution of samples given this instance.  The sample distribution function is obtained by reinforcement learning.  The resulting motion plans are then evaluated using a reward function, and the parameters of the sample distribution are adjusted towards the direction of the approximate gradient of the reward function.
+
+Conditional Variational Autoencoders (CVAEs) have been used to effectively learn sample distributions \citep{IHP-2018}. CVAEs are advantageous because they can represent complex, high-dimensional distributions that can be conditioned on arbitrary problem inputs. The CVAE is trained from demonstrations (examples of successful motion plans, human demonstrations, etc.) on similarly structured environments. In the online operation of the motion planner, samples are generated via the latent space of the CVAE, conditioned on problem-specific variables, such as start, goal and obstacle information (for e.g., an obstacle occupancy map). Theoretical properties are maintained by also generating samples using an auxiliary (uniform) sampler over the state space.
+
+While the above approach is shown to be effective on many problems, it can potentially fail in the face of complex obstacle configurations, or mismatch between training and testing environments. \textit{Leveraging Experience with Graph Oracles} (LEGO) \citep{kumar2019lego} addresses these issues by predicting samples that belong only to bottleneck regions, and which are spread out across diverse regions to maximize the likelihood of a feasible path existing.
+
+The \textit{Neural RRT*} approach \citep{Wang-2020} uses a convolutional neural network (CNN) to bias sampling towards predicted optimal paths.  It formulates the problem of generating good samples as an image-to-image mapping problem where the network's input is an RGB image of the workspace and robot-specific attributes such as the step size and clearance.  The network outputs a probability density as a pixelation over the workspace image, where the probability associated with each pixel value indicates the likelihood that the pixel will contain the optimal path. The architecture is trained from a large dataset of optimal paths generated using an A* algorithm to minimize the cross-entropy between the predicted optimal-path probabilities and the ground truth. The predicted probability distribution is then used to generate samples to be used by an RRT* planner. In order to maintain probabilistic completeness, a proportion of samples are generated using uniform sampling.
+
+The \textit{Critical PRM} \citep{9197106} identifies critical states along solution trajectories using graph-theoretic techniques, and builds a dataset of critical states and local environment features (such as an occupancy grid) for different planning problems. Then, in a new environment, a criticality prediction network is trained to predict the criticality of a new sample. In the proposed Critical PRM method, a proportion of states are sampled proportional to their criticality, while the rest are sampled uniformly. Critical PRMs are demonstrated to achieve up to three orders of magnitude improvement over uniform sampling, while preserving the guarantees and complexity of SBMP. 
+
+\textit{Q-function Sampling RRT} (QS-RRT) \citep{huh2018efficient} learns a state-action-value function (Q-function) over $\cspace$, where a state corresponds to a node on the tree, and an action is an extension of the tree from that node. The approach makes use of a Radial Basis Feature (RBF) representation in $\cspace$ to improve the effectiveness of the Q-function learning. The Q-function is integrated using a softmax node selection procedure inside RRT, and the selection of the best tree expansion is performed using numerical optimization. 
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=blue!20,frametitle=Discussion on Sampling Sequences]
+To use a learned sampling strategy for a class of motion planning problems, the variables that change across challenges must be clearly defined. For instance, in planning for a tabletop manipulation problem with a static set of obstacles whose poses may vary, the input to the learned model should be the start and goal configuration, as well as the object poses. 
+
+For problems where it is straightforward to obtain a dataset of high quality paths (from previously computed solutions, human demonstration, etc.), the learned model can be trained to bias samples along likely shortest paths given the problem input. For problems with complex constraints like manipulation, it makes sense to use the learned model to predict valid samples.
+   
+As the dimensionality of the input increases, the ability of the learned model to predict good samples will depend both on the amount of data used to train the model and the approximation power of the model. As the size of the model grows, an additional consideration is the trade-off between speed and quality of produced samples: a random sampler may be able to produce lower quality samples at a much higher rate than a learned sampler.
+\end{mdframed}
+
+
+\section{Collision Checking}
+
+Collision detection is often the most computationally expensive step of solving a motion planning problem \citep{Kleinbort2020}. It is therefore a promising direction to use machine learning to reduce the cost of this step (Figure~\ref{fig:learning-cc}). In order to avoid collisions in the real world, prediction errors in the form of false positives and false negatives must be suitably mitigated. 
+
+A practical strategy to minimize the number of collision checks while retaining theoretical properties of the motion planner is the idea of \textit{lazy collision checking} \citep{bohlin2000path,hauser2015lazy,mandalika2019generalized}. Under this strategy, edges are not immediately checked for collision, but rather are checked only when a candidate path to the goal is found. Feasible edges are marked and infeasible ones are deleted. The process repeats until a feasible path to the goal is found. This strategy avoids checking the vast majority of edges that have no chance of being on an optimal path.
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=red!20,frametitle=Categories of work on Collision Checking]
+\begin{myitem}
+    \item \textbf{Identifying samples that are guaranteed to be valid} \citep{BOKF-2013,BOF-2013}
+    \item \textbf{Using a learned model in place of a collision detector} \citep{bb-2005,huh2016collision,Das_2020,kew2019neural,chenning2021collision}
+    \item \textbf{Determining the order in which to collision check nodes or edges} \citep{PCM-2013,bhardwaj2019leveraging, Choudhury-2017-104364, Choudhury_2018, hou2020posterior}
+\end{myitem}
+\end{mdframed}
+
+
+% \noindent \textbf{
+% Categories:
+% \begin{itemize}
+%   \item Models that identify samples that are guaranteed to be valid \citep{BOKF-2013,BOF-2013}
+%   \item Use learned model in place of collision detector \citep{bb-2005,PCM-2013,kew2019neural,Choudhury-2017-104364, Choudhury_2018}
+%   \item Filter out samples that are likely to be invalid \citep{PCM-2013,Das_2020,bhardwaj2019leveraging,Tran2019PredictingCD}
+%   \item Models that determine order in which to test nodes/edges \citep{Choudhury-2017-104364, Choudhury_2018}
+%   \item Learn a representation of obstacle space \citep{strudel2020learning,PhillipsGrafflin2015ReproducingEM}
+% \end{itemize}
+% }
+
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=.99\textwidth]{images/Learning-CC.png}
+    \caption{Given a representation of obstacles, a learned collision detection model provides a prediction that can be used to validate (at least) one of the following conditions: \textbf{(Top-left)} Samples in $\mathbb{C}_{free}$. \textbf{(Top-right)} Samples in $\mathbb{C}_{obs}$. \textbf{(Bottom-left)} Edges entirely in $\mathbb{C}_{free}$. \textbf{(Bottom-right)} Edges intersecting with $\mathbb{C}_{obs}$.}
+    \label{fig:learning-cc}
+\end{figure}
+
+%An illustrative taxonomy of learned collision detection models is provided in Fig~\ref{fig:learning-cc}.
+
+%\begin{figure}[h!]
+%    \centering
+%    \includegraphics[width=0.48\textwidth]{images/CollisionDetection.PNG}
+%    \caption{Applications of machine learning to collision detection include methods that {\bf filter out nodes/edges that are likely to be in collision} \citep{PCM-2013,Das_2020,bhardwaj2019leveraging,Tran2019PredictingCD}, methods that can be used {\bf in place of or as a supplement to the collision detector} \citep{bb-2005,PCM-2013,kew2019neural,Choudhury-2017-104364, Choudhury_2018}, methods that {\bf identify samples that are guaranteed to be valid} \citep{BOKF-2013,BOF-2013}, methods that {\bf identify an efficient order in which to test nodes/edges} \citep{Choudhury-2017-104364, Choudhury_2018} and methods that {\bf learn a representation of obstacles} \citep{strudel2020learning,PhillipsGrafflin2015ReproducingEM}.\troy{I added a reference to \citep{Tran2019PredictingCD} but I do not discuss it in more detail. I also added \citep{PhillipsGrafflin2015ReproducingEM} which learns a model to represent deformable objects then uses RRT* to do planning given this model.}}
+%\end{figure}
+
+\subsection{Identifying samples that are guaranteed to be valid}
+
+This area of work uses learned models to identify samples that are guaranteed to be valid, eliminating the need to test them using an expensive collision checker. The \textit{Safety Certificate} approach \citep{BOF-2013,BOKF-2013} proposes an adaptive sampling distribution that provably converges to a uniform distribution.  When a sample is generated and collision-checked traditionally, this method stores a lower bound on the sample’s distance to the nearest obstacle. This distance, referred to as the \emph{safety certificate}, defines a region of the search space that is guaranteed to be collision-free.  Subsequent samples that are generated within a safety certificate are guaranteed to be valid and do not need to be collision-checked.  As the number of samples goes to infinity the safety certificates asymptotically cover the entire search space and the amortized cost of collision checking becomes negligible with respect to the overall running time of the algorithm.
+
+% Applications of learning to Collision detection (Fig~\ref{fig:learning-cc}) include methods that {\bf filter our samples or edges that are likely to be invalid} so that the planner does not need to spend time testing them for validity \citep{PCM-2013,Das_2020,bhardwaj2019leveraging}.  Other models are designed to be used {\bf in  place of the collision detector} \citep{bb-2005,PCM-2013}.  Another approach is to use a lazy planner that constructs a {\bf roadmap using  nodes/edges that the model predicts to be valid}, then test nodes/edges using the collision detector during the query phase \citep{kew2019neural,Choudhury-2017-104364, Choudhury_2018}.    A sixth approach is to {\bf learn a model that represents obstacles} that are sensed by the robot \citep{strudel2020learning}.
+
+\subsection{Using a learned model in place of a collision detector} 
+
+The most common approach to learned collision checking is to replace a traditional collision checker with a learned model.
+
+Model-based Motion Planning \citep{bb-2005} also helps perform predictive edge validation rather then calling a dedicated collision detector. As discussed in Section \ref{sec:sampling}, this method uses locally weighted regression to build an approximate model of $\cspace$.  This model can be used to predict if unsampled regions of $\cspace$ are valid or invalid, and if edges are valid.  
+
+Gaussian mixture models (GMMs) have been used for collision checking in RRTs \citep{huh2016collision}. The GMM is trained online during execution of the RRT using Incremental Expectation Maximization (EM). The training examples are generated by a traditional collision checker. By using biased sampling from the learned GMM distribution, the number of collision checks required for future iterations is shown experimentally to be reduced.
+
+The \emph{Fastron-RRT} \citep{Das_2020} uses a kernel perceptron to create a model of $\cspace$ that can be used as a proxy kinematic-based collision detector.  The kernel perceptron generates a set of support points that form a separating hyperplane between two classes (in this case, $\mathbb{C}_{free}$ and $\mathbb{C}_{obs}$).  Samples are collision-checked by querying which side of the hyperplane they lie on.  \textit{Fastron-RRT} can also operate under an active learning setting that updates the model's hyperplane in order to reflect changes in the environment. 
+
+\emph{ClearanceNet-RRT} \citep{kew2019neural} is a highly parallelizable extension of Fastron-RRT that uses a neural network (ClearenceNet) to predict obstacle clearance in order to obtain a heuristic for collision checking. The neural network obtains as input the poses of the robot and the obstacles in the environment, and outputs the distance to the nearest obstacle. This allows for the construction of an RRT where collision-checking can be deferred. Once a path has been found, ClearanceNet-RRT fixes errors in the path by performing gradient descent based path repair to move the path away from obstacles. 
+
+A recent approach to learned collision checking employs graph neural networks (GNNs) to reduce the number of collision checks on a Random Geometric Graph (RGG) \citep{chenning2021collision}. Given the vertices and edges of the graph, as well as problem-specific information, such as obstacle information and goal location, an attention-based neural network outputs vertex and edge embeddings, which are then used by the GNN. The GNN consists of a path exploration component that iteratively predicts collision-free edges to prioritize their exploration, and a path smoothing component that optimizes the obtained paths.
+
+\subsection{Determining the order in which to collision check nodes/edges}
+
+Another class of approaches use a learned model to determine the order in which nodes/edges are tested (collision checked) in order to more efficiently identify a valid path.
+
+Instance-based learning can be used to store previous local planning queries and their outcomes (i.e. whether they were in collision or collision-free) \citep{PCM-2013}. When a new sample is generated, this method identifies the $k$ nearest neighbors (or approximate nearest neighbors) from the nodes stored in a hash table. Given the neighbor set, the probability that the node is in collision is computed using a softmax function. This probability is then used as part of a collision filter for local planning queries.  It is also used as part of a method for exploring $\cspace$ around an existing sample in order to identify new samples for applications like RRT expansion.  Finally, it is used to defer collision detection to query time in order to perform collision detection in a lazy manner.
+
+\textit{Search Though Oracle Learning and Laziness} (STROLL) \citep{bhardwaj2019leveraging} uses a neural network to determine which edges to collision-check expensively when performing a lazy search on a roadmap. It formulates the problem of edge selection as a Markov Decision Process (MDP) over the state of the search problem, and uses Q-learning to solve this MDP. 
+
+The problem of path validity prediction can be formulated as a Decision Region Determination (DRD) problem \citep{Choudhury-2017-104364, Choudhury_2018}. This method first creates a training set from a sampled set of possible \textit{worlds} (environments), that form a set of hypotheses.  Then, it generates a roadmap without testing the edges and obtains a set of possible paths.  Each path is valid in some of the sampled worlds and invalid in others.  The set of worlds in which the path is valid forms the decision region for that path.  This method then uses the \textit{DIRECT} algorithm to obtain a decision tree that indicates what edges should be tested in order to prune inconsistent worlds and identity if a path is valid.
+
+\textit{Posterior Sampling for Motion Planning} (PSMP) \citep{hou2020posterior} formulates anytime search on graphs as an instance of Bayesian Reinforcement Learning (Bayesian RL). Unlike prior work, PSMP aims for anytime performance by leveraging learned posteriors on edge collisions to quickly discover an initial feasible path and progressively yield shorter paths.
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=blue!20,frametitle=Discussion on Collision Checking]
+The most straightforward way of applying a learned collision detector is to model it as a classification problem. For a static environment, an offline dataset of robot configurations in $\mathbb{C}_{free}$ and $\mathbb{C}_{obs}$ can be collected to train an appropriate machine learning model that predicts if an input configuration is in collision. It can also be beneficial to use a learned model that outputs a \textit{confidence score} about its prediction (e.g., a Bayesian model that outputs class probabilities). For predictions that have a confidence score below a fixed threshold the planner can query a more expensive, traditional collision checker.
+
+If traditional collision checking, including with lazy evaluation, proves to be relatively expensive, it makes sense to use a learned model to instead determine the order in which to test nodes/edges. 
+% To generalize across environments, the dataset and inputs must be adapted appropriately so that they contain enough information to distinguish a similar state with an identical robot configuration. For instance, poses of different objects in the scene (in the case of manipulation challenges) or an obstacle occupancy grid (in the case of navigational challenges).
+\end{mdframed}
+
+% \noindent\fbox{%
+%     \parbox{0.95\linewidth}{%
+%         The most straightforward way of applying a learned collision detector is to model it as a classification problem. For a static environment, an offline dataset of robot configurations in $\mathbb{C}_{free}$ and $\mathbb{C}_{obs}$ can be collected to train an appropriate machine learning model that predicts if an input configuration is in collision. To generalize across environments, the dataset and inputs must be adapted appropriately so that they contain enough information to distinguish a similar state with an identical robot configuration. For e.g., poses of different objects in the scene (in the case of manipulation challenges) or an obstacle occupancy grid (in the case of navigational challenges). It would be ideal to use a learned model that outputs a \textit{confidence score} about its prediction (such as a Bayesian model that outputs class probabilities). For predictions that have a confidence score below a fixed threshold, the planner can query a more expensive, traditional collision checker.
+%     }%
+% }
+
+\section{Distance Metrics, Heuristics and Constraints}
+\label{sec:learned-distance}
+In SBMP, distance metrics are used to estimate the viability of connecting samples and as a cost function for optimization. A common choice of metric is the Euclidean distance, under the intuition that the further the robot has to travel between states, the more likely that it will encounter an invalid state along its path. However, this metric does not take into consideration the topology of the environment, the complex motions performed by the rigid bodies of the robot, or the robot dynamics. For applications where a more accurate distance metric may be available, it may be computationally prohibitive to compute. Moreover, for many applications it is not immediately obvious what an accurate distance metric would look like. 
+
+Many sampling-based motion planners also use an estimate of the \textit{cost-to-go} from a node to the goal in order to bias the selection of nodes that are closer to the goal, and as a heuristic to speed up the search for the best solution. If the cost-to-go metric used is \textit{admissible}, then it can be added to the cost of getting from the start node (the \textit{cost-to-come}) to obtain a lower bound on the possible cost of paths that go through the node (Figure~\ref{fig:learning-cost-to-go}).  This can be used to give preference to expanding nodes that may yield shorter paths to the goal, while pruning nodes that cannot.
+
+\begin{figure}[t]
+  \begin{center}
+    \includegraphics[width=\textwidth]{images/LearningCostToGo.png}
+    \caption{The \emph{cost-to-go} is a heuristic estimate of the cost to move the robot from its current configuration to the goal.  In this example, the Euclidean distance of the sample to the goal (orange line) is used to approximate the cost-to-go.}
+    \label{fig:learning-cost-to-go}
+  \end{center}
+\end{figure}
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=red!20,frametitle={Categories of work on Distance Metrics, Heuristics \& Constraints}]
+\begin{myitem} 
+    \item \textbf{Approximating distance metrics\\} \citep{cfst-2018,6942569,pa-2015,LB-2011,kvea-2018}
+    \item \textbf{Approximating cost-to-go values} \citep{AT-2015,PhillipsGrafflin2015ReproducingEM,YA-2017,huh2020cost}
+    \item {\bf Planning for systems with dynamics} \citep{KP-2007,LCLX-2018}
+    \item \textbf{Modelling the effect of a heuristic} \citep{HBL-2005,Bhardwaj-2017-101433,yuanknowledge,wells2019learning,kim2019learning, zhao2020plrc} 
+\end{myitem}
+\end{mdframed}
+
+\subsection{Approximating the distance metric}
+
+A straightforward approach is to use a machine learning model to learn an approximation of a complex distance metric. The learned model can then be used in place of a computationally expensive distance computation step in the planning phase. 
+
+For instance, the \textit{swept volume} is the volume in the workspace, that the local planner sweeps over while passing between two configurations. It is generally considered to be an ideal distance metric, however it is very expensive to compute online. Deep neural networks can be used to estimate the swept volume between two points \citep{cfst-2018}. The network is trained in an obstacle-free environment from examples of pairs of configurations and the swept volume between them. The trained network, alongside a hierarchical neighborhood search procedure, is shown to be able to approximate swept-volume distance effectively and efficiently.
+
+Parametric models like locally-weighted projection regression can be used to approximate distances \citep{6942569}. The model is trained by approximating the optimal cost between pairs of states using an iterative Linear Quadratic Regulator (iLQR). The learned model approximates the original cost with a reasonable tolerance and gives a speed-up of a factor of 1000 over computing the actual cost.
+It is also possible to use a simpler non-linear parametric model to approximate distances \citep{pa-2015}. The model is trained using a novel steering function that solves the two-point boundary value problem (BVP) between two configurations of a wheeled mobile robot. 
+% It accurately predicts distances in terms of regression and ranking performance. With constant-time inference (prediction time), the method requires several factors less planning time when compared to Euclidean distance, while producing paths with similar quality.
+
+The distance between two states can also be approximated by constructing a densely sampled roadmap offline and querying the roadmap during planning time \citep{LB-2011}. The graph is generated by sampling a large number of states in an obstacle-free environment and then applying controls to the states. Two states ($s_i,s_j$) are considered to be connected if there is a control that extends the state $s_i$ to a state that is close to $s_j$. To reduce the online cost, the sampled states are mapped into a higher-dimensional Euclidean space through multi-dimensional scaling (MDS) that retains the relative distances represented by the sampled graph.
+
+Orthogonal to the other methods discussed above, the \textit{Distance-Aware Dynamic Roadmap} (DA-DRM) \citep{kvea-2018} learns a voxel distance grid which is updated using perceptual information from a humanoid robot’s perception system.  The learned distance information is use to estimate costs during roadmap search, and for path smoothing.  
+% This algorithm is shown to be applicable to a humanoid robot and provides improvements in terms of safety distance to obstacles, trajectory smoothness and solution generation for narrow workspaces.
+
+\subsection{Approximating the cost-to-go value}
+
+Informed \sbmps \ typically exploit the structure of the planning problem via an approximate cost-to-go value (or a \textit{heuristic}) to improve the practical efficiency of the search process \citep{gammell2021asymptotically}. It may thus be beneficial to learn a function that approximates the problem-specific cost-to-go.
+
+Similar to early work in approximating distance metrics, early work models the problem of learning an approximate cost-to-go as a supervised regression problem \citep{AT-2015}. It uses a training dataset where each data point consists of a randomly drawn point along with its \textit{locally minimum cost-to-come estimate} (lmc value).  Distance-weighted regression is used to fit a surface from points in the training set and to estimate estimate the cost-to-go of new points.  See Section \ref{sec:sampling} for additional information on the proposed method.
+
+For problems where the cost metric may be difficult to mathematically represent (like robot surgery), it can be learned from demonstrations through active learning and Inverse Optimal Control (IOC) \citep{PhillipsGrafflin2015ReproducingEM}. Similarly, \textit{Demonstration-Guided Motion Planning} (DGMP) \citep{YA-2017} learns a cost function that encodes task constraints for household tasks (for e.g., a full glass of water must be held upright) from expert demonstrations of the task. The learned cost function extracts time-dependent task constraints by learning low variance aspects of the demonstrations, which are correlated with the task constraints. The learned cost metric is optimized using \textit{Multi-Component Rapidly-Exploring Roadmaps} (MC-RRM), a SBMP technique. 
+
+A neural network architecture, {\tt c2g-hof} \citep{huh2020cost}, takes as input a point cloud representation of the workspace and a goal configuration to output a cost-to-go estimate. It is trained on a dataset of costs between every pair of configurations in randomly generated workspaces. During execution, the gradient of the output cost-to-go is followed to yield continuous, collision-free trajectories.
+
+\subsection{Planning for systems with dynamics}
+
+Planning with \textit{viability filtering} \citep{KP-2007} learns a viability model of an agent’s \emph{perceptual space} that is used to direct planning.  This method uses a virtual range finder sensor to model the robot's perception at a given state. It trains a viability classifier on a large set of motions along with their associated virtual perceptions that can be obtained from previous solutions or from simulation.  This method uses the classifier online to limit the planner's search to motions that lead to viable regions.  It improves planning efficiency by preventing the planner from exploring nonviable regions, which will unavoidably lead to failure.
+
+Near-Optimal RRT (NoD-RRT) \citep{LCLX-2018} uses a neural network to predict the cost between two given states considering nonlinear constraints. The neural network is trained on examples where the two point BVP is solved between pairs of states.  The authors show theoretically that NoD-RRT is asymptotically optimal.
+
+\subsection{Modelling the effect of a heuristic} 
+
+In some cases, it may be easier to model the \textit{effect} of using a good heuristic, such as the order in which nodes must be expanded during search. 
+
+In applications like rock climbing where multiple queries (locomotion, manipulation, contacts) must be processed to solve a specific planning problem, it is imperative to decide quickly if a query is solvable or not. Towards this objective, it is possible to train a classifier \citep{HBL-2005} to predict if a query is solvable.  The classifier is trained using data obtained from many iterations of Basic-MSP (multi-step planning) in randomly generated terrains.  This classifier can then be integrated with a multi-step planning algorithm to avoid spending computational effort in solving infeasible queries.
+
+\textit{Search As Imitation Learning} (SAIL) \citep{Bhardwaj-2017-101433} uses a heuristic policy that is trained to imitate an oracle that has perfect knowledge of the world and is capable of making decisions that minimize the required search.  SAIL posits that the manner in which a tree-based planner explores an environment can be seen as a wave-front and that it is desirable to keep the wave-front as small as possible while focusing the search towards the direction of the goal. It formulates the problem of selecting nodes for expansion as a sequential decision making problem in which information extracted from the wavefront is used to decide what nodes to expand. It then uses dynamic programming to compute the heuristic values for all states to determine the order of exploration.
+
+\textit{Piecewise Linear Regression Complex} (PLRC*) \citep{zhao2020plrc} is a data structure that approximates the costs of crossing local regions of a configuration space using piecewise linear regression. It is constructed by decomposing $\cspace$ into a set of cells. For each cell, pairs of points are sampled along the boundary, and the distance between them is calculated and stored. Then, this data is used to build a regression model that can return the costs between boundary points of every cell. For simple problems, the memory required to store this representation compares favorably to that required for standard discrete vertex-and-edge models, while achieving similar path quality.
+
+
+There has been recent interest in methods that encode prior information about the planning problem in the form of a sparse data structure. \cite{yuanknowledge} constructs a topological feature tree and computes a heuristic path on the tree. The computed path is then integrated with an \sbmp\ to improve the success rate in environments with dynamic obstacles. 
+
+Learned models have also been used to improve the efficiency of Task and Motion Planning by learning a classifier for feasible motions, and using the output of this classifier as a heuristic for guiding the search \citep{wells2019learning}. The classifier is trained on minimal exemplar scenes. On more complex scenarios, principled approximations are applied so as to minimize the effect of errors. Even in the presence of classification errors, properly biasing the heuristic ensures that the search is still orders of magnitude faster than an uninformed search.
+
+An algorithm for learning to guide a planner \citep{kim2019learning} proposes learning to predict constraints on the solution. A new type of problem-instance representation called \textit{score space} is proposed. Its main advantage is that it relays information about the similarity of problem instances. To transfer knowledge from past experience, the algorithm uses the correlation information in the problem score space representation of a given instance.  This limits planning to the constrained subspace, which reduces the size of the space that needs to be searched.
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=blue!20,frametitle=Discussion on Distance Metrics \& Heuristics]
+Learned models, such as those based on neural networks, can be used to approximate a more expensive to compute distance / cost-to-go metric, if a considerably large dataset of pairs of states and the true distance / cost-to-go between them can be collected. Access to the aforementioned offline dataset is not possible for some systems because it is not clear what a good distance / cost-to-go metric would look like. Approximating the distance metric computation using a learned model opens up interesting avenues for speeding up the nearest neighbor search component as well. There is a caveat, however. Due to the inherent bias-variance trade-off in any machine learning model, it is possible for the predicted distance / cost-to-go to have some error, which must be taken into consideration. 
+
+It is also possible to use learning to simulate the \textit{effect} of using a good heuristic, that biases the sampling of nodes to find higher-quality solutions more quickly - similar to some of the models discussed in Section~\ref{sec:sampling}. These methods, however, are not directly applicable to systems with constraints on their motion (such as dynamics), or where the cost function being optimized encodes task-specific attributes (such as grasping). %Section~\ref{sec:applications} discusses some of the work in these areas.
+\end{mdframed}
+
+\section{Steering Functions and Local Planners}
+% @aravind
+% \aravind{ 
+One of the requirements of many state-of-the-art \sbmp s is the availability of a local planner (or a \textit{steering function}) that connects two states of the system being planned for.  For some problems, such as those with constraints on the robot dynamics, a steering function corresponds to a boundary value problem (BVP) solver, which may not be available, or may be computationally expensive to query. This has led to the development of learned models that can be used in place of local planners.
+% }
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=red!20,frametitle=Categories of work on Steering Functions \& Local Planners]
+\begin{myitem}
+    \item \textbf{Learned steering functions for kinodynamic systems } \citep{FPCFT-2017,faust-acta-14,forftfd-2018,Chiang_2019,learned_goal_reaching_controllers,zheng2021sampling}
+\end{myitem}
+\end{mdframed}
+
+
+Reinforcement learning offers many promising avenues to learn a local planner (or a policy). It has been used to enable aerial robots to quickly navigate an environment and deliver payloads while complying with the dynamic constraints introduced by these loads \citep{FPCFT-2017, faust-acta-14}. The proposed method learns a policy for the system, that minimizes the residual oscillations in the load.  The large size of the action space associated with planning for aerial vehicles makes direct policy learning impractical for this system; so the policy is trained on a simplified problem space. During the planning stage, a PRM is used to generate collision-free paths.  The learned policy is then used to transform these paths into trajectories that satisfy the constraints imposed by the suspended load. 
+% On quadruped robots, Dynamics-Aware Discovery of Skills (DADS) \citep{sharma2020emergent} uses \textit{unsupervised} reinforcement learning to learn robotic \textit{skills}, that can be used in downstream tasks, potentially including SBMP. 
+
+\textit{PRM-RL} \citep{forftfd-2018} is a long-distance navigation method that uses reinforcement learning to obtain a policy for point-to-point navigation. The policy is first trained in a simple environment where it learns dynamics of the system, along with any task constraints and sensor noise.  The trained policy is then used during edge connection to obtain paths between candidate neighbors.  Neighbors are connected if the learned policy can consistently find a path between them. Similar to PRM-RL, \textit{RL-RRT} \citep{Chiang_2019} uses a learned obstacle-avoidance policy to perform local planning between two states, along with a learned reachability estimator to bias tree growth. The reachability estimator is trained via supervised learning to predict the time required for the obstacle-avoidance policy to reach a state given the obstacles that are present. 
+
+Recent work \citep{learned_goal_reaching_controllers} has proposed training a goal-reaching controller in an obstacle-free environment and applying this controller for planning in environments with obstacles. The node expansion procedure makes use of an informed local goal generation strategy for input to the learned controller. The expansion procedure is integrated inside the AO DIRT \citep{LB-DIRT,ML4KP} kinodynamic planner for improving success rate and solution quality in vehicular navigation problems.
+
+If optimal trajectories between two states can be computed offline, a supervised learning controller can be trained to steer the system from points in an initial state set to points in a final goal set. Learning-based kinodynamic RRT* \citep{zheng2021sampling} integrates this learned controller along with a learned cost-to-go metric.
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=blue!20,frametitle=Discussion on Steering Functions and Local Planners]
+In order to improve the efficiency of sampling-based kinodynamic planning via a learned model, it is possible to either learn a function that predicts the cost-to-go between two states, or a local planner than can viably connect two states, or both. Recent advances in deep reinforcement learning have focused on learning value functions and policies for a variety of different robotics tasks, but require a large dataset of interactions with the environment. It is a promising area of research to integrate these RL advances into SBMPs, which allow for planning over longer horizons, while maintaining theoretical properties and sample efficiency considerations.
+\end{mdframed}
+
+% \aravind{
+% \section{TODO: Termination criteria \& Goal selection}
+% }
+
+% \begin{mdframed}[hidealllines=true,backgroundcolor=red!20,frametitle=Categories of work on Task \& Motion Planning]
+% \textbf{
+% \vspace{-.15in}
+% \begin{myitem}
+%     \item Learning TAMP hierarchies and primitives  \citep{MohseniKabir2019SimultaneousLO}
+%     \item Learning heuristics for TAMP \citep{wells2019learning}
+% \end{myitem}}
+% \end{mdframed}
+
+
+%Manipulation planning introduces constraints associated with interacting with objects (e.g. grasping) and with the task being performed (e.g. pick-and-place on a shelf). In addition to the methods discussed in this section, learned methods for manifold sampling \citep{sutanto2020learning} which were covered in Section \ref{sec:sampling} are applicable to manipulation and grasping. 
+
+%\begin{mdframed}[hidealllines=true,backgroundcolor=red!20,frametitle=Categories of work on Manipulation \& Grasping]
+%\textbf{
+%\vspace{-.15in}
+%\begin{myitem}
+%    \item Learning TAMP hierarchies and primitives  \citep{MohseniKabir2019SimultaneousLO}
+%    \item Learning heuristics for TAMP \citep{wells2019learning}
+%\end{myitem}}
+%\end{mdframed}
+
+
+% \textit{Simultaneous Learning of Hierarchy And Primitives} (SLHAP) \citep{MohseniKabir2019SimultaneousLO} is a hierarchical architecture for integrating Task and Motion Planning (TAMP).  SLHAP represents this hierarchy using a hierarchical task network (HTN) and represents low-level motions using task space regions (TSRs). SLHAP uses learning from demonstration (LfD) to simultaneously learn low-level motions and high-level tasks. To perform tasks, SLHAP interleaves HTN planning to sequence through the primitives and motion planning, where the TSRs are input to a CBiRRT to generate paths that perform the demonstrated task.
+
+\edgar{ 
+% An algorithm for learning to guide a planner  \citep{kim2019learning} proposes learning to predict constraints on the solution. A new type of problem-instance representation called score-space is proposed. Its main advantage is that it relays information about the similarity of problem instances. To transfer knowledge from past experience, an algorithm that uses the correlation information in the problem score-space representation of a given instance. To show that the approach is effective at guiding a planner, the bidirectional RRT is compared to Trajopt in different environments. 
+}
+
+% \troy{
+% Learned score spaces have been applied to task and motion planning \citep{kim2019learning}.  This direction first identifies a subset of decision space that can be predicted reliability. The formulation defines the subspace as a set of \emph{solution constraints} and limits planning to the constrained subspace, which reduces the size of the space they needs to be searched.  Then, set of paths are learned along with an associated \emph{score space}, which maps each setting of the constrained variables to a score for each of the paths. 
+% }
+
+% \begin{mdframed}[hidealllines=true,backgroundcolor=blue!20,frametitle=Discussion on Manipulation \& Grasping]
+% Encoding the task that is being performed is a crucial step in manipulation planning, and typically requires manual engineering even across different instances of the same task. Thus, using learned models to either represent the task being performed, or to help find robot configurations that are conducive to the task are promising avenues for future research in this area. Although outside the scope of this survey, there has been a great deal of work in applying machine learning methods for sampling grasps \citep{lenz2015deep}. These sampled grasps can be treated as potential goal configurations for a sampling-based motion planner.
+% \end{mdframed}
+
+
+\section{Adaptive Selection of Primitives and Meta-Reasoning} 
+\label{sec:adaptive_planning}
+Many planning algorithms have been developed that use different combinations of sampling methods, neighborhood finders, expansion methods and connection strategies. It is often difficult to ascertain what combination of methods is best for a particular problem. One way of addressing this issue is to use learning to predict what methods or combinations of methods work best for a new planning problem. 
+% \aravind
+% {
+In some cases, it is useful to determine when to stop computational effort for a given planning problem. This form of reasoning is known as \textit{meta-reasoning}, and recent work has proposed machine learning-based solutions.
+% }
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=red!20,frametitle=Categories on Adaptive Selection \& Meta-Reasoning]
+\begin{myitem} 
+    \item \textbf{Planner selection} \citep{mmtpra-2005,Choudhury-2015}
+    \item \textbf{Connection strategy selection} \citep{EJTA-2013,Uwacu2016TheIO}
+    \item \textbf{Sampler selection} \citep{HSS-2005}%,ETA-2015
+    \item \textbf{Paths \& parameter selection} \citep{chamzas2020learning, moll2021hyperplan}
+    \item \textbf{Meta-reasoning} \citep{li2021learning, sung2021learning}
+\end{myitem}
+\end{mdframed}
+
+
+\subsection{Planner Selection}
+
+One adaptive selection method uses hand-crafted features in the environment to determine which combination of primitive methods to use \citep{mmtpra-2005}. It first partitions the environment by recursively dividing $\cspace$  until it obtains regions that are classified as homogeneous according to a set of features, which are obtained by constructing a simple PRM in each region and collecting statistics such as free node ratio, number of connected components, etc. Then, it uses a decision tree classifier which labels each region as free, cluttered, narrow passage or non-homogeneous based on the features observed in that region.  The decision tree is constructed using feature data that is collected from known examples of free, cluttered, narrow passage, and non-homogeneous environments. The planner that is selected for each region type is specified by the user (for e.g. PRM in the free regions and OBPRM in cluttered, narrow passage, and non-homogeneous environments). 
+
+The \textit{Planner Ensemble} \citep{Choudhury-2015} learns a mapping from applications to appropriate methods. From a set of complementary planners (including both sampling-based planners and trajectory optimization methods), it selects which planner to use for a specific application by learning priors on the planners' performance. The priors are then used to estimate the probability that each method will be able to solve a new problem in order to select the ensemble of planners that has the maximum likelihood of finding a feasible solution.  The model is trained on a dataset consisting of 10k planning problems that are generated by taking permutations and combinations of various primitive scenarios. 
+
+
+\subsection{Neighborhood Connection Strategy Selection}
+
+The \textit{Adaptive Neighbor Connection} (ANC) strategy \citep{EJTA-2013} uses a learned model to select from a set of neighborhood connection strategies based on their cost and how well they perform.  A neighborhood connection strategy consists of a candidate neighbor selection method (e.g. $k$-closest, $k$-Rand, etc.) and a distance metric (e.g. Euclidean, swept volume). ANC maintains a selection probability for each method, which is initially the same for all methods.  ANC selects a method according to the probability distribution, and after the connection step, it applies a reward or penalty to the selected method based on how many connections were successful and the number of collision detection calls made.  It then updates the selection probability of the methods based on this penalty/reward. An extension of ANC \citep{ETA-2015} uses a \emph{local} learning method that selects appropriate connection methods for roadmap construction.  As with ANC, this method dynamically divides the environment into regions.  It then selects what connection policy to use in each region using an adaptive probability distribution.  Extensions of this work have shown that introducing randomness into neighbor selection during training improves learning efficiency \citep{Uwacu2016TheIO}.
+
+\subsection{Sampler Selection}
+
+Another approach uses machine learning to adaptively combine multiple samplers (such as a Gaussian or Uniform sampler) by observing the performance of each sampler, and selecting the samplers that perform well more frequently \citep{HSS-2005}. This method maintains a probability for each sampler based on its cost and performance. To compute this probability, it maintains a weight for each sampler that captures its past performance. In order to ensure that all samplers have a reasonable chance of being tried, the weights for each sampler are initially assigned to be equal.   These weights are then used to compute a \emph{cost-insensitive} probability, which is scaled by the inverse of the cost of that sample to obtain a selection probability for each sampler.  At each timestep, the method selects a sampler based on this probability. 
+
+\subsection{Paths \& Parameter selection} 
+\textit{SPARK} and \textit{FLAME} 
+% \aravind{
+\citep{chamzas2020learning} are experience-based frameworks for complex manipulators in 3D environments.  Both \textit{SPARK} and \textit{FLAME} build an experience database of local primitives, which are created through a decomposition of the environment to capture local workspace features.  Each primitive is associated with a local sampler, which, given previous experiences, is able to generate samples in critical regions of the primitive.   This method solves motion queries by retrieving similar primitives from the database and combining their local samplers. A follow-up work, \textit{FIRE} \citep{chamzas2022learning} extracts local representations of various planning problems to learn the similarity function over them.
+% }
+
+\textit{HyperPlan} \citep{moll2021hyperplan} formulates the problem of motion planning algorithm selection and parameter optimization as a \textit{hyperparameter optimization} problem. It defines a loss function that captures the planning speed, combined planning and execution time, as well as the convergence to optimal solutions. Bayesian Optimization can then be used to optimize this loss function.
+
+\textit{ALEF} \citep{kingston2021using} uses experience from similar planning queries to efficiently solve constrained motion planning for multi-modal problems, such as the ones that arise during manipulation when an object is grasped, or the end effector is constrained to move along a straight-line path. ALEF builds a sparse roadmap within an augmented, manifold-constrained state space which aggregates experience
+gathered from different single-mode problems within a mode
+family. Upon a new query, paths from this roadmap are retrieved and used to bias sampling in an \sbmp.
+
+\subsection{Meta-Reasoning}
+
+Given the intuition that search trees rooted at the start and goal of a planning problem form two separate classes in $\cspace$, recent work has proposed learning a manifold that separates these classes \citep{li2021learning}. Points are then sampled on the manifold, and a closed polytope is constructed to approximate it. Under some assumptions, the output is either an infeasibility proof of the planning problem, or a motion plan that connects the start and goal states.
+
+Data-driven learning methods for \emph{meta-reasoning} have been used to model the relationship between solution quality and planning time in order to determine when to stop planning \citep{sung2021learning}.  Data for this method is generated by running an anytime planner on training problems for a long enough time to obtain an optimal solution with a high probability.  A model-based meta-reasoning method is proposed, which formulates the problem as a MDP, along with a model-free variation, which uses supervised learning in the form of a recurrent neural network (RNN).
+
+\begin{mdframed}[hidealllines=true,backgroundcolor=blue!20,frametitle=Discussion on Adaptive Selection \& Meta-Reasoning]
+The application of machine learning tools to adaptively select sampling-based motion planning primitives offers many promising avenues for exploration. Existing methods estimate the utility of different primitives or their combination by constructing a probability distribution that reflects their relative utility. These distributions are conditioned on features extracted from the environment, which can either be handcrafted or learned through a more expressive model. It is also interesting to consider learning the parameters of this distribution in a reinforcement learning (RL) setting, rather than a supervised setting. 
+        
+Another set of approaches accommodate heterogeneous problems by dividing them into \textit{regions}, and maintaining a separate probability distribution for each region based on the performance of different primitives in that region. Given the advances made in the expressive power of models like deep neural networks, it would be interesting to see if the classification of these regions can be learned automatically from prior planning experience, rather than through handcrafted features. 
+
+%The area of learning for meta-reasoning about \sbmp s is nascent, but is crucial as motion planning moves away from being a stand-alone problem to a small part of a broader robotics pipeline.
+\end{mdframed}
+ 
+% \noindent\fbox{%
+%     \parbox{0.95\linewidth}{%
+%         The application of machine learning tools to adaptively select sampling-based motion planning primitives remains a rich area of open work. State-of-the-art methods estimate the utility of different primitives or their combination by constructing a probability distribution that reflects their relative utility. An unexplored and interesting area of research is to learn the parameters of this distribution in a reinforcement learning (RL) setting, rather than a supervised setting.
+        
+%         Another set of approaches accommodate heterogeneous problems by dividing them into \textit{regions}, and maintain a separate probability distribution for each region based on the performance of different primitives in that region. Given the advances made in the expressive power of models like deep neural networks, it would be interesting to see if the classification of these regions can be learned automatically from prior planning experience, rather than through handcrafted features. 
+%     }%
+% }

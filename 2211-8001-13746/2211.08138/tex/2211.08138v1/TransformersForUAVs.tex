@@ -1,0 +1,75 @@
+\section{Transformers as Surrogate Models for UAV Design}
+
+As alluded to earlier, we are focused on speeding up the computational stage of the UAV design process. Therefore, rather than relying on expensive flight simulation models, our aim is to reduce the cost of computation time to the order of seconds per design. Reducing this computational cost will facilitate faster design exploration and will therefore open up the UAV design domain to further machine learning exploratory approaches.  
+
+\subsection{Flight Dynamics Model}
+
+The performance of each UAV is assessed using a pipeline comprising CAD tools such as Creo~\cite{creo} and a custom flight dynamics model (FDM)~\cite{walker2022flight,Bapty2022design}. Each UAV is assessed on controllability (existence of trim states) at different speeds. In particular, the FDM evaluates whether the UAV can fly at a specific velocity by adjusting the controls and orientation of a vehicle until the state of the vehicle reaches the desired value. These adjustments are achieved numerically, using the MINPACK package and the nonlinear simplex algorithm (see \citet{walker2022flight} for more details). Before evaluating the design in the FDM, each design must also be compiled and evaluated in a solid modeling computer-aided design tool, such as creo. This tool provides information to the FDM such as the overall mass, the moments of inertia, and potential interferences between parts. The output of the FDM provides a range of UAV statistics, such as trim states and electrical performance (power, current, voltage etc.).
+
+\subsection{Objective}
+
+As design is an iterative process, and we have the capability of producing hundreds of thousands of topologically valid designs, one might want to initially filter through these designs (quickly) to find a subset that meet designer specifications. A first step in this process is to find UAV designs that are able to fly or hover. As a result, we define the first objective as one where we aim to predict whether a design can hover, as this is often a vital characteristic of UAVs.\footnote{We note that some UAVs, such as many fixed wing UAVs, are launched (or catapulted) and therefore are not required to hover. For this class of UAVs, we would choose a different objective for filtering.} We therefore use a binary cross-entropy loss as the objective, whereby we label a design as $y = 1$ for hover times greater than $0$ and $y = 0$ for hover times of $0$.
+
+
+\subsection{Transformer Model}
+
+We will now introduce our transformer model that will operate over the sequence of token embeddings as highlighted in Figure \ref{fig:emb}. One key innovation of modern deep learning approaches is in the ability of some architectures to ingest structured data. In this paper so far, we have shown how we were able to define a flexible UAV grammar that allows us to represent a large diversity of designs as sequences. Transformers \cite{vaswani2017attention} are well-known to be extremely effective at operating on sequence data. They have seen huge success as part of large language models \cite{devlin2018bert, brown2020language} and we will now show how our UAV design embedding can bring success to the cyberphysical domain. 
+
+In order to classify whether a design can hover, we build a transformer encoder that consists of a linear encoding layer followed by a positional encoding layer. The output of the positional encoding is then passed through a transformer encoding layer (\texttt{nn.TransformerEncoder} in PyTorch) with 8 layers and 2 heads. The final token from the transformer encoder is then passed through a linear layer that goes from the embedding dimension of 200 to a single output dimension. During training we use the PyTorch in-built SGD optimizer with a learning rate of 0.01 and set the number of epochs to 2500. 
+% As a baseline comparison for predicting over sequence data, we also built an LSTM model \cite{hochreiter1997long} that consists of a linear input layer followed by an LSTM layer (\texttt{nn.LSTM} in PyTorch) with an input size of 512, a hidden size of 512.
+
+\subsection{Initial Data and Results}
+
+For the initial training of our model, we require a labeled data set. We therefore run the full CAD pipeline for $6{,}352$ UAV designs, where each design is sampled randomly from the procedural generator. Within this data set, only $794$ UAVs have a hover time greater than $0$~s. While computationally expensive, this initial data set is large enough to train our transformer model. We set aside $80~\%$ of the data for training and $20~\%$ for test. The resulting performance of our transformer model is an accuracy of $93.6~\%$. However, at this accuracy the recall for hovering UAVs is $0.63$, which means that we would miss around $40 \%$ of designs with this desired characteristic in the downstream tasks. Therefore, with careful calibration by changing the classification threshold from $0.5$ to $0.15$, we can achieve a recall of $0.88$ at the expense of a precision of $0.53$. When we describe the pipeline in the next section, a threshold of $0.15$ will result in the collection of a balanced data set of diverse hovering UAVs. Figure \ref{fig:PRCurve} provides further context for our threshold choice. The plot shows the precision-recall curve for the transformer encoder, where we have highlighted our chosen precesion-recall threshold with a red star. Depending on the recall, precision, and available compute, one could select a threshold accordingly by analyzing this graph.
+
+\begin{figure}[h!]%{0.7\columnwidth}
+\centering
+    \includegraphics[width=\columnwidth]{./images/PR-IAAI.pdf}
+    \caption{Precision-recall curve for the transformer encoder. The graph highlights the relative performance compared to a random classifier and indicates our chosen precision-recall threshold with the red star. } 
+    %(hover time and flight distance is shown along with each design).
+    \label{fig:PRCurve}
+\end{figure}
+
+\subsection{Design Pipeline and Experimental Results}
+
+We can now describe the entire design pipeline and our bootstrapping method for jointly improving overall UAV design and our surrogate models. Figure \ref{fig:pipeline} outlines the three staged process. In stage 1, highlighted in blue, we collect the initial labeled data. This requires sampling trees from our procedural generator and then flattening these trees into the appropriate format for the scientific models. We then run the scientific models (creo and the FDM) to evaluate the performance to build the initial data set. In stage 2, highlighted in orange, we train our transformer model as described in the previous section. Finally in stage 3, highlighted in yellow, we use our transformer model to filter through designs as sampled from the procedural generator in order to build a higher quality data set.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{./images/Pipeline.pdf}
+\caption{Graphic to provide an overview of the UAV design pipeline. The initial stage is to build a data set by sampling from the stochastic procedural generator (the declarative probabilistic program) in order to build a data set via running these designs through the scientific flight dynamics models. The next stage is to train the transformer on this data. In the last stage, we use the trained transformer to perform rejection sampling over the procedural generator to help find higher-quality designs.}\label{fig:pipeline}
+\end{figure}
+
+To demonstrate our pipeline, we sample $100{,}000$ new designs from the procedural generator and then use the transformer encoder with a threshold of $0.15$ to filter out designs that are predicted to be unable to hover. The result is $21{,}800$ UAV designs. This result is consistent with the performance over the validation data which reported an expected precision of around $50~\%$. Given that randomly sampling from the generator provides roughly $10~\%$ of designs that can hover and our model has a precision of $0.53$ and a recall of 0.88, we would expect to be left with around $20{,}000$ UAV designs of which $10{,}000$ should be able to hover. This result is significant as each evaluation through the scientific models takes 4-10 minutes depending on the complexity of the design. We can estimate a lower bound on the compute time by assuming 4 minutes per FDM evaluation, then $100{,}000$ UAVs would take $277.7$ days of compute, compared to $60.6$ days. 
+
+To determine the success of our filtering approach, we evaluated a subset of $6{,}621$ UAV designs (out of the proposed $21{,}800$) using the scientific models. It is at this point where we see the generalization of our approach. Of these $6{,}621$ designs, $3{,}308$ met the desired objective of being able to hover. This new data set therefore consists of $50 \%$ of UAVs that have the ability to hover compared to the $12.5 \%$ from the previous iteration (stage 1 in Figure \ref{fig:pipeline}). This result is consistent with the performance over the validation set, where we also saw a comparable precision of $0.53$.
+One potential concern is that the transformer encoder could identify UAV designs that are less diverse. However we show with both quantitative and qualitative results that a lack of diversity is not an issue. For quantitative results we refer to Figure \ref{fig:bars}. Figure \ref{fig:bars} presents the distribution of propellers (\ref{fig:props}) and wings (\ref{fig:wings}) for all hovering UAV designs that were filtered out via stage 3. We can see that the designs retrieved using our transformer model have a large range of values for both number of propellers and number of wings. Notably, we see from Figure \ref{fig:props} that a large proportion of the UAVs that hover have an even number of propellers. This observation meets what we see in practice with many UAVs taking on the form of quadcopters and hexcopters. However, this design process also provided some novel designs such as a 13 propeller UAV (or \textit{``tridecacopter''}) with a hover time of $204$~s. We see a similar pattern in Figure \ref{fig:wings} where there are more hovering UAVs with an even number of wings than odd. We further note that the vast majority of hovering UAV designs do not have wings. We postulate that the objective requirement of just being able to hover does not favor the inclusion of wings compared to other objectives such as maximum distance. For qualitative results, we select a range of filtered designs and present them in Figure \ref{fig:UAVExamples}. Importantly the UAVs in this figure highlight the diversity in designs that were retrieved via our AI-assisted UAV design process. These designs all meet the criteria of being able to hover, as well as having some other favorable performance metrics that were not previously specified such as reasonable flight distances. While some of these designs conceivably could have been designed by domain experts, such as the hexcopters, many designs would not have been likely expert choices. Therefore, our AI-assisted design process could lead to many more interesting new designs that may not have been considered before.
+
+\begin{figure}
+     \centering
+     \begin{subfigure}[b]{0.9\columnwidth}
+         \centering
+         \includegraphics[width=\textwidth]{./images/prop_bar_fly.pdf}
+         \caption{\# Propellers in UAV designs that can hover.}
+         \label{fig:props}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[b]{0.9\columnwidth}
+         \centering
+         \includegraphics[width=\textwidth]{./images/wing_bar_fly.pdf}
+         \caption{\# Wings in UAV designs that can hover.}
+         \label{fig:wings}
+     \end{subfigure}
+        \caption{Quantitative results of the filtering process. After using the transformer encoder, we are left with a diverse range of UAV designs that can hover. We see designs ranging from two propellers to thirteen (a) and designs with number of wings ranging from none to 4 (b).}
+        \label{fig:bars}
+\end{figure}
+
+\begin{figure*}[h!]%{0.7\columnwidth}
+\centering
+    \includegraphics[width=0.75\textwidth]{./images/ColoredFlyingExamples.pdf}
+    \caption{A subset of UAV designs that were found via the transformer-assisted design pipeline. The high proportion of UAV designs that meet the objective of being able to hover are also diverse. Many designs are novel and do not follow the standard choices that an expert UAV designer would necessarily select. } 
+    %(hover time and flight distance is shown along with each design).
+    \label{fig:UAVExamples}
+\end{figure*}
+
+We now ask how does this new data set help with the design process and what does it mean for the future of UAV design and the design of cyberphysical systems in general. The designs in Figure \ref{fig:UAVExamples} would not have been realistically possible to compute without the use of AI, namely the transformer encoder. The ability of the transformer to accurately predict whether a design would be able to hover without the need of running the scientific models is a big step in the process of automating the UAV design process. The transformer reduces the $1$ in $10$ chance of evaluating a hovering design to $1$ in $2$, and saves significant compute time. As a result of this saving, we enable the possibility of evaluating many more interesting novel designs, such as those shown in the Figure. For future UAV design our process as described in this paper has the potential to facilitate even more sophisticated machine learning approaches that are able to leverage the higher quality data sets that our approach produces. More generally, our case study demonstrates how a cyberphysical system such as a UAV can be represented as a tree structure using a domain-specific design language. In highlighting this demonstration, we believe other cyberphysical systems could be represented in flexible grammars that could then utilize sequence-based transformer approaches as shown here.

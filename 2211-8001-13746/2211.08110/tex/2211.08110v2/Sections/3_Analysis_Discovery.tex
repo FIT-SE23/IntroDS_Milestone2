@@ -1,0 +1,90 @@
+% \vspace{-5pt}
+\section{Analysis of Token Redundancy in ViT and Overview of \M}
+% \vspace{-5pt}
+\label{sec:motivation}
+
+% \vspace{-5pt}
+\subsection{Token Redundancy in ViT} \label{sec:analysis_token_packaging}
+% \vspace{-5pt}
+\noindent\textbf{Token redundancy viewed by different attention heads.}
+Assuming that the final class (CLS) token is strongly correlated with classification~\cite{zhou2021refiner}, we visualize the information regions detected by the CLS token in different attention heads of DeiT-T, as shown in Fig.~\ref{fig:head}.
+It can be seen that each head extracts the features of the image (multi-head visual receptive area of the image) independently and differently~\cite{pan2021iared2,heo2021pit,mao2021dual}, indicating that the heads contain distinct token-level redundancy. This inspires our token selector design with multiple heads, which is elaborated in Section~\ref{sec:token_selector}.
+
+\begin{figure}[tb]
+\centering
+\vspace{-0.2in}
+\includegraphics[width=0.8\columnwidth]{Figs/headattention_3head_2.pdf}
+% \vspace{-0.2in}
+\caption{The information region detected by each head in DeiT-T.}
+\label{fig:head}
+\vspace{-0.25in}
+\end{figure}
+
+\noindent\textbf{Token redundancy viewed by different transformer blocks.}
+Fig.~\ref{fig:token} gives the centered kernel alignment (CKA)~\cite{kornblith2019similarity} that represents the similarity between the tokens in each transformer block and the final CLS token, showing a tendency from weak to strong.
+It tells us that it is inaccurate for each transformer block to encode or evaluate the image tokens, especially in the front blocks.
+Thus, pruning rates for these front blocks should be lower to avoid ruling the informative tokens out.
+% Besides, background tokens, although less informative, can help with the recognition of foreground features~\cite{yang2021instance}.
+This also inspires our token packager technique to provide chances to make up for pruning mistakes (Section~\ref{sec:token_packaging}).
+
+\begin{figure}[tb]
+\centering
+\vspace{-0.1in}
+\includegraphics[width=0.8 \columnwidth]{Figs/evolution.pdf}
+\vspace{-0.1in}
+\caption{CKA between the final CLS token and other tokens measured after each transformer block (2 to 11).} % \textcolor{red}{x/y-axis caption font can be smaller.}}
+\label{fig:token}
+\vspace{-0.2in}
+\end{figure}
+
+% \subsection{Computation Properties within the ViT} \label{sec:analysis_token_pruning}
+% \noindent\textbf{Position embedding and sequence datatype.}
+% \textit{Position embedding:}
+% To mark the position information of each patch/token in the input image, Transformer attaches an additional position vector into the input embedding only at the entrance of the model.
+% In the later parts of the model, the order of the token sequence is neglected since Transformer operates on the input embedding which accommodates both the content and position information.
+% \textit{Sequence datatype:}
+% a Transformer block takes a 2D data sequence as the input but does not use a 3D feature map as a convolutional layer does.
+% Hence, after image-adaptive dropping a certain part of tokens, the sparse input matrices can be directly concatenated into smaller-size dense matrices (Figure~\ref{fig:location_observation}).
+% And the self-attention module can still be accelerated through parallel computing, which means, in principle, the image-adaptive token pruning will not introduce extra hardware overhead for Transformer-like models.
+% In fact, the computation properties facilitate the optimization of our hardware design.
+% \begin{figure}[htb]
+% \centering
+% \includegraphics[width=0.45 \columnwidth]{Figs/position_feature.pdf}
+% \caption{Observation on Position Embedding and Token Sparsity.}
+% \label{fig:location_observation}
+% \end{figure}
+
+% \subsection{Computational Complexity Analysis}
+% Given an input sequence $N{\times} D$, where $N$ is the input sequence length or the token number and $D$ is the embedding dimension~\cite{Touvron2021TrainingDI} of each token.
+% Some works~\cite{pan2021iared2,zhu2021visual} address the computational complexity of ViT as $(12ND^2{+}2N^2D)$. However, in one ViT, $D$ represents three physical dimensions as shown in Table~\ref{tab:complexity} and the computational complexity of the ViT can be written as $(4ND_{ch}D_{attn}$${+}$ $2N^2D_{attn}$${+}$$8ND_{ch}D_{fc})$.
+% Compared with other prunable dimensions, directly pruning tokens, $N$, will contribute to the reduction of all operations linearly or even quadratically ($N^2$ in \ding{173} and \ding{174}). Hence, it can activate more compression benefits compared with other pruning types.
+
+% \input{Tables/1_ViT_Computation}
+
+% \noindent\textbf{Observations.}
+% From the above analysis, we conclude three advantages of \textbf{image-adaptive token pruning}: it can generate minimal hardware overhead; it can accurately target the image-adaptive visual redundancy of the ViT; it can activate more compression benefits compared with other pruning types.
+% \vspace{-5pt}
+\subsection{Overview of \M}
+%\zf{Need to revise this subsection based on intro}
+% \vspace{-5pt}
+%Image-adaptive token pruning has the potential to activate the maximum pruning rate as justified in Sec~\ref{sec:related_work}.
+
+To develop a hardware-efficient image-adaptive token pruning framework, we first design an effective adaptive token pruning module (also known as \textbf{token selector}) according to the vision redundancy in ViTs (Section~\ref{sec:co-design}). This module includes an \textit{attention-based multi-head token classifier} and a \textit{token packager}, as shown in Fig.~\ref{fig:framework}. To improve the pruning rate and accuracy, the token classifier incorporates different token-level redundancies in multiple heads to more accurately classify tokens and the token packager consolidates (instead of discarding) non-informative tokens to one informative token to reserve information for later transformer blocks. To improve the hardware efficiency, we choose linear layers for the token selector to reuse the GEMM hardware component for the backbone ViT, and always concatenate the classified sparse tokens into dense ones.
+Please note that it is challenging for CNN-based architecture to implement the data-level pruning,
+because the kernel size of the convolution operation is fixed so that the irregular input features cannot be directly concatenated into dense ones to speedup the model inference.
+Moreover, we deploy 8-bit fixed-point quantization to further compress the model, and propose a polynomial approximation of nonlinear functions inside ViTs for FPGA-based efficient implementations and regularize the quantization errors.
+A proof-of-concept hardware accelerator design is presented in Section~\ref{sec:hardware_design}. 
+To meet the target ViT inference speed on hardware while reserving the accuracy (typically within 1\% accuracy loss), one also needs to carefully decide the number of token selectors to insert in the backbone ViT, as well as the location and pruning rate of each token selector.
+To address this challenge, in Section~\ref{sec:vit_training}, we propose a latency-aware multi-stage training strategy to learn all these parameters.
+
+
+% For the FPGA performance, the pruning module should be added as little as possible while maintaining high accuracy and sufficient computation reduction.
+% In addition, for the proper trade-off between the model accuracy and the throughput, it is necessary for the location and the pruning rate of the inserted token selectors to comply with the evolution of encoding in the ViT. 
+% Therefore, it is challenging to determine the distribution and the pruning rate of selectors.
+% Subsequently, we develop the latency-aware multi-stage training to explore the ViT accelerator design space.
+
+% After the latency-aware training, we develop a multi-stage pruning workflow, where each pruning module is inserted between several transformer blocks throughout the network model as shown in Figure~\ref{fig:framework}. The input token sequence first goes through several transformer blocks and then gets evaluated by the first token selector, where each token is scored and identified as either informative or less informative.
+% Then, processed by the token package step, less informative tokens are separated from the sequence and integrated into a package token.
+% This package token concatenates back to the informative ones to participate in the calculation of the subsequent transformer blocks.
+% In the next stage, a newly generated package token will be attached to the existing package tokens.
+

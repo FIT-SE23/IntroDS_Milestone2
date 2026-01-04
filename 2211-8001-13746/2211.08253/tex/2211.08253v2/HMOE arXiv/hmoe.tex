@@ -1,0 +1,489 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage{iccv}
+\usepackage{times}
+
+% Include other packages here, before hyperref.
+\usepackage{stfloats}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{bm}
+\usepackage{multirow}
+\usepackage{colortbl}
+\usepackage{wrapfig}
+\usepackage[inline]{enumitem}
+\usepackage[T1]{fontenc}
+
+\usepackage[pagebackref=true,breaklinks=true,letterpaper=true,colorlinks,bookmarks=false]{hyperref}
+\usepackage[capitalize]{cleveref}
+\crefname{section}{Sec.}{Secs.}
+\crefname{section}{Section}{Sections}
+\crefname{table}{Table}{Tables}
+\crefname{table}{Tab.}{Tabs.}
+
+\iccvfinalcopy
+
+\begin{document}
+	\title{HMOE: Hypernetwork-based Mixture of Experts for Domain Generalization}
+	
+	\author{
+		Jingang Qu\textsuperscript{1} \quad
+		Thibault Faney\textsuperscript{2} \quad
+		Ze Wang\textsuperscript{1} \quad
+		Patrick Gallinari\textsuperscript{1,3} \\
+		Soleiman Yousef\textsuperscript{2} \quad
+		Jean-Charles de Hemptinne\textsuperscript{2}
+		\\[.5em]
+		Sorbonne Université, CNRS, ISIR, F-75005 Paris, France\textsuperscript{1} \quad
+		IFPEN \textsuperscript{2} \quad 
+		Criteo AI Lab, Paris \textsuperscript{3} 
+		\\
+	}
+\maketitle
+
+%%%%%%%%% ABSTRACT
+\begin{abstract}
+Due to domain shift, machine learning systems typically fail to generalize well to domains different from those of training data, which is what domain generalization (DG) aims to address. Although various DG methods have been developed, most of them lack interpretability and require domain labels that are not available in many real-world scenarios. This paper presents a novel DG method, called HMOE: Hypernetwork-based Mixture of Experts (MoE), which does not rely on domain labels and is more interpretable. MoE proves effective in identifying heterogeneous patterns in data. For the DG problem, heterogeneity arises exactly from domain shift. HMOE uses hypernetworks taking vectors as input to generate experts' weights, which allows experts to share useful meta-knowledge and enables exploring experts' similarities in a low-dimensional vector space.  We compare HMOE with other DG algorithms under a fair and unified benchmark-DomainBed. Our extensive experiments show that HMOE can divide mixed-domain data into distinct clusters that are surprisingly more consistent with human intuition than original domain labels. Compared to other DG methods, HMOE shows competitive performance and achieves SOTA results in some cases.
+\end{abstract}
+
+%%%%%%%%% BODY TEXT
+\section{Introduction}
+\label{sec:intro}
+
+Domain generalization (DG) aims to train models on known domains that can generalize well to unseen domains, which is of crucial importance for deploying models in safety-critical real-world applications. Over the past decade, a variety of DG algorithms have been proposed \cite{gulrajaniSearchLostDomain2020, zhouDomainGeneralizationSurvey2022, wangGeneralizingUnseenDomains2022}, focusing primarily on developing DG-specific data augmentation techniques and learning domain-invariant representations to build generalizable predictors. However, many high-performing DG algorithms rely on domain labels to explicitly reduce domain discrepancy, severely limiting their applicability in real-world scenarios where domain annotation may be prohibitively expensive. Additionally, current DG algorithms lack interpretability and fail to provide insight into the causes of success or failure in generalizing to new domains. Therefore, the goal of this work is to develop a novel DG algorithm which does not require domain labels and is more interpretable.
+
+We follow the nomenclature of \cite{chenCompoundDomainGeneralization2022}, which refers to DG with domain labels as vanilla DG and the more challenging DG without domain labels as compound DG. Our work focuses on addressing compound DG through inferring latent domains from mixed-domain data and using them efficiently. \cite{deshmukhGeneralizationErrorBound2019, blanchardDomainGeneralizationMarginal2021, muandetDomainGeneralizationInvariant2013} demonstrated that using domain-wise datasets can theoretically achieve lower generalization error bounds and better DG performance than using mixed data directly, indicating the importance of domain information. Furthermore, latent domain discovery helps us understand the workings of models and enhances interpretability. To make the problem tractable, we assume that latent domains are distinct and separable.
+
+In this paper, we propose HMOE: \textbf{H}ypernetwork-based Mixture of Experts (\textbf{MoE}). MoE is a well-established learning paradigm that aggregates a number of experts by calculating the weighted sum of their predictions \cite{jacobsAdaptiveMixturesLocal1991, jordanHierarchicalMixturesExperts1994}, where the aggregation weights, also known as gate values, are determined by a routing mechanism and add up to 1. To discover latent domains, HMOE leverages MoE's \emph{divide and conquer} property, that is, the routing mechanism can learn to softly partition the input space into subspaces in an unsupervised manner during training \cite{yukselTwentyYearsMixture2012}, with each assigned to an expert. We further expect that each subspace is associated with a latent domain, enabling latent domain discovery. During inference, we can compare the similarities between an unseen test domain and the inferred domains based on gate values, hence improving interpretability. \cite{guoMultisourceDomainAdaptation2018, zhongMetaDMoEAdaptingDomain2022} have validated MoE in domain adaptation \cite{wangDeepVisualDomain2018} and mentioned that MoE can leverage the specialty of individual domain and alleviate negative knowledge transfer \cite{standleyWhichTasksShould2020} compared to using a single model to learn multiple different domains.
+
+HMOE innovatively uses a neural network, called a hypernetwork \cite{haHypernetworks2016}, which takes vectors as input to generate the weights of experts of MoE. By mapping vectors into experts, hypernetworks enable the exploration of experts' similarities in a low-dimensional vector space, facilitating latent domain discovery. Hypernetworks also serve as a link between experts, providing a platform for them to exchange information and promoting knowledge sharing.
+
+MoE's intrinsic soft partitioning is not always effective and sometimes fails to maintain a consistent division of the input space, especially when the distinction between latent domains is not significant. To address this issue, we propose a differentiable dense-to-sparse Top-1 routing algorithm, which forces gate values to become one-hot and converges to hard partitioning. This leads to sparse-gated MoE, which improves and stabilizes latent domain discovery. In addition, to better incorporate hypernetworks into MoE, we introduce an embedding space that contains a set of learnable embedding vectors corresponding one-to-one with experts. This embedding space is fed to hypernetworks to generate the weights of experts and is also part of the routing mechanism to compute gate values, thus enhancing the interaction between hypernetworks and the routing mechanism.
+
+We summarize our contributions as follows:
+\begin{enumerate*}[label=(\arabic*)]
+\item We present a novel DG method, HMOE, within the framework of MoE. HMOE does not require domain labels, enables latent domain discovery, and offers excellent interpretability.
+\item HMOE innovates the use of hypernetworks to generate expert weights and achieves sparse-gated MoE.
+\item As far as we know, HMOE is the first work that can jointly learn and utilize latent domains in an end-to-end way.
+\item We conduct comprehensive experiments to compare HMOE with other DG methods under a fair and unified evaluation framework -- DomainBed \cite{gulrajaniSearchLostDomain2020}. HMOE achieves competitive performance and even state-of-the-art results in some cases.
+\end{enumerate*}
+
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Domain Generalization (DG)}
+\label{sec:related_DG}
+The goal of DG is to train a predictor on known domains that can generalize well to unseen domains.
+
+\noindent \textbf{Vanilla DG} \quad The first line of work is to design DG-specific data augmentation techniques to increase the diversity and quantity of training data to improve DG performance \cite{yueDomainRandomizationPyramid2019, volpiGeneralizingUnseenDomains2018, shankarGeneralizingDomainsCrossgradient2018, zhangMixupEmpiricalRisk2017, liuUnifiedFeatureDisentangler2018, zhouDomainGeneralizationMixstyle2021, qiaoLearningLearnSingle2020, zhouLearningGenerateNovel2020}. Previous work learned domain-invariant representations through invariant risk minimization \cite{arjovskyInvariantRiskMinimization2019, kruegerOutofdistributionGeneralizationRisk2021, ahujaInvariancePrincipleMeets2021}, kernel methods \cite{muandetDomainGeneralizationInvariant2013, ghifaryScatterComponentAnalysis2016, ganLearningAttributesEquals2016, blanchardDomainGeneralizationMarginal2021}, feature alignment \cite{panDomainAdaptationTransfer2010, tzengDeepDomainConfusion2014, wangVisualDomainAdaptation2018, sunDeepCoralCorrelation2016, pengMomentMatchingMultisource2019, liDomainGeneralizationAdversarial2018, motiianUnifiedDeepSupervised2017, ghifaryDomainGeneralizationObject2015, matsuuraDomainGeneralizationUsing2020}, and domain-adversarial training \cite{ganinUnsupervisedDomainAdaptation2015, ganinDomainadversarialTrainingNeural2016, liDomainGeneralizationAdversarial2018, liDeepDomainGeneralization2018, gongDlowDomainFlow2019}. Another approach is to disentangle latent features into class-specific and domain-specific representations \cite{khoslaUndoingDamageDataset2012, pengDomainAgnosticLearning2019, ilseDivaDomainInvariant2020, namReducingDomainGap2021, zhangPrincipledDisentanglementDomain2022}. General machine learning paradigms were also applied to vanilla DG, such as meta-learning \cite{liLearningGeneralizeMetalearning2018, balajiMetaregDomainGeneralization2018, douDomainGeneralizationModelagnostic2019, liEpisodicTrainingDomain2019}, self-supervised learning \cite{carlucciDomainGeneralizationSolving2019, kimSelfregSelfsupervisedContrastive2021}, gradient manipulation \cite{huangSelfchallengingImprovesCrossdomain2020, shiGradientMatchingDomain2021, rameFishrInvariantGradient2022}, and distributionally robust optimization \cite{sagawaDistributionallyRobustNeural2020, kruegerOutofdistributionGeneralizationRisk2021}.
+
+\noindent \textbf{Compound DG} \quad There are some DG algorithms that do not require domain labels by design \cite{huangSelfchallengingImprovesCrossdomain2020, matsuuraDomainGeneralizationUsing2020, liSimpleFeatureAugmentation2021, namReducingDomainGap2021, zhangPrincipledDisentanglementDomain2022, chenCompoundDomainGeneralization2022}. Besides improving DG performance, latent domain discovery is also an important task for compound DG and contributes to better interpretability. \cite{matsuuraDomainGeneralizationUsing2020, chenCompoundDomainGeneralization2022} can do this but have two main limitations: (1) Their methods proceed in two phases: first infer latent domains from mixed data and then deal with DG using the inferred domains, which is similar to vanilla DG. The problem is that the second phase depends on the first and cannot provide some feedback to correct possible errors in domain discovery. (2) Their methods assume that domain shift arises from stylistic differences to identify latent domains, which does not always hold. 
+
+On the contrary, HMOE is trained in an end-to-end manner and leverages MoE to discover latent domains without an explicit induced bias on the cause of domain shift.
+
+\subsection{Hypernetworks}
+\label{sec:related_hypernet}
+
+A hypernetwork is a neural network that generates the weights of another target network. Hypernetworks were initially proposed by \cite{haHypernetworks2016} and have since been applied to optimization problems \cite{lorraineStochasticHyperparameterOptimization2018, navonLearningParetoFront2020}, meta-learning \cite{zhaoMetalearningHypernetworks2020}, continuous learning \cite{vonoswaldContinualLearningHypernetworks2019, brahmaHypernetworksContinualSemiSupervised2021}, multi-task learning \cite{linControllableParetoMultitask2020, tayHypergridTransformersSingle2021, mahabadiParameterefficientMultitaskFinetuning2021}, few-shot learning \cite{senderaHypershotFewshotLearning2022}, and federated learning \cite{shamsianPersonalizedFederatedLearning2021}.
+
+\subsection{Mixture of Experts (MoE)}
+\label{sec:related_moe}
+
+\begin{figure}[htbp]
+	\centering
+	\begin{subfigure}{0.57\linewidth}
+		\includegraphics[width=\textwidth]{figures/MOE}
+		\caption{Classical MoE}
+		\label{fig:moe}
+	\end{subfigure}
+	\begin{subfigure}{0.42\linewidth}
+		\includegraphics[width=\textwidth]{figures/Gate_Value_Matrix}
+		\caption{Gate value matrix}
+		\label{fig:gate_values}
+	\end{subfigure}
+	\caption{(a) MoE calculates the weighted sum of experts' outputs. (b) Gate values are determined by the gate network.}
+	\label{fig:moe_and_gate}
+\end{figure}
+
+MoE was originally proposed by \cite{jacobsAdaptiveMixturesLocal1991, jordanHierarchicalMixturesExperts1994} and consists of two main components: experts and a gate network, as shown in \cref{fig:moe_and_gate}. The output of MoE is the weighted sum of experts, with gate values calculated by the gate network on a per-example basis. In recent years, MoE has regained attention as a way to scale up deep learning models and more efficiently harness modern hardware \cite{shazeerOutrageouslyLargeNeural2017, lepikhinGshardScalingGiant2020, fedusSwitchTransformersScaling2021, duGlamEfficientScaling2022, zophDesigningEffectiveSparse2022, fedusReviewSparseExpert2022}. In this case, sparse MoE is preferred, which routes each example only to the experts with Top-1 or Top-K gate values, instead of all of them.
+
+\subsection{Application of Hypernetworks and MoE in DG}
+
+As far as we know, no work has applied hypernetworks to solve DG in computer vision. Recently, \cite{volkExamplebasedHypernetworksOutofdistribution2022} applied hypernetworks to DG in natural language processing (NLP) and achieved SOTA results on two NLP-related DG tasks. 
+
+As for MoE, \cite{liSparseFusionMixtureofExperts2022} proposed replacing feed-forward network layer (FFN) of Vision Transformer (ViT) \cite{dosovitskiyImageWorth16x162020} with a sparse mixture of FFN experts to improve DG performance. \cite{guoMultisourceDomainAdaptation2018, zhongMetaDMoEAdaptingDomain2022} applied MoE to a task similar to DG, namely domain adaptation \cite{wangDeepVisualDomain2018}, but they require domain labels to train an expert for each domain separately. \cite{zhongMetaDMoEAdaptingDomain2022} aggregates the outputs of experts via a transformer-based aggregator, but its aggregator is trained with fixed experts and cannot provide probabilities of experts, while HMOE can do this and is more interpretable. In addition, if we regard MoE as a kind of ensemble method, there are some work having the same spirit \cite{manciniBestSourcesForward2018, dinnocenteDomainGeneralizationDomainspecific2018, zhouDomainAdaptiveEnsemble2021}.
+
+\section{Method}
+\label{sec:method}
+
+\subsection{Problem Setting}
+Let $\mathcal{X}$ denote an input space and $\mathcal{Y}$ a target space. A domain $S$ is characterized by a joint distribution $P^s_{XY}$ on $\mathcal{X} \times \mathcal{Y}$. In vanilla DG setting, we have a training set containing $M$ known domains, \ie, $\mathcal{D}_{tr}^V = \{ \mathcal{D}^s \}_{s=1}^{M}$ with $\mathcal{D}^s = \{(x^s_i, y^s_i, d^s_i)\}_{i=1}^{N_s}$ where $(x^s_i, y^s_i) \sim P^s_{XY}$ and $d^s_i$ is the domain index or label. Also consider a test dataset $\mathcal{D}_{te}$ composed of unknown domains different from those of $\mathcal{D}_{tr}^V$. Vanilla DG aims to train a robust predictor $f: \mathcal{X} \to \mathcal{Y}$ on $\mathcal{D}_{tr}^V$ to achieve a minimum predictive error on $\mathcal{D}_{te}$, \ie, $\min_f \mathbb{E}_{(x, y) \sim \mathcal{D}_{te}} [ \ell(f(x), y) ]$, where $\ell$ is the loss function.
+
+Our work focuses on the more difficult compound DG, for which the training set $\mathcal{D}_{tr} = \{ (x_i, y_i) \}_{i=1}^{N}$ contains mixed domains and has no domain annotation. However, as demonstrated in \cite{gulrajaniSearchLostDomain2020, zhouDomainGeneralizationSurvey2022, wangGeneralizingUnseenDomains2022}, intrinsic inter-domain relationships play a key role in obtaining better generalization performance. Therefore, our proposed HMOE is designed to discover latent domains by dividing $\mathcal{D}_{tr}$ into clusters that match human intuition about visual relationships between different domains, and to fully leverage the learned domain information to perform well on unknown domains.
+
+\subsection{Overall Architecture}
+\label{sec:arch}
+
+\begin{figure*}[htbp]
+	\centering
+	\begin{subfigure}{0.76\linewidth}
+		\includegraphics[width=\textwidth]{figures/HMOE_Arch}
+		\caption{An overview of HMOE}
+		\label{fig:arch}
+	\end{subfigure}
+	\hspace{0.4cm}
+	\begin{subfigure}{0.19\linewidth}
+		\includegraphics[width=\textwidth]{figures/Gate_Function}
+		\caption{Gate function}
+		\label{fig:gate_function}
+	\end{subfigure}
+	\caption{(a) In the upper branch (\ie, the domain path), the input is mapped to the embedding space through the D2V encoder, and gate values are calculated by a predefined gate function. In the lower branch (\ie, the classifier path), the hypernetwork takes embedding vectors as input to create a set of classifiers. The final output is the weighted sum of classifiers' outputs. (b) The gate function determines gate values based on the distances between the output of the D2V encoder and the embedding vectors. The smaller the distance, the greater the gate value.}
+	\label{fig:hmoe}
+\end{figure*}
+
+An overview of the HMOE architecture is depicted in \cref{fig:arch}. HMOE processes each input $x$ through two paths: the domain path, which is intended to discover latent domains, and the classifier path, which aims to train a classifier expert for each latent domain. 
+
+The classifier path begins with a featurizer $h_z$ to extract high-level features from $x$, which can be a pretrained network, such as VGG \cite{simonyanVeryDeepConvolutional2014}, ResNet \cite{heDeepResidualLearning2016}, or ViT \cite{dosovitskiyImageWorth16x162020}. We define a discrete learnable embedding space $\mathcal{E}$ consisting of $K$ embedding vectors $\{ e_k \in \mathbb{R}^D \}_{k=1}^K$ ($D$ represents the embedding dimension), each corresponding to a classifier expert. These vectors are fed into a hypernetwork $f_h$ to generate a set of weights $\{ \theta_k \}_{k=1}^K$, which further form a set of experts $\{ f_c(:; \theta_k) \}_{k=1}^K$. The output of the featurizer $z$ is passed to these experts to compute their corresponding outputs, that is, $y_k = f_c(z; \theta_k)$.
+
+The domain path begins with a Domain2Vec (D2V) encoder $h_v$, which transforms $x$ into the embedding space $\mathcal{E}$ and outputs $v \in \mathbb{R}^D$. The output $v$ is then compared with the embedding vectors through a predefined gate function $g(v, \mathcal{E})$, as shown in \cref{fig:gate_function}, to produce a set of probabilities $\bm{p} = \{ p_k \}_{k=1}^K$. The final output of HMOE is the weighted sum of the outputs of experts as follows:
+\begin{equation}
+    y = \sum_{k=1}^K p_k y_k = \langle g(h_v(x), \mathcal{E}), \left[ f_c(h_z(x); f_h(e_k)) \right]_{k=1}^K \rangle \label{eq:output}
+\end{equation}
+
+In the classical MoE, the gate network and experts share the same input. In contrast, the D2V encoder of HMOE takes images as input rather than the featurizer's extracted features, which mainly contain class-specific information for classification. If we connect the D2V encoder to the featurizer, HMOE risks separating the input space based on semantic categories rather than domain-wise distinction.
+
+\subsection{Hypernetworks}
+\label{sec:hypernet}
+
+We use the hypernetwork $f_h$ taking a vector $e$ as input to generate the weights of the classifier $f_c$. In our work, both $f_h$ and $f_c$ are MLPs. In a sense, $f_c$ acts as a placeholder computational graph, $e$ can be seen as a conditioning signal, and $f_h$ maps $e$ to a function. The role of $f_h$ is multifaceted: (1) $f_h$ eases latent domain discovery. (2) $f_h$ allows for the use of many experts without significantly increasing the number of parameters. (3) Compared to the classical MoE, $f_h$ offers another way of interaction between experts and the routing mechanism besides the aggregation of experts. (4) As we will see later, by directly taking the D2V encoder as input, $f_h$ enables the generalization of experts beyond aggregation.
+
+\subsection{Routing Mechanism}
+\label{sec:routing}
+ 
+\subsubsection{Gate Function}
+\label{sec:gate_func}
+
+To quantify the responsibilities of experts for each input example and to aggregate experts' outputs, we need to calculate gate values $\bm{p}$. As shown in \cref{fig:gate_function}, based on the output of the D2V encoder $v$ and the embedding space $\mathcal{E}$, we define a gate function $g(v, \mathcal{E})$ to calculate $\bm{p}$ as follows:
+\begin{subequations}
+    \begin{gather}
+        d_k = \lVert v - e_k \rVert _2    \label{eq:dist_ve}   \\
+        s_k = -\log (d_k^2 + \epsilon)    \label{eq:neg_log}   \\
+        p_k = \frac{\exp (s_k)}{\sum_{j=1}^K \exp (s_j)}
+    \end{gather}
+\end{subequations}
+where $\epsilon$ is a small value. The negative logarithm in \cref{eq:neg_log} is used to establish a negative correlation between $d_k$ and $p_k$ (\ie, the smaller $d_k$, the larger $p_k$) and to nonlinearly rescale the distance $d$ (\ie, stretch small $d$ and squeeze great $d$), which makes $\bm{p}$ less sensitive to large $d$.
+
+\subsubsection{Differentiable Dense-to-Sparse Top-1 Routing}
+\label{sec:diff_top1}
+Based on gate values $\bm{p}$, the routing mechanism determines where and how to route input examples. A consistent and cohesive routing is crucial to the training stability and convergence of MoE \cite{daiStableMoEStableRouting2022}. In order to stabilize the routing and enhance latent domain discovery to capture less obvious domain differences, sparse-gated MoE is preferable. However, the commonly used Top-1 or Top-K functions are not differentiable and cause oscillatory behavior of gate values during training \cite{hazimehDselectkDifferentiableSelection2021}. To overcome this limitation, we propose a differentiable dense-to-sparse Top-1 routing algorithm by introducing an entropy loss on $\bm{p}$ as follows:
+\begin{equation}
+    \mathcal{L}_{en} = \mathbb{E}_{(x, y) \sim \mathcal{D}_{tr}} \left[ \mathbb{H} \big( g(h_v(x), \mathcal{E}) \big) \right]
+\end{equation}
+where $\mathbb{H(\cdot)}$ denotes the entropy of a distribution. In practice, we multiply $\mathcal{L}_{en}$ by $\gamma_{en}$ that linearly increases from 0 to 1 in the first half of training and remains at 1 in the second. Early on, $\gamma_{en}$ is small, and the distances between $v$ and the embedding vectors are almost the same, leading to a uniform $\bm{p}$. Therefore, all experts can be fully trained and gradually become specialized. In the later stages, $\mathcal{L}_{en}$ forces $\bm{p}$ to become one-hot based on specialized experts.
+
+Due to the negative logarithm in \cref{eq:neg_log}, the D2V encoder has to move towards one of the embedding vectors rather than away from the others in order to minimize $\mathcal{L}_{en}$. As a result, the output of the D2V encoder will converge to $\mathcal{E}$ and become quantized during training.
+
+\subsubsection{Expert Load Balancing}
+\label{sec:load_balance}
+Sparse MoE may suffer from an unbalanced expert load, which is problematic if only a small subset of experts are used while the others are left idle. We define the importance of experts as $I(X) = [I_1(X), \cdots, I_K(X)]$, where $X$ represents a single batch and $I_k(X)$ is specified as the sum of gate values assigned to the $k$th expert (\ie, sum the gate value matrix in \cref{fig:gate_values} along the example dimension). \cite{pavlitskayaBalancingExpertUtilization2022} defines a distribution $P = I(X) / \sum I(X)$ and uses the KL-divergence between $P$ and the uniform distribution $\mathcal{U}$ to balance the expert load, which is also used in our work:
+\begin{equation}
+	\mathcal{L}_{kl} = D_{KL}(P \Vert \mathcal{U}) = D_{KL} \left( \frac{I(X)}{\sum I(X)} \Vert \mathcal{U} \right)
+\end{equation}
+
+\subsection{Embedding Space}
+\label{sec:emb_space}
+The embedding space $\mathcal{E}$ plays a key role in HMOE. As we can see, the embedding vectors have an effect on both the generation of expert weights and the routing mechanism, thus serving as a bridge to balance these two parts. In addition, these embedding vectors are learnable like the weights of neural networks and attract the D2V encoder during training under the influence of $\mathcal{L}_{en}$. 
+
+\subsection{Class-Adversarial Training on D2V}
+\label{sec:class_adv}
+We expect the D2V encoder $h_v$ to contain as little class-specific information as possible, which ensures that HMOE partitions the input space based on domain-wise distinction rather than semantic categories. Inspired by Domain-Adversarial Neural Networks \cite{ganinDomainadversarialTrainingNeural2016}, we define an adversarial classifier $f_c^{ad}$ taking $v$ as input and add the following loss to perform class-adversarial training on $h_v$:
+\begin{equation}
+    \mathcal{L}_{ad} = \mathbb{E}_{(x, y) \sim \mathcal{D}_{tr}} \left[ \ell_{ce}(f_c^{ad}(GRL(v, \lambda_{grl})), y) \right]
+\end{equation}
+where $\ell_{ce}$ denotes the cross-entropy loss and $GRL$ represents the gradient reversal layer, which acts as an identity function in the forward pass and multiplies the gradient by $-\lambda_{grl}$ in the backward pass. As suggested in \cite{ganinDomainadversarialTrainingNeural2016}, we define $\lambda_{grl}$ as follows:
+\begin{equation}
+	 \lambda_{grl} = 2 / (1 + \exp (-10 \times pct_{tr})) - 1
+\end{equation}
+where $pct_{tr}$ varies linearly from 0 to 1 during training.
+
+\subsection{Semi-/supervised Learning on Domains}
+\label{sec:semi_domains}
+
+Due to the probabilistic nature of MoE, given an input $x$ and the corresponding gate values $\bm{p} = \{ p_k \}_{k=1}^K$, we can interpret $p_k$ as the probability of selecting the $k$th expert $E_k$ given $x$, \ie, $p(E_k | x)$.  In addition, $E_k$ is thought to be associated with a specific domain $\mathcal{S}_m$. Therefore, we get $p_k = p(E_k | x) = p(S_m | x)$. Consider a dataset with domain labels $\mathcal{D}_d = \{ (x_i, d_i) \}_{i=1}^{N_d}$ (class labels are not necessary) with $d_i \in \{ 1, \cdots, M_d \}$, we can make use of $\mathcal{D}_d$ as follows:
+\begin{equation}
+    \mathcal{L}_{d} = \mathbb{E}_{(x, d) \sim \mathcal{D}_d} \left[ \ell_{ce}(\bm{p}, d) \right]
+\end{equation}
+Note that $M_d$ may be smaller than $K$, but this has no bearing on the calculation of $\mathcal{L}_{d}$. In this case, we assume that the first $M_d$ experts are assigned to $M_d$ domains, and the other experts do not have domain information and learn from the data by themselves.  If all domain labels are available in the training data, $\mathcal{L}_{d}$ becomes supervised learning on domains.
+
+\subsection{Training and Inference}
+\label{sec:train_infer}
+
+In addition to the losses mentioned above, the supervised loss on targets is as follows:
+\begin{equation}
+    \mathcal{L}_{y} = \mathbb{E}_{(x, y) \sim \mathcal{D}_{tr}} \left[ \ell_{ce}(\hat{y}, y) \right]
+\end{equation}
+where $\hat{y}$ is the prediction of HMOE, as calculated by \cref{eq:output}. The final training loss is:
+\begin{align}
+    \mathcal{L} &= \lambda_{y} \mathcal{L}_{y} + \lambda_{en} \mathcal{L}_{en} + \lambda_{kl} \mathcal{L}_{kl} + \lambda_{ad} \mathcal{L}_{ad} + \lambda_{d} \mathcal{L}_{d}
+\end{align}
+where $\lambda$ are trade-off hyper-parameters to balance different losses. Generally, $\lambda_{y}$ is set to 1 and $\mathcal{L}_{d}$ is not used for compound DG without domain labels.
+
+For inference, we provide three modes: MIX, MAX, and OOD. MIX refers to the mixture of experts that is calculated by \cref{eq:output}, MAX employs the output of the expert with the highest gate value, and OOD\footnote{The OOD inference can be efficiently implemented using PyTorch-based JAX-like library, \emph{functorch}.} (Out of Domain) uses the output of a classifier whose weights are generated by the hypernetwork directly taking the D2V encoder as input. OOD enables the generalization of experts beyond aggregation.
+
+\section{Experiments}
+\label{sec:exp}
+
+This paper focuses on image classification. However, to demonstrate HMOE's versatility, we also apply it to a toy regression problem to learn a one-dimensional piece-wise function defined on three intervals and HMOE proves effective in identifying discontinuities. Due to space constraints, this toy problem is placed in the \textbf{supplementary material}.
+
+Next, we focus on testing HMOE and comparing it with other DG algorithms on DomainBed \cite{gulrajaniSearchLostDomain2020}.
+
+\subsection{Datasets and Model Evaluation}
+DomainBed provides a unified codebase to implement and train DG algorithms and integrates commonly used DG-related datasets. In this work, we conduct experiments on Colored MNIST with 3 domains \cite{arjovskyInvariantRiskMinimization2019}, Rotated MNIST with 6 domains \cite{ghifaryDomainGeneralizationObject2015},  PACS with 4 domains \cite{liDeeperBroaderArtier2017}, VLCS with 4 domains \cite{fangUnbiasedMetricLearning2013}, OfficeHome with 4 domains \cite{venkateswaraDeepHashingNetwork2017}, and TerraIncognita with 4 domains \cite{beeryRecognitionTerraIncognita2018}. In the \textbf{supplementary material}, we give detailed statistics and visualize some samples for each domain of each dataset.
+
+To select models and tune hyper-parameters, DomainBed provides three options, of which we select the training-domain validation that randomly draws 80\% from the data of each training domain to form the training set and uses the remaining as the validation set. This option best matches the setting of compound DG without domain labels and access to test domains.
+
+\subsection{Implementation Details}
+
+For Colored and Rotated MNIST, following \cite{gulrajaniSearchLostDomain2020}, we use as the featurizer a four-layer ConvNet (refer to Appendix D.1 of \cite{gulrajaniSearchLostDomain2020}). The D2V encoder $h_v$ consists of two \emph{conv} layers (32 units, $3 \times 3$ kernels, ReLU), followed by global average pooling and a fully-connected (fc) layer to map to the embedding dimension $D$.
+
+For other datasets, we use ResNet-50\footnote{For a fair comparison with other DG algorithms, we use the pretrained ResNet-50 of IMAGENET1K-V1 in PyTorch, although V2 is better.} pretrained on ImageNet \cite{dengImagenetLargescaleHierarchical2009} as the featurizer and freeze all batch normalization layers. The D2V encoder $h_v$ cascades 3 \emph{conv} layers (64-128-256 units, stride 2, $4 \times 4$ kernels, ReLU), two residual blocks (each has 2 \emph{conv} layers with 256 units, $3 \times 3$ kernels, ReLU), and a  $3 \times 3$ \emph{conv} layer with $D$ units followed by global average pooling. We use Instance Normalization \cite{ulyanovInstanceNormalizationMissing2016} with learnable affine parameters before all ReLU of $h_v$.
+
+For all datasets, the classifier $f_c$ is a fc layer whose input size is the featurizer's output size (128 for ConvNet and 2048 for ResNet-50) and output size is the number of classes. The hypernetwork $f_h$ is a five-layer MLP with 256-128-64-32 hidden units and SiLU \cite{hendrycksGaussianErrorLinear2016} except the output layer, and its input size is $D$ and output size is the total number of learnable parameters (\ie, weights and biases) of $f_c$.  In addition, we use the hyperfan method proposed by \cite{changPrincipledWeightInitialization2019} to initialize $f_h$. If $\mathcal{L}_{ad}$ is used, the adversarial classifier is a three-layer MLP with 256 hidden units and ReLU except the output layer, and its input size is $D$ and output size is the number of classes. We set $D=32$ and initialize embedding vectors using the standard normal distribution.
+
+We define three HMOE variants based on the number of embedding vectors $K$ and whether domain labels are used:
+\begin{enumerate*}[label=(\arabic*)]
+\item \textbf{HMOE-DL:}  Domain labels of $\mathcal{D}_{tr}$ are provided. In this case, we only use $\mathcal{L}_{y}$ and $\mathcal{L}_{d}$ with $\lambda_{y} = \lambda_{d} = 1$ and discard other losses, and $K$ is the number of training domains per dataset.
+\item \textbf{HMOE-DN:} Domain numbers are known but domain labels. In this case, $K$ is the number of training domains per dataset. We use $\mathcal{L}_{y}$, $\mathcal{L}_{en}$, $\mathcal{L}_{kl}$, and $\mathcal{L}_{ad}$ with $\lambda_{y} = \lambda_{en} = \lambda_{kl} = 1$ and $\lambda_{ad} = 0.01$.
+\item \textbf{HMOE-ND:} No domain information is available and we use a fixed $K=5$. The setting of losses is the same as in HMOE-DN.
+\end{enumerate*}
+
+DomainBed trains all DG algorithms with Adam for 5,000 iterations. For Colored and Rotated MNIST / other datasets, the learning rate is 0.001 / 5e-5, the batch size is 64 / 32 $\times$ number of training domains, and models are evaluated on the validation set every 100 / 300 iterations. Each experiment uses one domain of a dataset as the test domain and trains algorithms on the others, which is repeated 3 times with different random seeds. The average accuracy over 3 replicates is reported. In addition, we do not tune HMOE's hyper-parameters and use the settings mentioned above consistently. Other DG algorithms also use the default settings predefined in DomainBed. All experiments are performed on PyTorch using a A5000 GPU.
+
+\subsection{Results}
+We use the up-to-date domain generalization benchmark on DomainBed, and the comparison of HMOE (3 variants and 3 inference modes) with other DG algorithms is shown in \cref{tab:res_domainbed}, where the best results are underlined. ERM means the vanilla supervised learning that just fine-tunes ResNet-50 on mixed data, also called DeepAll in some papers and serving as a performance baseline. We report the average accuracy of all test domains for each dataset. Refer to the \textbf{supplementary material} for detailed results.
+
+\begin{table*}[htbp]
+        \centering
+		\small
+		\setlength\tabcolsep{5pt}
+        \begin{tabular}{cccccccc}
+        \hline
+        \textbf{Algorithm}  &  & \textbf{ColoredMNIST}     & \textbf{RotatedMNIST}     & \textbf{VLCS}             & \textbf{PACS}             & \textbf{OfficeHome}       & \textbf{TerraIncognita} \\
+        \hline
+        \multicolumn{8}{c}{\emph{w/ Domain Labels}} \\
+        \hline
+        
+        IRM      \cite{arjovskyInvariantRiskMinimization2019}                        &  & 52.0 $\pm$ 0.1            & 97.7 $\pm$ 0.1            & 78.5 $\pm$ 0.5            & 83.5 $\pm$ 0.8            & 64.3 $\pm$ 2.2           & 47.6 $\pm$ 0.8          \\
+        GroupDRO \cite{sagawaDistributionallyRobustNeural2020}            &  & 52.1 $\pm$ 0.0            & 98.0 $\pm$ 0.0            & 76.7 $\pm$ 0.6            & 84.4 $\pm$ 0.8           & 66.0 $\pm$ 0.7           & 43.2 $\pm$ 1.1            \\
+        Mixup    \cite{yanImproveUnsupervisedDomain2020}                      &  & 52.1 $\pm$ 0.2            & 98.0 $\pm$ 0.1            & 77.4 $\pm$ 0.6            & 84.6 $\pm$ 0.6            & 68.1 $\pm$ 0.3           & 47.9 $\pm$ 0.8           \\
+        MLDG     \cite{liLearningGeneralizeMetalearning2018}                     &  & 51.5 $\pm$ 0.1            & 97.9 $\pm$ 0.0            & 77.2 $\pm$ 0.4            & 84.9 $\pm$ 1.0            & 66.8 $\pm$ 0.6           & 47.7 $\pm$ 0.9           \\
+        CORAL    \cite{sunDeepCoralCorrelation2016}                                  &  & 51.5 $\pm$ 0.1            & 98.0 $\pm$ 0.1            & \underline{\textbf{78.8}} $\pm$ 0.6            & 86.2 $\pm$ 0.3            & \underline{\textbf{68.7}} $\pm$ 0.3           & 47.6 $\pm$ 1.0            \\
+        MMD      \cite{liDomainGeneralizationAdversarial2018}                    &  & 51.5 $\pm$ 0.2           & 97.9 $\pm$ 0.0            & 77.5 $\pm$ 0.9            & 84.6 $\pm$ 0.5            & 66.3 $\pm$ 0.1            & 42.2 $\pm$ 1.6            \\
+        DANN     \cite{ganinDomainadversarialTrainingNeural2016}            &  & 51.5 $\pm$ 0.3           & 97.8 $\pm$ 0.1            & 78.6 $\pm$ 0.4            & 83.6 $\pm$ 0.4            & 65.9 $\pm$ 0.6           & 46.7 $\pm$ 0.5            \\
+        CDANN    \cite{liDeepDomainGeneralization2018}                            &  & 51.7 $\pm$ 0.1            & 97.9 $\pm$ 0.1            & 77.5 $\pm$ 0.1            & 82.6 $\pm$ 0.9             & 65.8 $\pm$ 1.3            & 45.8 $\pm$ 1.6            \\
+        MTL      \cite{blanchardDomainGeneralizationMarginal2021}           &  & 51.4 $\pm$ 0.1           & 97.9 $\pm$ 0.0            & 77.2 $\pm$ 0.4            & 84.6 $\pm$ 0.5            & 66.4 $\pm$ 0.5            & 45.6 $\pm$ 1.2            \\
+        ARM      \cite{zhangAdaptiveRiskMinimization2021}                         &  & \underline{\textbf{56.2}} $\pm$ 0.2           & \underline{\textbf{98.2}} $\pm$ 0.1            & 77.6 $\pm$ 0.3            & 85.1 $\pm$ 0.4            & 64.8 $\pm$ 0.3            & 45.5 $\pm$ 0.3            \\
+        VREx     \cite{kruegerOutofdistributionGeneralizationRisk2021}      &  & 51.8 $\pm$ 0.1            & 97.9 $\pm$ 0.1            & 78.3 $\pm$ 0.2            & 84.9 $\pm$ 0.6           & 66.4 $\pm$ 0.6            & 46.4 $\pm$ 0.6            \\
+        \hline
+        \multirow{3}{5em}{HMOE-DL}                                   				  &  MIX  & 51.6 $\pm$ 0.1            & 97.3 $\pm$ 0.1            & 76.7 $\pm$ 0.4            & 83.5 $\pm$ 0.5            & 64.7 $\pm$ 0.2            & 45.0 $\pm$ 0.8            \\
+                                                                     						  				   &  MAX & 51.7 $\pm$ 0.1            & 97.0 $\pm$ 0.0            & 77.6 $\pm$ 0.3            & 83.9 $\pm$ 0.3            & 63.2 $\pm$ 0.1            & 43.2 $\pm$ 1.5             \\
+                                                                     					      				   &  OOD & 51.7 $\pm$ 0.2           & 97.4 $\pm$ 0.1            & 76.8 $\pm$ 0.9            & 84.5 $\pm$ 0.3            & 63.7 $\pm$ 0.2            & 44.0 $\pm$ 0.9            \\
+        \hline
+        \multicolumn{8}{c}{\emph{w/o Domain Labels}}                                                                                                                                    																																							\\
+        \hline
+        ERM      \cite{vapnikNatureStatisticalLearning1999}                           &  & 51.5 $\pm$ 0.1            & 98.0 $\pm$ 0.0            & 77.5 $\pm$ 0.4            & 85.5 $\pm$ 0.2            & 66.5 $\pm$ 0.3            & 46.1 $\pm$ 1.8           \\
+        RSC      \cite{huangSelfchallengingImprovesCrossdomain2020}      &  & 51.7 $\pm$ 0.2            & 97.6 $\pm$ 0.1             & 77.1 $\pm$ 0.5            & 85.2 $\pm$ 0.9            & 65.5 $\pm$ 0.9            & 46.6 $\pm$ 1.0           \\
+        SagNet   \cite{namReducingDomainGap2021}                                    &  & 51.7 $\pm$ 0.0            & 98.0 $\pm$ 0.0            & 77.8 $\pm$ 0.5            & 86.3 $\pm$ 0.2            & 68.1 $\pm$ 0.1            & 48.6 $\pm$ 1.0            \\
+        \hline
+        \multirow{3}{5em}{HMOE-DN}                                   			    &  MIX     & 51.9 $\pm$ 0.1           & 97.5  $\pm$ 0.1          & 76.8   $\pm$ 0.5         & 84.8  $\pm$ 0.6         & 65.4  $\pm$ 0.4          & 48.7  $\pm$ 1.3          \\
+                                                                     						   				  &  MAX   & 51.9  $\pm$ 0.1          & 97.4   $\pm$ 0.0         & 76.6   $\pm$ 0.4         & 85.1   $\pm$ 0.5         & 65.4  $\pm$ 0.3           & \underline{\textbf{49.5}}  $\pm$ 1.0  \\
+                                                                     						   				  &  OOD   & 51.9  $\pm$ 0.2          & 97.5   $\pm$ 0.0        & 75.8    $\pm$ 0.2         & 84.9  $\pm$ 0.7          & 65.3 $\pm$ 0.1           & 48.4   $\pm$ 0.9         \\
+        \hline
+        \multirow{3}{5em}{HMOE-ND}                                                  &  MIX    & 51.6  $\pm$ 0.0          & 97.5    $\pm$ 0.1        & 76.6   $\pm$ 0.2         & 84.5   $\pm$ 0.5         & 65.5  $\pm$ 0.3          & 48.4    $\pm$ 1.4        \\
+                                                                     					                      &  MAX  & 51.7   $\pm$ 0.1         & 97.4    $\pm$ 0.0       & 76.8    $\pm$ 0.2         & 86.6    $\pm$ 0.6        & 65.5  $\pm$ 0.3          & 45.0     $\pm$ 1.7       \\
+                                                                     						                  &  OOD  & 51.7   $\pm$ 0.1         & 97.5    $\pm$ 0.0       & 76.7    $\pm$ 0.5         & \underline{\textbf{87.0}}  $\pm$ 0.2   & 65.6     $\pm$ 0.1       & 47.1    $\pm$ 1.1      \\
+        \hline
+        \end{tabular}
+        \caption{Domain generalization results on DomainBed}
+        \label{tab:res_domainbed}
+\end{table*}
+
+For Colored and Rotated MNIST, all algorithms exhibit similar performance, except the impressive results of ARM.  HMOE achieves SOTA results on PACS and TerraIncognita, which well demonstrates its effectiveness. However, ERM outperforms HMOE and most DG algorithms for VLCS and OfficeHome. VLCS contains real camera photos, and its domain shift is mainly caused by changes in scene and perspective. We find that the visual differences between different domains of VLCS are subtle. In this case, forcing to reduce or model domain discrepancy may cause or aggravate overfitting. For OfficeHome, this is also the case. Interestingly, HMOE-DL is inferior to HMOE-DN/ND in most cases, which implies that HMOE works better using its own learned domain information than using given domain labels. We find that latent domains discovered by HMOE are more human-intuitive than original domain labels (\cref{sec:domain_discovery}). 
+\setlength{\intextsep}{2pt}
+\setlength{\columnsep}{0.12pt}
+\begin{wrapfigure}{R}{0.26\textwidth}
+	\centering
+	\setlength{\abovecaptionskip}{0em}
+	\includegraphics[width=0.26\textwidth]{figures/HMOE_DL_Ld}
+	\caption{Avg $\mathcal{L}_d$ per dataset}
+	\label{fig:hmoe_dl_ld}
+\end{wrapfigure}
+
+\cref{fig:hmoe_dl_ld} shows the supervised loss on domains of HMOE-DL $\mathcal{L}_d$ \wrt iterations, which fails to decrease quickly for OfficeHome and VLCS. This implies that the information of domain labels is not well absorbed and seems to be incompatible with HMOE. 
+
+HMOE-DN / ND are basically tied in terms of performance. For three inference modes, MAX and OOD are competitive with MIX in most cases and can be used to sacrifice a little accuracy for efficiency in practice because MAX and OOD are more computationally efficient without computing all experts like MIX.
+
+\subsection{Latent Domain Discovery}
+\label{sec:domain_discovery}
+
+We use t-SNE \cite{vandermaatenVisualizingDataUsing2008} to visualize the output of the D2V encoder, as shown in \cref{fig:t-SNE}. We can see that HMOE effectively partitions the mixed data into a number of clusters, each centered around an embedding vector. As expected, the output of the D2V encoder converges to embedding vectors. For PACS (\cref{fig:pacs_cluster}), the training domains are well separated. Some cartoon images look quite artistic and are classified as art. In addition, test photo samples are projected into the art cluster, suggesting that the D2V encoder should capture some semantics about latent domains since photo is closest to art. If we increases the number of embedding vectors $K$ to 5, cartoon and sketch clusters are split into two sub-clusters, as shown in \cref{fig:pacs_cluster_ND}. For TerraIncognita (\cref{fig:terra_cluster}), the dots of the same color are largely clustered together. The training domains are to some extent separated, although L38 and L43 are partially mixed. The test domain L46 seems to be more similar to L100. For OfficeHome (\cref{fig:office_cluster}), the training domains are mixed within each cluster, indicating a conflict between domain labels and inferred domains. This also explains why $\mathcal{L}_d$ cannot be significantly reduced for OfficeHome in \cref{fig:hmoe_dl_ld}.
+
+To intuitively understand how HMOE distinguishes between domains, we visualize some samples to compare domain labels and HMOE's clusters, as shown in \cref{fig:cluster_imgs}. HMOE seems to partition TerraIncognita based on illumination and OfficeHome based on background complexity, which more matches human intuition than domain labels.
+
+After the above analysis, we conclude that the success of HMOE, \eg, SOTA on PACS and TerraIncognita, can be attributed to its ability to self-learn more reasonable and informative domain knowledge and use it efficiently.
+
+\begin{figure*}
+	\centering
+	\begin{subfigure}{0.24\linewidth}
+		\includegraphics[width=\textwidth]{figures/PACS_Cluster}
+		\caption{PACS-DN}
+		\label{fig:pacs_cluster}
+	\end{subfigure}
+    %
+    \begin{subfigure}{0.24\linewidth}
+		\includegraphics[width=\textwidth]{figures/PACS_Cluster_ND}
+		\caption{PACS-ND ($K=5$)}
+		\label{fig:pacs_cluster_ND}
+	\end{subfigure}
+    %
+    \begin{subfigure}{0.24\linewidth}
+		\includegraphics[width=\textwidth]{figures/Terra_Cluster}
+		\caption{TerraIncognita-DN}
+		\label{fig:terra_cluster}
+	\end{subfigure}
+    %
+    \begin{subfigure}{0.24\linewidth}
+		\includegraphics[width=\textwidth]{figures/Office_Real_Cluster}
+		\caption{OfficeHome-DN}
+		\label{fig:office_cluster}
+	\end{subfigure}
+	\caption{The t-SNE visualization of the output of the D2V encoder. The suffixes in captions (DN and ND) represent HMOE-DN / ND, red squares are embedding vectors, black triangles are 20 samples randomly drawn from the test domain, and other dots are training domains. The silhouette coefficients are 0.73, 0.72, 0.54 and 0.63 for \cref{fig:pacs_cluster,fig:pacs_cluster_ND,fig:terra_cluster,fig:office_cluster}, respectively.}
+	\label{fig:t-SNE}
+\end{figure*}
+
+\begin{figure}[H]
+	\centering
+    \begin{subfigure}{0.495\linewidth}
+		\includegraphics[width=\textwidth]{figures/Terra_Domains}
+		\caption{TerraIncognita-DN}
+		\label{fig:terra_domains}
+	\end{subfigure}
+    %
+	\begin{subfigure}{0.495\linewidth}
+		\includegraphics[width=\textwidth]{figures/Office_Real_Domains}
+		\caption{OfficeHome-DN}
+		\label{fig:office_domains}
+	\end{subfigure}
+    
+	\caption{Compare domain labels and HMOE's clusters}
+	\label{fig:cluster_imgs}
+\end{figure}
+
+\subsection{Ablation Study}
+
+In this section, we conduct an ablation study to analyze the contribution of each component of HMOE. The results are shown in \cref{tab:ablation}, which reports the average accuracy of three inference modes. We employ the silhouette coefficient (SC) to quantitatively evaluate the HMOE's clustering based on both the compactness and separation of clusters. SC ranges from -1 (poor) to 1 (good). We use gate values to identify clusters and the output of the D2V encoder to measure the distance between them.
+\vspace{1em}
+\begin{table}[htbp]
+	\centering
+	\small
+	\setlength\tabcolsep{2.5pt}
+	\begin{tabular}{ccccccccc}
+		\hline
+		Name & $\mathcal{L}_{en}$ & $\mathcal{L}_{kl}$ & $\mathcal{L}_{ad}$ & VLCS   & PACS   & Office   & TerraInc & Avg. SC \\
+		\hline
+		H1   & -           &  -          &  -           & 76.1  & 83.2  & 64.2  & 46.8  &     0.37   \\
+		H2   & -           &  -          &  \checkmark  & \textbf{76.8}  & 84.2  & 64.7  & 47.5  &     0.27   \\
+		H3   & \checkmark  &  -          &  -           & 76.3  & 81.8  & 63.7  & 43.4  &   Collapse \\
+		H4   & \checkmark  &  -          &  \checkmark  & 75.9  & 82.1  & 62.2  & 44.1  &   Collapse \\
+		H5   & \checkmark  &  \checkmark &  -           & 76.0  & 84.0  & 64.2  & 47.0  &   0.65     \\
+		H6   & \checkmark  &  \checkmark & \checkmark   & 76.4  & \textbf{84.9}  & \textbf{65.4}  & \textbf{48.9}  &   0.60     \\
+		\hline
+	\end{tabular}
+	\caption{Ablation study for HMOE-DN (avg. accuracy of MIX, MAX and OOD is reported, \checkmark means the corresponding loss is used, and SC denotes the silhouette coefficient.)}
+	\label{tab:ablation}
+\end{table}
+
+\vspace{0.5em}
+
+\noindent \textbf{Top-1 routing $\mathcal{L}_{en}$ and expert load balancing $\mathcal{L}_{kl}$}
+
+\vspace{0.2em}
+\noindent \cref{tab:ablation} shows that the joint use of $\mathcal{L}_{en}$ and $\mathcal{L}_{kl}$ leads to better clustering with greater SC and promotes latent domain discovery. Without them, HMOE divides the data through MoE's intrinsic soft partitioning. H6 outperforms H2 in most cases, which could indicate that better clustering helps improve the DG performance. However, H1 and H5 have comparable performance, probably due to the absence of $\mathcal{L}_{ad}$. We find that $\mathcal{L}_{en}$ without $\mathcal{L}_{kl}$ suffers from the learning collapse problem, \ie, some embedding vectors collapse together and the D2V encoder outputs similar values. An example is shown  \cref{fig:pacs_8_embs_losses}. This shows the importance of $\mathcal{L}_{kl}$.
+
+\vspace{0.6em}
+\noindent \textbf{Class-adversarial training} \quad $\mathcal{L}_{ad}$ helps improve accuracy in most cases, verifying the necessity of removing class-specific information from the D2V encoder. H2 and H6 have smaller SC than H1 and H5, respectively, which is logical as class information can still be used by H1 and H5 for clustering, but is somewhat removed for H2 and H6 via $\mathcal{L}_{ad}$.
+
+\subsection{More Empirical Analysis}
+\begin{description}[style=unboxed,leftmargin=0cm]
+\item[More embedding vectors ]
+We further increase $K$ to 8 and find that HMOE also suffers from the learning collapse problem, as shown in \cref{fig:pacs_8_embs_losses}. When embedding vectors are much more than needed, HMOE has difficulties in how to correctly assign the data to different experts.
+
+\item[Train HMOE using OOD ] 
+
+As mentioned earlier, hypernetworks $f_h$ associate experts with vectors, enabling the exploration of experts' similarities in a low-dimensional vector space and facilitating latent domain discovery. To verify this, we use OOD (\ie, $f_h$ takes the D2V encoder $h_v$ as input) to train HMOE, which means that each input can have its own expert, instead of selecting from a few given experts. This involves minimizing the following loss:
+\begin{equation}
+	\mathcal{L}_{ood} = \mathbb{E}_{(x, y) \sim \mathcal{D}_{tr}} \left[ \ell_{ce} \big( f_c \big( h_z(x) ; f_h(h_v(x)) \big), y \big) \right]
+\end{equation}
+After training, the D2V encoder is also able to distinguish between different domains, as shown in \cref{fig:ood_clusters}. This nicely demonstrates the role of hypernetworks in learning and capturing semantic similarities across domains.
+\begin{figure}[H]
+	\begin{minipage}[htbp]{0.48\linewidth}
+		\centering
+		\includegraphics[scale=0.52]{figures/PACS_Cluster_8_Embs}
+		\caption{Learning collapse for PACS with $K=8$}
+		\label{fig:pacs_8_embs_losses}
+	\end{minipage}
+	\hspace{0.4em}
+	\begin{minipage}[htbp]{0.48\linewidth}
+		\centering
+		\includegraphics[scale=0.52]{figures/OOD_PACS}
+		\caption{Train HMOE using OOD for PACS}
+		\label{fig:ood_clusters}
+	\end{minipage}
+\end{figure}
+\vspace{-0.3em}
+
+\item[Use Swin Transformer as featurizer ] \cite{sivaprasadReappraisingDomainGeneralization2021,liSparseFusionMixtureofExperts2022} investigate the impact of the backbone architecture (\ie, the featurizer for HMOE) on DG, and \cite{liSparseFusionMixtureofExperts2022} found that the transformer-based backbone outperforms the CNN-based counterpart. Motivated by this, we replace ResNet-50 with Swin Transformer \cite{liuSwinTransformerHierarchical2021} (the pretrained small version in PyTorch and its output size is 768) as the featurizer of HMOE-DN. The results are shown in \cref{tab:swin}, where ERM just fine-tunes Swin Transformer and we report the MIX mode of HMOE-DN. \cref{tab:swin} is clearly superior to \cref{tab:res_domainbed}. HMOE-DN outperforms ERM on PACS and TerraIncognita and they are comparable on the other two datasets.
+
+\vspace{0.8em}
+\begin{table}[htbp]
+	\centering
+	\small
+	\setlength\tabcolsep{2.5pt}
+	\begin{tabular}{ccccc}
+		\hline
+        & VLCS   & PACS   & OfficeHome   & TerraIncognita \\
+		\hline
+		ERM       \cite{vapnikNatureStatisticalLearning1999}      & 79.8 & 86.9 & 76.0 & 54.1                    \\
+		\hline
+																			      HMOE-DN  &  79.6 & 87.6 & 76.1 & 55.3                  \\
+		\hline
+	\end{tabular}
+	\caption{Use Swin Transformer as featurizer of HMOE-DN}
+	\label{tab:swin}
+\end{table}
+
+\end{description}
+
+\section{Conclusion}
+\label{sec:conclusion}
+This paper presents a novel DG method, HMOE, which does not require domain labels, enables latent domain discovery, and provides excellent interpretability. HMOE uses the framework of Mixture of Experts (MoE) to solve the DG problem and employs hypernetworks to generate the weights of experts. Compared to other DG methods requiring domain labels, HMOE shows competitive performance and achieves SOTA results on the PACS and TerraIncognita datasets. It is worth mentioning that the discovery and utilization of domain information are jointly undertaken for HMOE, rather than in stages like other related work.
+
+However, it also remains unclear how to effectively determine an appropriate number of experts or embedding vectors to fully explore domain information while avoiding the learning collapse. A promising solution that we will explore in future work is to use tree-structured hierarchical MoE to discover hierarchical domain knowledge, where each level contains only a number of experts but the number of multi-level inferred domains grows exponentially. 
+
+Finally, HMOE is versatile and scalable, and it should also be applicable to a wide range of problems beyond the scope of DG that are troubled by heterogeneous patterns.
+
+\clearpage
+%%%%%%%%% REFERENCES
+{\small
+	\bibliographystyle{ieee_fullname}
+	\bibliography{references}
+}
+
+\clearpage
+\input{suppl}
+
+\end{document}

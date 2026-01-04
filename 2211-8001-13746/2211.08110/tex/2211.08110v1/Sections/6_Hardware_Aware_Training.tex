@@ -1,0 +1,137 @@
+\section{Latency-Aware Multi-Stage Training Strategy}\label{sec:vit_training}
+Our strategy is as follows: (1) We propose latency-sparsity loss to take into account the latency characteristics of the hardware side during the training process.
+% Meanwhile, too many selectors may lead to significant performance overhead.
+(2) We design a block-to-stage training pipeline to learn the number of token selectors to insert in the backbone ViT, their location and pruning rates.
+Please note that (i) the block-to-stage pipeline is based on token pruning, and 8-bit quantization on weight and activation will lead to 2$\times$$\sim$2.4$\times$ speedup without accuracy drops; and (ii) our training strategy uses finetuning for each selector, and the training effort of our pipeline is equivalent to the effort of training-from-scratch of the backbone ViT.
+
+%explore the ViT accelerator design space.
+
+\noindent\textbf{Relationship between Latency and Keep Ratio.}
+In order to bridge the inference of ViT model to the actual latency bound of hardware deployment, we build the latency-sparsity table for the target FPGA as Table~\ref{tab:speed_ratio}.
+% This table can be built on real hardware (not specific to our FPGA implementation) or retrieved through a performance and resource model for the target hardware. 
+In this paper, we measure the actual numbers from our FPGA implementation.
+Each time we only enter the $Keep Ratio$ tokens into one ViT block with a selector and test the corresponding latency.
+
+
+\begin{table}[htb]
+\centering
+% \small
+\tabcolsep 4pt
+\vspace{-0.15in}
+\caption{Tested latency of one DeiT block with different token keeping ratios on ZCU102 FPGA.}
+\label{tab:speed_ratio}
+\vspace{-0.1in}
+% \resizebox{1.\columnwidth}{!}{
+\begin{tabular}{c|c|cccccc}
+\toprule
+\multicolumn{2}{c|}{\bf Keep Ratio}     & 1.0        & 0.9 & 0.8 & 0.7 & 0.6 & 0.5 \\
+\midrule
+\bf Latency & DeiT-T   & 1.034 & 0.945 & 0.881 & 0.764 & 0.702 & 0.636 \\
+ (ms) & DeiT-S   & 3.161 & 2.837 & 2.565 & 2.255 & 1.973 & 1.682 \\
+\bottomrule
+\end{tabular}
+\vspace{-5pt}
+\end{table}
+
+\noindent\textbf{Latency-Sparsity Loss.} $\xi_{ratio}$ is built as follows:
+% \setlength{\belowdisplayskip}{0pt} \setlength{\belowdisplayshortskip}{0pt}
+% \setlength{\abovedisplayskip}{0pt} \setlength{\abovedisplayshortskip}{0pt}
+\begin{equation}
+{\mathrm{Block}(\rho_{i})}=latency\_sparsity\_table(\rho_{i})
+    \label{eq:single_block}
+\end{equation}
+\begin{equation}
+    \sum_{i=1}^{L}{\mathrm Block}_{i}(\rho_{i}) \leq LatencyLimit
+    \label{eq:hardware_cost}
+\end{equation}
+\begin{equation}
+    \xi_{ratio}=\sum_{i=1}^{L}(1-\rho _{i}-\frac{1}{B}\sum_{b=1}^{B}\sum_{j=1}^{N}D_{j}^{i,b})^{2}
+    \label{eq:hd_loss}
+\end{equation}
+where Eq.~\eqref{eq:single_block} shows the look-up-table mapping  to find the latency of one $\mathrm{Block}$ under the corresponding ratio $\rho_i$ in Table~\ref{tab:speed_ratio}.
+Eq.~\eqref{eq:hardware_cost} guarantees that the inference speed of the whole model satisfies the given hardware latency requirement,
+with $i$ being the block index, %$I_{i}$ is a binary variable indicating whether a selector is inserted in $Block_{i}$. 
+$\rho_{i}$ being the corresponding pruning rate. % such that ${N}' {=} \rho_{i}{\cdot} N$ is the number of remaining tokens.
+Through Eq.~\eqref{eq:single_block} and \eqref{eq:hardware_cost}, we obtain appropriate $\rho_{i}$ and feed it to the latency-sparsity loss (\ref{eq:hd_loss}), where $B$ is the training batch size, and $M$ (Eq.~\eqref{eq:gumbel}) is the token keep decision.
+In order to achieve per-image adaptive pruning, we set the average pruning rate of all images in one batch as the convergence target of the Eq.~\eqref{eq:hd_loss}.
+% Experiments show that the pruning rate difference of images in the same block will not exceed~4.2\%.
+
+\noindent\textbf{Training Objective.} It includes the standard cross-entropy loss $\xi_{cls}$, distillation loss $\xi_{distill}$, and latency-sparsity loss $\xi_{ratio}$.
+The former two are the same as the loss strategy used in DeiT.
+\begin{equation}
+\xi = \xi_{cls}+\lambda _{distill}\xi_{distill}+\lambda _{ratio}\xi_{ratio}
+    \label{eq:total_loss}
+\end{equation}
+where we set $\lambda_{distill}{=}0.5$, $\lambda_{ratio}{=}2$ in all our experiments.
+
+
+\begin{algorithm}[htb]
+\caption{Latency-Aware Multi-Stage Training with Image-Adaptive Token Pruning}
+\label{alg:progressive_training}
+% \SetAlgoLined
+\SetKwInOut{Input}{Input}
+\SetKwInOut{Output}{Output}
+
+\small
+    \Input{ViT blocks $\{\mathrm{Block}_i\}^L_{i=1}$; \\
+    \quad Accuracy drop constraint $a_\mathrm{drop}$; \\
+    \quad Initial pruning rate $\rho_\mathrm{init}$; \\
+    \quad Target latency $LatencyLimit$. \\}
+    
+    \Output{Token selectors with pruning rates $\rho_{s_1},...,\rho_{s_k}$. }
+    \BlankLine
+    
+    \tcp{\scriptsize Step1: Insert a token selector between each two adjacent blocks and adjust the pruning rate $\rho_i$.}
+    \ForEach{$i \in [L, L-1, \dots, 4]$}{
+    $\rho_{i} = \rho_\mathrm{init}$\;
+    $a,t \leftarrow$ Evaluate$(\{\mathrm{Block}_j(\rho_j)\}^L_{j=1})$\;
+    \texttt{\scriptsize // $a$ and $t$ represent accuracy drop and latency of the whole model.} \\
+    \While{$a < a_\mathrm{drop}$}{
+    \eIf{$t<LatencyLimit$}{ Return the finalized token pruned ViT\;}
+    {Decrease $t_i$\;
+    $\rho_i$ = latency\_sparsity\_table($t_i$)\;
+    $a,t \leftarrow$ Evaluate$(\{\mathrm{Block}_j(\rho_j)\}^L_{j=1})$;
+    }}}
+    \BlankLine
+    
+    \tcp{\scriptsize Step2: Combine sequential selectors with similar pruning rates as one stage, keep the first selector and retrain ViT. }
+    
+    $\rho_{s_1},...,\rho_{s_k} \leftarrow$ Combine $\rho_{1},...,\rho_{L}$;
+    \BlankLine
+    
+%    \texttt{// Step3: Retrain ViT with the multi-stage selectors. }\\
+    Retrain ViT$[\mathrm{Block}_1(\rho_1),..,\mathrm{Block}_{i}(\rho_{s_1}),..,\mathrm{Block}_L(\rho_{s_k})]$\;
+    \eIf{$t<LatencyLimit$}
+    {Return the finalized token pruned ViT\;}
+    {Increase $a_{drop}$ or $LatencyLimit$\;
+    Initialize the model and selectors from the end of the last Step1\;
+    Go to the Step1 and repeat the training process.
+    }
+ 
+\end{algorithm}
+\setlength{\textfloatsep}{8pt}
+
+\begin{figure}[tb]
+\centering
+\vspace{-0.15in}
+\includegraphics[width=0.9\columnwidth]{Figs/per_layer.pdf}
+\vspace{-0.15in}
+\caption{Accuracy and token sparsity distribution after block-to-stage training. The insertion before the 2nd and 3rd blocks shows the pruning difficulty.}
+\label{fig:model_location}
+\vspace{-0.1cm}
+\end{figure}
+
+\noindent\textbf{Block-to-Stage Training.}
+% It is challenging to decide the number and the location of selectors, and the correlative pruning rate.
+Algorithm~\ref{alg:progressive_training} presents our training strategy to find the optimal accuracy-pruning rate trade-offs and proper locations for token selectors, 
+based on the token redundancy (Fig.~\ref{fig:token}).
+In ViTs, tokens can be more effectively encoded in later blocks.
+Hence, we adopt progressive training on inserting the token selector from later blocks to front ones.
+Each time we insert a token selector, we train the current selector and fine tune the other parts by decreasing the latency of the current block until accuracy drops noticeably ($>0.5\%$).
+% We record the accuracy of the whole model and the pruning rate of the current selector at that insertion step.
+Since token pruning in the front 3 blocks leads to more severe accuracy drops, we stop the selector insertion when reaching the fourth block.
+If the pruned model has satisfied the target latency, we end the training and finalize the pruned model; otherwise, continue the training and repeat the insertion. After all the insertions, if the adjacent selectors have a similar pruning rate (difference$<8.5\%$), we combine them as one pruning stage and solely keep the first selector of that stage, shown in Fig.~\ref{fig:model_location}.
+Finally, if the final latency of the whole model is lower than the target latency, we return the pruned model; otherwise, we will relax the accuracy or latency constraints and repeat the training.
+
+
+

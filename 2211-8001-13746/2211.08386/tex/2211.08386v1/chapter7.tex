@@ -1,0 +1,465 @@
+\chapter{Generating Succinct Answers from Long-form Answers}
+
+A LFQA system should be an ‘empathetic machine’: the long-form answer should not only provide relevant and factual information, but also be succinct. While no prior work has been done on this direction, in this Chapter, we take the initial step by leveraging the generated long-form answers as an context to extract succinct short-phrase answers for extractive open-domain question answering task.
+
+Specifically, we propose a framework named CGAP~\cite{su2022context}, which first generates a long-form answer leveraging the amount of parameterized knowledge stored in pre-trained language models, and then extract the short-span answer from the long-form answers without access to any external knowledge sources. Experimental results on three QA benchmarks show that our method significantly outperforms previous \textit{closed-book} QA methods, and is on par with traditional \textit{open-book} methods which extracts the answer from the retrieved documents.
+
+% \textit{Closed-book} question answering (QA) requires a model to directly answer an open-domain question without access to any external knowledge. Prior work on \textit{closed-book} QA either directly finetunes or prompts a pretrained language model (LM) to leverage the stored knowledge. However, they do not fully exploit the parameterized knowledge. To address this issue, we propose a two-stage, \textit{closed-book} QA framework which employs a \textit{coarse-to-fine} approach to extract relevant knowledge and answer a question. Our approach first generates a related context for a given question by prompting a pretrained LM. We then prompt the same LM for answer prediction using the generated context and the question. Additionally, to eliminate failure caused by context uncertainty, we marginalize over generated contexts. Experimental results on three QA benchmarks show that our method significantly outperforms previous \textit{closed-book} QA methods (e.g. exact matching 68.6\% vs. 55.3\%), and is on par with \textit{open-book} methods that exploit external knowledge sources (e.g. 68.6\% vs. 68.0\%). Our method is able to better exploit the stored knowledge in pretrained LMs without adding extra learnable parameters or needing finetuning, and paves the way for hybrid models that integrate pretrained LMs with external knowledge.
+
+
+% \section{Background}
+% \label{sec:introduction}
+% Open-domain question answering (ODQA) has been extensively studied in recent years. Significant progress has been made by the \textit{open-book} QA models~\cite{chen2017reading, rag, guu2020realm, izacard2021leveraging, lazaridou2022internet} that explicitly exploit external knowledge corpus via dense retrieval techniques like DPR~\cite{karpukhin2020dense}. However, learning a good retriever takes substantial resources, like large number of labeled domain-specific pairs of question and contexts~\cite{karpukhin2020dense}, or intensive computation~\cite{lee2019latent}. Also it is more challenging to retrieve relevant knowledge when the size of the external database increases~\cite{reimers-gurevych-2021-curse}. 
+
+% Another class of models, known as \textit{closed-book} question answering (CBQA), were recently proposed ~\cite{roberts2020much}. CBQA tries to directly answer the open-domain questions without access to any external knowledge sources, and leverages the parametric knowledge stored in large pretrained language models (LMs)~\cite{raffel2020exploring, brown2020language, ye2020studying}. However, the \textit{closed-book} methods are not competitive with \textit{open-book} models in term of accuracy.
+
+\begin{figure}[!t]
+ \centering
+ \includegraphics[width=0.6\textwidth]{figures/chapter-CGAP/EMNLP2022-example.png}
+  \caption{An example illustrating our two-stage, \textbf{CGAP} framework. CGAP generates more accurate answer (e.g. \textit{Richard Marx}) compared to standard few-shot prompting (e.g. \textit{Ross Bagdasarian}).}
+  \label{fig:example}
+\end{figure}
+
+
+\section{Methodology}
+\label{sec:cgap_methodology}
+% \subsection{Main Idea}
+% While it has been shown that large pretrained LMs store abundant knowledge~\cite{petroni2019language,roberts2020much}, we hypothesize the accuracy gaps are largely because the way of exploiting the parameterized knowledge are not sophisticated enough. Prior work on CBQA either finetunes pretrained LM models on entire QA datasets~\cite{roberts2020much, ye2020studying}, or they directly prompt those models using several few-shot QA pairs~\cite{brown2020language, radford2019language}. On the contrary, \textit{open-book} models use a two-stage pipeline. They first retrieve relevant contexts from external corpus, then they extract the answer based on the retrieved contexts.
+
+% Therefore, to better exploit the parameterized knowledge in pretrained LMs and bridge the huge accuracy gaps between the \textit{closed-book} and \textit{open-book} methods, we propose a \textit{coarse-to-fine}, two-stage method for CBQA task. The main idea is to leverage generated contexts as the intermediate bridge between the huge amount of parameterized knowledge and answer. To the best of our knowledge, no previous investigation has been conducted on generating context from large pretrained LMs for CBQA and leveraging them to predict answer.
+
+Our proposed framework \textbf{CGAP} consists of two stages. It first performs \textbf{C}ontext \textbf{G}eneration relevant to a given question by prompting a pretrained LM. Then it prompts the same LM for \textbf{A}nswer \textbf{P}rediction using the generated context and the question.  In order to mitigate failures caused by variability in the generated context, we generate multiple contexts, predicting the final answer by majority voting. Figure~\ref{fig:example} shows that CGAP generates 3 contexts and 3 predicted answers at the two stages respectively, and choose the most voted answer as the final answer. Note that we do not finetune the large pretrained LMs for context generation or answer prediction. This facilitates our approach to take advantage of gigantic LMs such as GPT-3~\cite{brown2020language}, PALM~\cite{chowdhery2022palm}  or Megatron-Turing NLG 530B~\cite{smith2022using}, which are only available through APIs.
+
+Our proposed \textbf{C}ontext \textbf{G}eration and \textbf{A}nswer \textbf{P}rediction, called \textbf{CGAP}, framework is illustrated in Figure~\ref{fig:framework}. CGAP consists of two stages. First, it generates relevant context to a given question by prompting a large pretrained LM. 
+In the second stage, it predicts an answer using the generated context and the question by prompting the same LM. 
+To accurately predict the answer, we generate multiple contexts. We run each of the two stages multiple times in parallel for the same question, generating different contexts for each, and use majority voting to select the final answer.
+
+% Large LMs such as GPT-3~\cite{brown2020language}, Megatron-Turing-530B~\cite{smith2022using}, and PALM~\cite{chowdhery2022palm} have shown promising results in few-shot learning. They have also been shown as a good knowledge source~\cite{roberts2020much, liu2022multi}. However, finetuning them on downstream applications is challenging due to smaller datasets. Moreover, they are only available through API. In our \textbf{CGAP} framework, we therefore propose a modified few-shot prompting and demonstrate significant improvement over exiting finetuing or few-shot accuracies. 
+
+% We denote the input question as $Q$, and the corresponding generated context as $C_{gen}$. We use  $C_{gen}^i$ to represent the $i$-th generated context samples that we marginalize on $(i=1.,,,k)$. The database of samples is denoted as $D$, and each data sample in $D$ is denoted by $d_i$ where $i=1,...N$, which consists N triples $<Q_i, C_i, A_i>$ , a question $Q_i$, a golden context passage $C_i$, and corresponding answer $A_i$.
+
+Formally, for our task we have a question $Q$ to be answered, and a support repository $\mathcal{D} = \{(c_1, q_1, a_1), \ldots, (c_n, q_n, a_n)\}$ that consists of tuples of question $q_i$ and answer $a_i$ pairs with mapping to the context $c_i$.
+In our experiments, we use the training sets of the corresponding datasets as $\mathcal{D}$.
+
+As shown in Figure~\ref{fig:framework}, in the first stage, given question $Q$, we select $m$ the context generation prompts $S = \{(q_1, c_1), \ldots, (q_m, c_m)\}$ from the support repository $\mathcal{D}$.
+We then use $S$ with $Q$ to prompt pretrained LM to generate $k$ contexts, which are denoted by $ C_{gen} = \{c^1_{gen}, c^2_{gen}, \ldots, c^k_{gen}\}$.
+In the second stage, we select $m$ answer prediction prompts $S'=\{(q_1, a_1, c_1), \ldots, (q_m, a_m, c_m)\}$ from $\mathcal{D}$ and then we prompt the same LM using $C_{gen}$, $Q$ and $S'$.
+The LM predicts a set of $k$ answers $A_p = \{a^1_p, a^2_p,..., a^k_p\}$ each corresponding to the $k$ contexts in $C_{gen}$. The final answer $A$ is selected by majority voting on $A_p$.
+
+\begin{figure*}[!ht]
+ \centering
+ \includegraphics[width=0.94\linewidth]{figures/chapter-CGAP/EMNLP2022-framework.png}
+  \caption{Overview architecture of our \textbf{CGAP} framework. It first does \textbf{C}ontext \textbf{G}eneration by prompting large pretrained LMs, then it further prompts the LMs for \textbf{A}nswer \textbf{P}rediction by feeding the generated context to the LM models alongside the question. $k$ contexts are generated and the final answer $A$ is chosen by majority voting. (\textit{If computation capability allows, it could prompt multiple ($k$) LMs in parallel at both two stages to speed up.}) }
+  \label{fig:framework}
+\end{figure*}
+
+
+\subsection{Context Generation}
+\label{sec:context_generation}
+
+We would like to leverage the parameterized knowledge stored in large pretrained LMs to facilitate the answer generation process.
+We first prompt the LM with few-shot examples to generate contexts that are relevant to the given question.
+
+
+%For few-shot examples, we use the training dataset, $\mathcal{D}$ that consists of tuples of question ($\mathbf{Q}$), answer ($\mathbf{A}$), and context ($\mathbf{C}$). We select $m$ such tuples and denote them by $S=\{(Q_1, C_1), \ldots, (Q_m, C_m)\}$. %where $S_j = (Q_j, C_j)$. 
+
+
+%First we select $m$ samples $S=\{S_1, S_2,..., S_m\}$ from a pool of database (i.e., the corresponding training dataset) for question $Q$, then we construct the prompts with the selected samples and prompt the LM for $C_{gen} = \{C^1_{gen}, C^2_{gen}, ..., C^k_{gen}\}$.
+% \begin{equation}
+%     C_{gen}^i = LM^i(Prompt(<S_1,...S_m>, Q))
+% \end{equation}
+
+% where each sample $S=<Q_i, C_i>$ contains a question $Q_i$ and a corresponding golden context passage $C_i$. 
+
+\textbf{Sample Selection} Selecting appropriate samples as in-context prompts is the key to generate high-quality context relevant to the question. 
+Previous work has shown that leveraging relevant samples helps the LM to generate contextually relevant and factually correct context~\cite{liu2021pre,liu2022multi}. We therefore use a similarity-based retriever to search relevant samples from the corresponding training dataset. 
+Prior work has shown that DPR~\cite{karpukhin2020dense} achieves good performance in selecting the most relevant context for the question in ~\textit{open-book} models~\cite{izacard2021leveraging}. We therefore use DPR in our framework. In our DPR setup, we represent the question and the samples in the training dataset as $768$-dimensional dense vector representations, computed via the BERT-based bi-encoder networks. We rank the documents according to their similarity score, calculated as:
+\begin{equation}
+        Score(Q, (q_j, c_j)) = \text{BERT}(Q)^T \cdot \text{BERT}(q_j; c_j)
+\label{eqa:retriever_score}
+\end{equation}
+
+where $;$ denotes concatenation of the tokens of the question $q_j$ and the context $c_j$. 
+Finally, we get $S=\{(q_1, c_1), \ldots, (q_m, c_m)\}$ which are the top-m retrieved samples for question $Q$.
+
+% feeding the pretrained LM with suitable and intuitive prompts can trigger it to generate relevant content
+\textbf{Prompts Construction} Given the question $Q$ and the set of question-context pair samples $S$ selected, we use few-shot prompting to condition pretrained LMs on the samples. 
+We use similar few-shot prompting technique for \textit{closed-book} QA as in ~\cite{brown2020language}, that considers multiple <question, answer> pairs. The template we used to construct prompts is: \texttt{Q:} ... \texttt{A:} .... 
+Thus the constructed prompt $Prompt(Q)$ for a given question $Q$ becomes:
+\begin{align*}
+    Prompt(Q) =& \texttt{Q:} q_m \backslash n \texttt{A:} c_m \backslash n \ldots \\ &\texttt{Q:} q_1 \backslash n \texttt{A:} c_1 \backslash n \texttt{Q:} Q \backslash n
+\end{align*}
+
+We use '$\backslash n$' to separate the question, context and the samples. 
+We investigated the order of samples to optimize the prompt and find that using the retrieved samples in reversed order of similarity yields better accuracies across all datasets. 
+
+We now pass $Prompt(Q)$ through a pretrained LM to generate the context as follows: 
+
+\begin{equation*}
+    c_{gen} = \mathcal{LM}(Prompt(Q))
+\end{equation*}
+
+To generate a set of $k$ contexts, $\{c^1_{gen}, ..., c^k_{gen}\}$, we run this step $k$ times.
+
+\subsection{Answer Prediction}
+\label{sec:ans_pred}
+In the answer prediction stage, we use the generated context $c_{gen}$ from the first stage along with the question $Q$.
+%After we get the generated context for each question from the first stage, we further predict the answer conditioned on the context alongside with the question. 
+Specifically, we prompt the same LM by few-shot examples
+%<Context, Question, Answer> examples 
+selected from the training set, $\mathcal{D}$, together with $c_{gen}$ and $Q$. 
+
+\textbf{Sample Selection} 
+Constrained by the maximum sequence length of the LM, we can feed the LM only a few $(c, q, a)$ samples. 
+Thus, it could be difficult for the LM to learn how to predict the answer for the given question conditioned on the context, unless similar examples have been provided. 
+For example, if we were asking the question \textit{'who is the current director of the us mint?}', the example that answering the question \textit{'who is the fbi director of the united states?'} from the provided context will be more helpful, than the example that is answering \textit{'how many episodes are there in `Dragon Ball Z'?'} from the given context. We therefore use the same criteria for answer prediction as has been used for context generation. 
+We use the same set of samples as selected in the first stage as described in Equation~\ref{eqa:retriever_score} and denote as $S'=\{(q_1, c_1, a_1), \ldots, (q_m, c_m, a_m)\}$. %However, each $S'_i$ is composed of tuples $<Q_i, C_i, A_i>$, where $A_i$ is the corresponding answer for question $Q_i$ and given context $C_i$. 
+%Thus, we use the same similarity based criteria to select the answer prediction prompt samples, i.e., we used the same set of samples selected from the first stage as described in Equation~\ref{eqa:retriever_score}, we denote as $S'=\{S'_1, S'_2,..., S'_m\}$, except that now $S'_m$ is composed of triples of $<Q_m, C_m, A_m>$ where $A_m$ is the corresponding answer for question $Q_m$ given context $C_m$. 
+
+\textbf{Prompt Construction} We are prompting LMs with few-shot examples to predict answer for the question conditioned on the generated context. 
+To equip the LM with this capability, we constructed intuitive prompts for the selected examples and feed them into the LM. 
+Specifically, the template we used to construct answer prediction prompts is: \texttt{C:} ... \texttt{Q:} ... \texttt{A:} ... . 
+Thus, the constructed prompt for a given question Q and the $i$-th generated context $c^i_{gen}$ is:
+\vspace{-5pt}
+
+\begin{align}
+\begin{split}
+    \textrm{Prompt}(c^i_{gen}, Q) =&
+    \texttt{C:} c_m \backslash n 
+    \texttt{Q:} q_m \backslash n
+    \texttt{A:} a_m \backslash n\\
+    & \ldots \\
+    &\texttt{C:} c_1 \backslash n 
+    \texttt{Q:} q_1 \backslash n 
+     \texttt{A:} a_1 \backslash n \\
+    &\texttt{C:} c^i_{gen} \backslash n
+    \texttt{Q:} Q \backslash n 
+    \label{equ:cgen_q}
+\end{split}
+\end{align}
+
+We then feed $Prompt(c^i_{gen}, Q)$ into the pretrained LM to predict the answer:
+\begin{equation}
+    a_p^i = \mathcal{LM}(\textrm{Prompt}(c^i_{gen}, Q)))
+    \label{equ:answer_prediciton}
+\end{equation}
+where we use $a^i_p$ to denote the $i$-th answer predicted by the LM. The $k$ generated contexts in $c_{gen}$ will yield a set of answers $A_p=\{a^1_p, ...,a^k_p\}$.
+
+
+\subsection{Context Marginalization}
+\label{sec:methods_margin}
+The large pretrained LM can generate impressively fluent and relevant context given input, it also has a tendency to generate factually incorrect statements, ranging from subtle inaccuracies to wild hallucinations~\cite{shuster2021retrieval, krishna2021hurdles, su2022read}. 
+Answers conditioned solely on hallucinated or erroneous statements are likely to be incorrect (Equation~\ref{equ:answer_prediciton}). Thus, we would like to remove the variability in the answer due to any particular generated context.
+
+Ideally, we could marginalize over this unknown context by producing an answer for every possible context, weighting each answer by the probability of the context. Here we approximate this by generating a set of contexts, and selecting the final answer based on majority voting. Suppose there are $T$ unique answers $\{A^1_p,...,A^T_p\}$ from the $k$ predicted answer from Equation~
+\ref{equ:answer_prediciton} where $T<=k$, then we select the $J$-th answer that receives the highest number of votes from the $T$ different answers via:
+\begin{equation}
+    % J = \argmax_{j\in \{1,2,...,T\}} \sum^k_{i=1}(\mathbbm{1}(a^i_p = A^j_p))
+    J = \argmax_{j\in \{1,2,...,T\}}\sum^k_{i=1}(\mathbbm{1}(a^i_p = A^j_p))
+    \label{equ:marginalization}
+\end{equation}
+
+as the final answer $A$.  As $k$ gets larger, the final answer $A$ will converge to the answer that would be produced marginalizing over all possible contexts.  We refer to this majority vote over multiple generated contexts as context marginalization.
+
+
+\begin{table*}[!th]
+\centering
+\begin{adjustbox}{width=0.95\textwidth}
+{
+\begin{tabular}{lllccc}
+\specialrule{.08em}{.1em}{.1em} 
+\textbf{Model Type}  & \multicolumn{1}{c}{\textbf{Model}} & \textbf{Method} &\textbf{NQ} & \textbf{TQA} & \textbf{WQ}\\ 
+\hline 
+\multirow{3}{*}{Open-book} & RAG~\cite{lewis2020retrieval} & \textit{Finetuned} & 44.5  & 68.0    & \textbf{45.5}  \\
+                            & Fusion-in-Decoder (large) ~\cite{izacard2021leveraging} & \textit{Finetuned}  & \textbf{51.4}  & 67.6  & -     \\
+                              & $OB_{Google}^{PoE}$~\cite{lazaridou2022internet} & \textit{Few-shot} & 38.4  & - & - \\ 
+                              \hline
+\multirow{5}{*}{Closed-book}  & T5-11B ~\cite{roberts2020much} & \textit{Finetuned} & 32.6             & 42.3     & 37.2         \\
+                              & T5-11B+SSM ~\cite{roberts2020much} & \textit{Finetuned}   & 34.8  & 51.0    & 40.8  \\
+                            & BART-large, pre-finetuned on PAQ ~\cite{lewis2021paq} & \textit{Finetuned} & 32.7  & 33.2  & -  \\
+                            %   & GPT-3-175B (Few-shot, paper) *~\cite{brown2020language}              & 29.9  & 71.2  & 41.5  \\
+                              & LM-530B (API) & \textit{Few-shot}           & 23.0 & 55.3 & 23.6 \\ 
+                              \cdashline{2-6}
+                            % \cline[dashed]{2-6}
+                              & \textbf{CGAP} (ours)   & \textit{Few-shot} & \underline{42.0} & \textbf{\underline{68.6}}  & \underline{41.8} \\ 
+\specialrule{.08em}{.1em}{.1em} \\
+\end{tabular}
+}
+\end{adjustbox}
+\vspace{-10pt}
+\caption{Exact Match (EM) score for \textbf{CGAP} (highest accuracy configurations) in comparison to recent state-of-the-art \textit{open-book} and \textit{closed-book} based systems. Highest score indicated in \textbf{bold}, highest \textit{closed-book} model
+\underline{underlined}.}
+\vspace{-5pt}
+\label{tab:main_results}
+\end{table*}
+
+\section{Experimental Setup}
+
+\subsection{Datasets}
+\label{sec:datasets}
+We evaluated our experiments on three open-domain QA benchmark datasets: Natural Questions (NQ)~\cite{kwiatkowski2019natural}, TriviaQA (TQA)~\cite{joshi2017triviaqa}, and WebQuestions 
+(WQ)~\cite{berant2013semantic}, using the same data splits for train, validation and test as in~\citet{lee2019latent, izacard2021leveraging}.
+
+NQ contains questions from Google search queries; TQA contains a collection of questions from trivia and quiz-league websites, and we use their unfiltered set; while questions of WQ were from Google Suggest API. 
+For NQ and TQA, we use the processed data provided by~\citet{izacard2021leveraging}, in which each question-answer pair is accompanied by a 100-words Wikipedia passage containing the answer. 
+For WQ, we retrieved the corresponding context passage for each question from 2019/08/01 Wikipedia dump, using the DPR-based retriever that is trained jointly on the union of knowledge-intensive training data in KILT benchmark~\cite{petroni2021kilt}.
+
+%WE NEED TO MENTION ABOUT THE PRETRAINED MODELS as well.
+
+\subsection{Baselines}
+\label{sec:baselines}
+We compare our \textbf{CGAP} framework with the following baseline methods for \textit{closed-book} QA.
+
+\textbf{Standard Few-shot Prompting} 
+We use the standard few-shot prompting technique
+similar to GPT-3~\cite{brown2020language} in our evaluation on the \textit{closed-book} QA datasets as described in Section ~\ref{sec:datasets}. We consider this technique as the few-shot baseline in all our experiments. The baseline that is experimented using 530 billion (530B) parameterized LM is refferred as \textbf{LM-530B}.
+%For fair comparison of this technqiue with our method, we experiment the same 530 billion parameterized LM (referred as \textbf{LM-530B}).
+%adopted the standard few-shot prompting on GPT-3 for \textit{closed-book} QA, and evaluated on the same datasets as described in Section ~\ref{sec:datasets}.
+%However, we were unable to reproduce the results reported in their paper when we query GPT-3 via API~\footnote{Results of querying OpenAI GPT-3 API using standard prompting are shown in Appendix~\ref{sec:appendix-gpt3}}. 
+%Thus, we use their standard prompting format and experimented on a 530 billion parameterized LM as our baseline (referred as \textbf{LM-530B}), for fair comparison. 
+%Greedy
+
+% They use beam search with a beam width of 4 and a length penalty of 0.6 for answer prediction. (reffered as \textbf{GPT-3 (Few-shot, paper)})
+% They first randomly draw $K$ (=64) question-answer pairs from the corresponding training set, and use 'Q: ' and 'A: ' respectively as prefix before each question and answer, to form the conditioning prompts.
+
+
+\textbf{LM Fune-tuning}~\citet{roberts2020much} first proposed the \textit{closed-book} QA task for open domain QA, and they directly fine-tuned T5~\cite{raffel2019exploring} using the entire QA pairs in the training data, without access to any external knowledge corpus (referred as \textbf{T5-11B}). They also experimented with using ’Salient Span-Masking’ (SSM) to continue pretraining the T5 checkpoints before fine-tuning for QA (referred as \textbf{T5-11B+SSM}). ~\citet{lewis2021paq} pre-finetuned BART-large~\cite{lewis2020bart} on \textit{Probably Asked Questions} (PAQ), a very large resource of 65M automatically generated QA-pairs, then further finetuned the model on corresponding training data (referred as \textbf{BART-large, pre-finetuned on PAQ}).
+
+% \boldmath
+\textbf{Open-book Few-shot Prompting} ~\citet{lazaridou2022internet} used few-shot prompting for open domain QA task, but they generate the answer via conditioning on retrieved documents from Google Search API. (referred as \textbf{$OB^{PoE}
+_{Google}$})
+% They proposed to do answer ranking via Product-of-Experts(PoE) to combine together all probabilities for the final answer probability. 
+% \unboldmath
+
+\subsection{State-of-the-art Open-book QA Models}
+We compare the state-of-the-art \textit{open-book} QA models with \textbf{CGAP}. \textbf{Fusion-in-Decoder} (FiD)~\cite{izacard2021leveraging} uses DPR~\cite{karpukhin2020dense} to retrieve 100 passages from Wikipedia. Then they encode each passage independently and combine all outputs from the T5 encoder before passing them to the T5 decoder to generate a final answer. \textbf{RAG}~\cite{rag} is an end-to-end retrieval-augmented generation model. 
+% which back-propagates to the retriever’s input encoder, learning to adapt the input embedding to retrieve more relevant results.
+
+% \begin{figure*}[!t]
+% 	\begin{center}
+% 		\includegraphics[width=0.95\textwidth]{figs/ablation-1-new.pdf}
+% 		\caption{Ablation on context generation LM Size. Answer prediction LM size: 357M (\textit{left}), 1.3B(\textit{right}). The colored dash lines represent the standard prompting few-shot baselines.}
+% 		\vspace{-5pt}
+% 		\label{Fig:ablation-CG-357m-1.3b-ans}
+% 	\end{center}
+% \end{figure*}
+
+\begin{figure*}[!t]
+	\begin{center}
+		\includegraphics[width=0.95\textwidth]{figures/chapter-CGAP/ablation-1-test.png}
+		\caption{Ablation on context generation LM Size. The colored dash lines represent the standard prompting few-shot baselines.}
+		\vspace{-5pt}
+		\label{Fig:ablation-CG-357m-1.3b-ans}
+	\end{center}
+\end{figure*}
+\subsection{Implementation Details}
+To test how different model scales affect the performance of our approach, we experiment on a collection of GPT-style LMs, with 357 million (357m),
+1.3 billion (1.3b), and 530 billion (530b)~\cite{smith2022using} parameters, at both context generator and answer prediction stage. 
+We use top-$p$ sampling with a value of 0.9 to generate diversified contexts. However, to handle the deterministic generation (e.g. short answer),
+we use greedy decoding at the answer prediction stage, similar to ~\cite{chowdhery2022palm, wang2022self}.
+
+For the prompt configuration at both stages, we choose 10 samples, constrained by the maximum sequence length of the LMs. We use DPR checkpoint from Huggingface\footnote{\url{https://huggingface.co/facebook/dpr-ctx_encoder-multiset-base}} to select samples from the training set.
+
+\subsection{Evaluation}
+Following the standard evaluation procedures in previous work~\cite{rajpurkar2016squad,lee2019latent, izacard2021leveraging}, we use Exact Match (EM) as our answer accuracy evaluation metric, where each predicted answer is compared to the ground-truth after both are lowercased and stripped of articles, punctuation, and duplicate whitespace.
+
+
+\section{Results and Ablation Studies}
+In this section, we show our main results as well as ablations to further analyze the effectiveness of our approach.
+% ompare our CCAP approach with baselines, and also state-of-the-art \textit{open-book} models for open-domain QA. 
+
+
+\begin{table*}[t]
+\centering
+% \resizebox{.5\textwidth}{!}{
+\begin{adjustbox}{totalheight=0.35\textheight-2\baselineskip,}
+{
+\begin{tabular}{ccclll}
+\specialrule{.08em}{.1em}{.1em} 
+\begin{tabular}[c]{@{}c@{}}\textbf{AP} \\ \textbf{LM Size}\end{tabular} &
+  \begin{tabular}[c]{@{}c@{}}\textbf{CG} \\ \textbf{LM Size}\end{tabular} &
+  \begin{tabular}[c]{@{}c@{}}\textbf{Margin-} \\\textbf{alization} \end{tabular} &
+  \textbf{NQ} &
+  \textbf{TQA} &
+  \textbf{WQ} \\ \hline
+\multirow{6}{*}{357M} & \multirow{2}{*}{357M} & \xmark & 22.9 & 28.5 & 26.2 \\
+                      &  &  \checkmark   & 25.7 \textcolor{mypink2}{\small{(+2.8)}} & 33.4 \textcolor{mypink2} {\small{(+4.9)}} & 29.6 \textcolor{mypink2}{\small{(+3.4)}} \\ \cline{2-6} 
+                      & \multirow{2}{*}{1.3B} & \xmark & 23.1 & 29.7 & 28.3  \\
+                      &  &  \checkmark  & 26.1 \textcolor{mypink2}{\small{(+3.0)}} & 34.8 \textcolor{mypink2}{\small{(+5.1)}} & 31.3 \textcolor{mypink2}{\small{(+3.0)} } \\ \cline{2-6} 
+                      & \multirow{2}{*}{530B} & \xmark & 26.3 & 36.3 & 31.2  \\
+                      &  &  \checkmark   & 28.9 \textcolor{mypink2}{\small{(+2.7)}} & 45.7 \textcolor{mypink2}{\small{(+9.4)}} & 34.0 \textcolor{mypink2}{\small{(+2.8)}} \\ \hline
+\multirow{2}{*}{530B} & \multirow{2}{*}{530B}  & \xmark & 29.5 & 56.3 & 28.3  \\
+                      &  & \checkmark    & \textbf{42.0} \textcolor{mypink2}{\small{(+12.5)}} & \textbf{68.6} \textcolor{mypink2}{\small{(+12.4)}} & \textbf{41.8} \textcolor{mypink2}{\small{(+13.5)}} \\ 
+\specialrule{.08em}{.1em}{.1em} 
+\end{tabular}
+}
+\end{adjustbox}{}
+\caption{Ablation on context marginalization. (AP and GP represent Answer Prediction and Context Generation, respectively.)}
+
+\label{tab:ablation-2-margin}
+\end{table*}
+
+% \subsection{Comparison to Prior Work}
+\subsection{Main Results}
+\label{sec:main_results}
+Table~\ref{tab:main_results} shows the EM score comparison between our CGAP-based method with existing \textit{closed-book} baseline approaches~\footnote{GPT-3 API shows different results than reported in the paper~\cite{brown2020language}. We therefore didn't compare to it. 
+%We were unable to reproduce the results reported in paper~\cite{brown2020language} when we query GPT-3 via API, so we didn't compare to it. 
+Detailed on these are shown in Section~\ref{sec:appendix-gpt3}}. 
+We also compare with state-of-the-art \textit{open-book} models at the upper section of the table. 
+
+% While GPT-3 (175B) few-shot method reported the highest answer accuracy on TQA~\cite{brown2020language}, we can not reproduce that score when we call the GPT-3 API by ourselves~\footnote{Results of querying openAI GPT-3 API using standard prompting are shown in Appendix}. 
+As we can see, our CGAP based method outperforms other existing \textit{closed-book} methods by large margin, especially on NQ and TQA datasets. 
+The CGAP also outperforms the standard few-shot prompting baseline LM-530B on all three datasets (at least by $13.3$ EM point). 
+
+Furthermore, CGAP obtains highest score on TriviaQA. 
+The scores are also very close to the state-of-the-art \textit{open-book} method RAG on NQ and WebQuestions, and only lose few points on NQ to FiD. While FiD uses 100 retrieved passages for answer prediction, CGAP rather only uses $8$ generated contexts for the approximate context marginalization.
+
+\subsection{Ablation Studies}
+We conducted a systematic ablation study to further investigate the contribution of the context generation model and the effect of context marginalization.
+
+\subsubsection{Context Generation}
+\label{sec: ablation_cg}
+While previous work~\cite{roberts2020much, brown2020language} demonstrated that the scale of the model sizes improves the answer accuracy of \textit{closed-book} QA, there are also other findings showing that simply increasing the model size does not lead to substantive accuracy gains~\cite{RaeGopher2022}. Thus, we would like to investigate \textbf{how will the context generation LM affect the answer accuracy}. 
+
+We experimented by varying the LM sizes for context generation, and fix the answer generation LM. We used context generation LM sizes of 357m, 1.3B and 530B, and answer generation LM with 357m and 1.3B parameters. 
+We also compare with standard few-shot prompting which has no context generation.
+ 
+We plot the results in Figure~\ref{Fig:ablation-CG-357m-1.3b-ans}. As we can see, there are huge accuracy gains from standard prompting, to CGAP method that has context generation. The accuracy increases by absolute $19.00$\% for NQ, $16.87$\% for TQA and $15.26$\% for WQ, when using 357M model for both standard prompting and CGAP approach.
+%For example, when we use the same answer prediction LM (357m), the answer accuracy increases from 3.85\% to 22.85\% for NQ, 10.97\% to 26.23\% for WebQuesions, and 11.66\% to 28.53\% for TriviaQA respectively, when we use only a 357M LM for context generation in CGAP. 
+The answer accuracy continues to increase when we increase the LM size for context generation. 
+Furthermore, we notice that the slopes of the accuracy gain curve using larger answer prediction model is steeper than using smaller one on all three datasets. This suggests the use of larger answer prediction LM to fully exploit the knowledge in generated context.   
+
+\begin{figure}[!th]
+	\begin{center}	\includegraphics[width=0.36\textwidth]{figures/chapter-CGAP/ablation-1-3.png}
+		\caption{Ablation on $k$, the number of contexts for marginalization.}
+		\vspace{-15pt}
+		\label{Fig:ablation-margin-k}
+	\end{center}
+\end{figure}
+
+\subsubsection{Context Marginalization}
+\label{sec:margin}
+Since there will be some hallucinated content or erroneous statements in the generated context, we approximate context marginalization by sampling multiple contexts and selecting the final answer based on majority voting, as introduces in Section~\ref{sec:methods_margin}. Here, we investigate the performance gains brought in by context marginalization, and also the accuracy curves with varied number of sampled contexts used in the approximate marginalization $k$.
+
+In Table~\ref{tab:ablation-2-margin}, we show the accuracy comparisons w/ and w/o using marginalization (k=8), with different LM sizes. 
+As we can see, \textbf{context marginalization improves the answer accuracy consistently on the three datasets}\footnote{We show a concrete example in Appendix~\ref{sec:appendix_example} Table~\ref{tab:appendix-gcap}}, under all settings. 
+Notably, there is much larger performance gains using marginalization when we scale up the model sizes to 530 billion parameters (i.e. increase EM score by 12.8\% averaged on three datasets). 
+
+The larger the number of context samples $k$, the more accurately the majority vote reflects the true marginalization over all possible contexts.  Therefore, we perform further ablation by changing the value $k$ for 357M LM for both context generation and answer prediction. 
+%We use 357M LM , but vary the number of context samples $k$ used for marginalization. 
+We plot the accuracy curves in Figure~\ref{Fig:ablation-margin-k}. We see that there are accuracy improvements when we use more context samples.  As expected and curves plateau for larger values of $k$ as the approximation approaches the true marginalization over all possible contexts.
+
+\section{Analysis}
+Considering that it is the first time leveraging context generated by large pretrained LMs for ODQA, we also conducted further analysis. 
+
+We compare generated context with retrieved context in the two-stage, few-shot prompting based CBQA framework. It is a dominant paradigm to use retrieved context from external corpus together with the question for answer prediction for \textit{open-book} QA~\cite{chen2017reading, lewis2020retrieval,izacard2021leveraging, lazaridou2022internet}. 
+
+\subsection{Retrieved vs. Generated Context}
+% Therefore, we investigate using the retrieved context in the few-shot prompting setting for CBQA, and compare its performances with using generated context. 
+
+In CBQA setting, we are not allowed to retrieve context from external knowledge sources. 
+However, we can retrieve the contexts from the training dataset based on their relevance to the given question. 
+We use $c_r=\{c^1_r, c^2_r,..., c^m_r\}$ to represent the top-$m$ relevant context for question $Q$. 
+It can be obtained via Equation~\ref{eqa:retriever_score}.
+%, where $c^j_r$ is the context of the $j$-th samples $S_j$ in $S=\{S_1, S_2,... S_m\}$. 
+
+Let the top-1 retrieved context be $c^{\text{top-1}}_r$ for question $Q$.
+We use $c^{\text{top-1}}_r$ to compare with the generated context, $c_{gen}$. 
+We use the same top-$m$ prompts $S'$ for answer prediction as introduced in Section~\ref{sec:ans_pred}. 
+The answer $a^r_p$ for the $c^{\text{top-1}}_r$ will be:
+\begin{equation}
+    a^r_p = \mathcal{LM}(Prompt(c^{\text{top-1}}_r, Q)))
+    \label{equ:c1}
+\end{equation}
+
+where $Prompt(c^{\text{top-1}}_r,Q)$ can be obtained via Equation~\ref{equ:cgen_q}. 
+
+% Equation~\ref{equ:answer_prediciton} is used to calculated the answer $A_p$ using generated context $C_{gen}$ in CGAP approach. 
+
+% We experimented using different context generation and answer prediction LM sizes, to compare $C_{gen}$ with $C^{\text{top-1}}_r$ thoroughly. 
+% We show that the accuracy gains from $C_{gen}$ are largely correlated with LM size and the the model size for answer prediction (AP) in XX.
+
+The comparison between $c^{\text{top-1}}_r$ and $c_{gen}$ is shown in Table~\ref{tab:further_analysis_c1}. From the upper part of the table, we see that using $c^{\text{top-1}}_r$ gives slightly higher EM score than using $c_{gen}$ generated by 357M and 1.3B LMs. However, $c_{gen}$ gives higher EM scores than $c^{\text{top-1}}_r$ on all three datasets when we scale up the context generation LM size to 530B. This suggests the use of large pretrained LM for a better generated context.
+
+\begin{table}[htbp]
+\centering
+\begin{adjustbox}{width=0.46\textwidth}
+{
+\begin{tabular}{lc|ccc}
+\specialrule{.08em}{.1em}{.1em} 
+\multicolumn{1}{c}{\textbf{AP}}          & \textbf{Context}          & \textbf{NQ}    & \multicolumn{1}{l}{\textbf{TQA}} & \multicolumn{1}{l}{\textbf{WQ}} \\ \hline
+\multirow{4}{*}{357M}  & $c^{\text{top-1}}_r$  & 25.1 & 32.2 & 28.3 \\
+                      & $c_{gen}$ \small{(357M LM)}  & 22.9  & 28.5  & 26.2 \\
+                      & $c_{gen}$ \small{(1.3B LM)}  & 23.1  & 29.7  & 28.3 \\
+                      & $c_{gen}$ \small{(530B LM)}  & \textbf{26.3}  & \textbf{36.3} & \textbf{31.2}  \\ \hline
+% \multirow{4}{*}{1.3B} & $C^1_r$   & 28.4 & 41.0                 & 34.5 \\
+%                       & $C_{gen}$ \small{(357M LM)}  & 25.4 & 34.3 & 30.1\\
+%                       & $C_{gen}$ \small{(1.3B LM)} & 26.6 & 35.0  & 31.9 \\
+%                       & $C_{gen}$ \small{(530B LM)} & \textbf{31.4} & \textbf{47.0} & \textbf{37.3} \\ \hline
+\multicolumn{1}{c}{\multirow{2}{*}{530B}} & $c^{\text{top-1}}_r$  & \textbf{30.8} & \textbf{58.1}  & \textbf{29.5} \\
+\multicolumn{1}{c}{}  & $c_{gen}$\small{(530B LM)}  & 29.5 & 56.3  & 28.3 \\ 
+\specialrule{.08em}{.1em}{.1em} 
+\end{tabular}
+}
+\end{adjustbox}
+\caption{Comparison of using retrieved top-1 context $c^{\text{top-1}}_r$, with few-shot generated context $c_{gen}$ on \textit{closed-book} QA task.}
+\vspace{-10pt}
+\label{tab:further_analysis_c1}
+\end{table}
+\vspace{-10pt}
+\subsection{Multiple Retrievals vs. Context Marginalization}
+We notice that in Table~\ref{tab:further_analysis_c1}, $c^{\text{top-1}}_r$ performs slightly better than $c_{gen}$ when using 530B LM for answer prediction. 
+We argue that this might be caused by the hallucination in $c_{gen}$. 
+While we have shown in Section~\ref{sec:margin} that context marginalization could mitigate the problem and improve answer accuracy, we further facilitate $c_{gen}(530B)$ with context marginalization and compare with retrieved context. 
+
+For fair comparison, we perform majority voting using the top-$k$ retrieved context $c_r$, since ~\citet{karpukhin2020dense} showed that the quality of the retrieved documents will also affect the final answer accuracy. 
+Specifically, we replace $c^{\text{top-1}}_r$ with each retrieved context $c^i_r$ in Equation~\ref{equ:c1} to predict answer $a^{r(i)}_p$ ($i=1,...,k$), and use Equation~\ref{equ:marginalization} to select the most frequent answer as the final answer.
+ 
+Furthermore, we replace $c^{\text{top-1}}_r$ with golden context $c_{golden}$ in Equation~\ref{equ:c1}. 
+This will be the upper-bound of using retrieved/generated context in the two-stage, few-shot prompting CBQA task.
+
+We show the results\footnote{Concrete comparison examples are shown in Appendix~\ref{sec:appendix_example} Table~\ref{tab:example-NQ}, Table~\ref{tab:example-TQA} and Table~\ref{tab:example-WQ}.} in Table~\ref{tab:further_analysis_margin}. 
+As we can see, using marginalization over $c_{gen}$ consistently outperforms $c^{\text{top-1}}_r$, and also better than majority voting over multiple retrieved contexts $c_r$ for answer prediction, on all different model size combinations on three datasets. 
+Notably, marginalization over $c_{gen}$ yields higher EM score than using $c_{golden}$ when using 530B LM for answer prediction. 
+% The possible reason for this might be for some $C_{golden}$ that can not lead to a correct answer, the $\{c^1_{gen},..., c^k_{gen}\}$ generated by the 530B model can suprisingly .  
+
+
+
+\begin{table}[!h]
+\centering
+\begin{adjustbox}{width=0.46\textwidth}{
+\begin{tabular}{cl|ccc}
+\hline
+\textbf{AP} & \multicolumn{1}{c}{\textbf{Context}} & \textbf{NQ} & \textbf{TQA} & \textbf{WQ} \\ \hline
+\multirow{5}{*}{357M} & $c_{golden}$ & \textbf{31.6} & \textbf{41.5} & 33.4 \\
+ & $c^{\text{top-1}}_r$ & 25.1 & 32.2 & 28.3 \\
+ & ($c^1_r$,...,$c^k_r$) & 24.6 & 32.4 & 27.8 \\
+& $c_{gen}$  & 26.3 & 36.3 & 31.2 \\
+ & ($c^1_{gen}$,..., $c^k_{gen}$) & 28.9 & 45.7 & \textbf{34.0} \\ \hline
+%  &  &  &  &  \\
+\multirow{5}{*}{1.3B} & $c_{golden}$ & \textbf{35.1} & 51.4 & 38.1 \\
+ & $c^{\text{top-1}}_r$ & 28.4 & 41.0 & 34.5 \\
+ & ($c^1_r$,...,$c^k_r$) & 28.1 & 42.9 & 34.5 \\
+  & $c_{gen}$   & 31.4 & 47.0 & 37.3 \\
+ & ($c^1_{gen}$,..., $c^k_{gen}$) & 33.5 & \textbf{55.5} & \textbf{41.5} \\ \hline
+%  &  &  &  &  \\
+\multirow{5}{*}{530B} & $c_{golden}$ & 36.0 & 61.3 & 30.2 \\
+ & $c^{\text{top-1}}_r$ & 30.8 & 58.1 & 29.5 \\
+ & ($c^1_r$,...,$c^k_r$) & 29.5 & 56.3 & 28.3 \\
+ & $c_{gen}$   & 23.0 & 55.3 & 23.6 \\
+ & ($c^1_{gen}$,..., $c^k_{gen}$) & \textbf{42.0} & \textbf{68.6} & \textbf{41.8} \\ 
+ \specialrule{.08em}{.1em}{.1em} 
+\end{tabular}
+}
+\end{adjustbox}
+\caption{Comparison of using context marginalization ($c^1_{gen}$,..., $c^k_{gen}$), multiple retrievals ($c^1_r$,...,$c^k_r$), and golden context $c_{golden}$ on \textit{closed-book} QA task.}
+\vspace{-10pt}
+\label{tab:further_analysis_margin}
+\end{table}
+
+\section{Summary}
+We propose a simple yet effective framework named \textbf{CGAP} to extract succinct answers from long-form answers. CGAP performs \textbf{C}ontext \textbf{G}eneration followed by  \textbf{A}nswer \textbf{P}rediction via two-stage prompting using large pretrained LMs. 
+It does not rely on external knowledge sources, and does not need finetuning or add extra learnable parameters.
+To the best of our knowledge, we are the first to leverage generated context from large pretrained LMs for succinct answer extraction.
+Experimental results on three open-domain QA benchmarks show that our method significantly outperforms previous \textit{closed-book} QA methods and is par with \textit{open-book} methods. We demonstrate our method up to 530B parameter models and showcase that larger models boost the accuracy by huge margins.
+

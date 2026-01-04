@@ -1,0 +1,886 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+\usepackage[pagenumbers]{cvpr} % To force page numbers, e.g. for an arXiv version
+\usepackage{epsfig}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage[font=small,skip=1pt]{caption}
+\usepackage{comment}
+\usepackage{xcolor}
+\usepackage{tabularx}
+\usepackage[super]{nth}
+\newcolumntype{Y}{>{\centering\arraybackslash}X}
+\captionsetup{labelfont=bf}
+\captionsetup{labelsep=period}
+\usepackage{enumitem}
+\usepackage{algorithm,algorithmicx,algpseudocode}
+\usepackage{color,soul}
+\usepackage{url}
+\soulregister\cite7
+\soulregister\ref7
+\soulregister\pageref7
+\usepackage{bm}
+\DeclareMathOperator{\EX}{\mathbb{E}}
+\DeclareMathOperator{\D}{\mathcal{D}}
+\DeclareMathOperator{\N}{\mathcal{N}}
+\DeclareMathOperator{\I}{\mathbf{I}}
+\DeclareMathOperator{\x}{\mathbf{x}}
+\DeclareMathOperator{\xw}{\Tilde{\mathbf{x}}}
+\DeclareMathOperator{\X}{\mathbf{X}}
+\DeclareMathOperator{\XW}{\Tilde{\mathbf{X}}}
+\DeclareMathOperator{\z}{\mathbf{z}}
+\def\rvz{{\mathbf{z}}}
+\def\rvx{{\mathbf{x}}}
+\def\gN{{\mathcal{N}}}
+\newcommand{\y}{{\bm y}}
+\newcommand{\vect}[1]{\ensuremath{\mathbf{#1}}}
+\newcommand{\xT}{\vect{x}_T}
+\newcommand{\xt}{\vect{x}_t}
+\newcommand{\conditioner}{\tau_\theta}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\bI}{\mathbf{I}}
+\newcommand{\bM}{\mathbf{M}}
+\definecolor{myblue}{RGB}{66,133,244}
+\definecolor{mygreen}{RGB}{51,168,83}
+\definecolor{myyellow}{RGB}{251,188,3}
+\definecolor{myred}{RGB}{234,67,53}
+\definecolor{mygrey}{RGB}{95,99,104}
+\definecolor{mypup}{RGB}{153,0,204}
+\usepackage[pagebackref,breaklinks,colorlinks]{hyperref}
+
+\begin{document}
+\title{ShadowDiffusion: Diffusion-based Shadow Removal \\using Classifier-driven Attention and Structure Preservation}
+
+\author{Yeying Jin$^{1}$, Wenhan Yang$^{2}$, Wei Ye$^{3}$, Yuan Yuan$^{3}$ and Robby T. Tan$^{1,4}$\\
+	$^1$National University of Singapore, $^2$Peng Cheng Laboratory, \\$^3$Huawei International Pte Ltd, $^4$Yale-NUS College\\
+	{\tt\small jinyeying@u.nus.edu, yangwh@pcl.ac.cn, yewei10@huawei.com,}\\
+	{\tt\small yuanyuan10@huawei.com, robby.tan@nus.edu.sg}
+}
+\maketitle
+
+%%%%%%%%% ABSTRACT
+\begin{abstract}
+Shadow removal from a single image is challenging, particularly with the presence of soft and self shadows. Unlike hard shadows, soft shadows do not show any clear boundaries, while self shadows are shadows that cast on the object itself. Most existing methods require the detection/annotation of binary shadow masks, without taking into account the ambiguous boundaries of soft and self shadows. Most deep learning shadow removal methods are GAN-based and require statistical similarity between shadow and shadow-free domains. In contrast to these methods, in this paper, we present ShadowDiffusion, the first diffusion-based shadow removal method. ShadowDiffusion focuses on single-image shadow removal, even in the presence of soft and self shadows. To guide the diffusion process to recover semantically meaningful structures during the reverse diffusion, we introduce a structure preservation loss, where we extract features from the pre-trained Vision Transformer (DINO-ViT). Moreover, to focus on the recovery of shadow regions, we inject classifier-driven attention into the architecture of the diffusion model. To maintain the consistent colors of the regions where the shadows have been removed, we introduce a chromaticity consistency loss. Our ShadowDiffusion outperforms state-of-the-art methods on the SRD, AISTD, LRSS, USR and UIUC datasets, removing hard, soft, and self shadows robustly. Our method outperforms the SOTA method by {\bf 20\%} of the RMSE of the whole image on the SRD dataset.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intr}
+Shadows can be categorized into hard shadows, soft shadows, and self shadows~\cite{salvador2004cast,huang2009moving}. 
+%
+Hard and soft shadows, known as cast shadows, are formed when an object blocks beams of light and generates shadows on a surface or other objects nearby. Unlike hard shadows, soft shadows exhibit a gradual transition from shadow to non-shadow regions, without showing any sharp shadow boundaries.
+%
+Self shadows are formed when part of an object blocks beams of light, casting shadows on the object itself.
+%
+Generally, removing all these shadows is intractable due to ambiguities between shadows and non-shadows. However, compared with hard shadows, in most cases, soft and self shadows are more ambiguous and thus more difficult to identify and remove.
+
+
+\begin{figure}[t!]
+	\centering
+	\captionsetup[subfigure]{font=small, labelformat=empty}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{z}\textbf{(a) Self}}\hspace{0.02cm}
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/object/DSC01538/s.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/object/DSC01538/our.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/object/DSC01538/eccv22.png}}\hfill	
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/object/DSC01538/g2r21.png}}\hfill\\
+	\vspace{0.025cm}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{z}\textbf{(b) Soft}}\hspace{0.02cm}
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/SRD/IMG_6466/s.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/SRD/IMG_6466/our.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/SRD/IMG_6466/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/SRD/IMG_6466/g2r21.png}}\hfill
+	\vspace{0.025cm}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{z}\textbf{(c) Hard}}\hspace{0.02cm}
+	\subfloat[Input Shadow]{\includegraphics[width=0.233\columnwidth]{fig/SRD/IMG_6602/s.png}}\hfill
+	\subfloat[Ours]{\includegraphics[width=0.233\columnwidth]{fig/SRD/IMG_6602/our.png}}\hfill
+	\subfloat[SG'22~\cite{wan2022sg}]{\includegraphics[width=0.233\columnwidth]{fig/SRD/IMG_6602/eccv22.png}}\hfill
+	\subfloat[G2R~\cite{liu2021from}]{\includegraphics[width=0.233\columnwidth]{fig/SRD/IMG_6602/g2r21.png}}\hfill\\
+	\caption{The visual results of state-of-the-art supervised method~\cite{wan2022sg} and weakly-supervised method~\cite{liu2021from} in removing (a) self shadow, (b) soft shadow, and (c) hard shadow. Our ShadowDiffusion can preserve semantically meaningful structures (e.g., duck, paper, cleanser) during the reverse diffusion.}
+	\label{fig:intro}
+\end{figure}
+
+To remove shadows, some methods use an off-the-shelf shadow detection method~\cite{zhu2018bidirectional} or interactive user input~\cite{gryka2015learning} to obtain binary shadow masks.
+%.
+However, these binary shadow masks are problematic to obtain, particularly for soft and self shadows.
+%
+Moreover, due to the limited labeled shadow data or paired shadow and non-shadow images, the supervised shadow removal methods lack the generalisation beyond the relatively small training datasets.
+
+%
+Existing unsupervised methods (e.g., ~\cite{hu2019mask,liu2021shadow,jin2021dc}) are GAN-based~\cite{zhu2017unpaired}, which requires unpaired shadow and shadow-free images for training.
+%
+They largely rely on the statistical similarity between images from the two domains~\cite{le2020shadow} (shadow and shadow-free domains).
+%
+Unfortunately, once the two domains are statistically different, these methods produce hallucination/fake contents~\cite{zhu2018bidirectional} and also suffer from unstable training.
+
+
+The weakly-supervised methods (e.g.,~\cite{le2020shadow,liu2021from}) are GAN-based and require binary shadow masks to distinguish shadow and shadow-free patches.
+% 
+These patches from the same images can reduce the domain gap of shadow and shadow-free domains.
+However, cropping patches is time-consuming~\cite{liu2021from} and synthesizing shadows on the shadow-free regions cannot represent real-world shadow images.  
+%
+Moreover, these weakly-supervised methods require shadows to be homogeneous, which is often not the case, particularly for self shadows and soft shadows.
+
+Unlike existing shadow removal methods, in this paper, we introduce {\it ShadowDiffusion}, a diffusion-based shadow removal method, to address hard, soft and self shadows in a single integrated framework.
+%
+First, we constrain the shadow removal process by incorporating a classifier into denoising U-Net architecture in our diffusion model~\cite{Ho:2020,song2021ddim}. 
+%
+By employing the binary classification of the shadow class and non-shadow class, we can inject shadow attention during the reverse diffusion iterations. 
+%
+Since our shadow attention is soft attention learned from the data, it can focus even on soft or self shadow regions.
+
+
+%
+Second, the structure and semantic information in shadow regions is often difficult to retain during the reverse diffusion, since the latent variables of DDPM  (Denoising Diffusion Probabilistic Models~\cite{Sohl:2015,Ho:2020}) lack high-level semantic meaning~\cite{preechakul2022diffusion}.
+%
+To address this problem, namely, to guide the diffusion process to generate semantically meaningful structures, our basic idea is to inject the pre-trained feature extractor, DINO-ViT~\cite{caron2021emerging} into our ShadowDiffusion framework.
+%
+Specifically, as the keys' self-similarity~\cite{shechtman2007matching} contains structure information~\cite{tumanyan2022splicing}, we use the structure preservation loss between intermediate keys of the clean and denoised images during the sampling.
+%
+As shown in Fig.~\ref{fig:intro}, our method can remove shadows and retain various structured regions (e.g., duck, paper, cleanser).
+
+
+%
+Third, our ShadowDiffusion is able to map shadow images to non-shadow images by learning from the training data.
+%
+However, it has no explicit constraint on enforcing color consistency in the output images.
+%
+To address this, we propose to utilize a normalized color (chromaticity) consistency loss.
+%
+The key idea of this loss is to keep image chromaticity consistent before and after the shadow removal and independent from the light colors.
+%
+
+In summary, we make the following contributions:
+\begin{enumerate}[noitemsep,topsep=1pt]
+	\item We propose ShadowDiffusion, the first diffusion-based shadow removal network, that performs shadow removal robustly on hard, soft and self shadows from a single image in an integrated framework.
+	%
+	\item We propose a structure preservation loss based on pre-trained DiNO-ViT. This loss can preserve semantically meaningful structures in the reverse diffusion process of our shadow removal. 
+	%
+	\item We introduce classification-driven attention in our diffusion model and chromaticity consistency loss. The classification-drive attention allows our diffusion model to focus on recovering shadow regions, including self and soft shadows. Our chromaticity-consistency loss enables our diffusion model to have consistent colors in our shadow removal outputs.
+\end{enumerate}
+%
+Comprehensive experiments on SRD, AISTD, LRSS, UIUC and USR datasets demonstrate that our ShadowDiffusion outperforms the state-of-the-art methods. 
+%
+It outperforms~\cite{zhu2022bijective} by 14\% error reduction (from 6.61 to 5.70) in terms of RMSE on shadow areas, 25\% (from 3.61 to 2.72) on non-shadow areas and 20\% (from 4.46 to 3.59) on the overall areas.
+
+
+\section{Related work}
+\label{sec:related}
+Different image priors have been explored for single image shadow removal, e.g., modeling of illumination and color~\cite{finlayson2005removal}, image regions~\cite{guo2012paired,vicente2017leave}, image gradients~\cite{gryka2015learning}, user inputs~\cite{gong2016interactive}.
+However, they lack high-level semantics and may produce unsatisfactory results.
+%
+In recent years, CNN-based shadow removal methods~\cite{chen2021canet,fu2021auto} show promising performance.
+DeshadowNet~\cite{qu2017deshadownet} removes shadows in an end-to-end manner.
+%
+DSC~\cite{hu2019direction} obtains global and context information from the direction-aware spatial attention module.
+%
+SP+M-Net~\cite{le2019shadow} and SP+M+I-Net~\cite{le2021physics} remove shadow using shadow image decomposition.
+%
+CANet~\cite{chen2021canet} is a two-stage context-aware network.
+%
+BMNet~\cite{zhu2022bijective} removes shadows from the perspective of invertible neural networks. 
+
+\begin{figure*}
+	\vspace{-0.1in}
+	\centering
+		\captionsetup[subfigure]{labelformat=empty}
+		{\includegraphics[width=1\textwidth]{network.pdf}}
+	\vspace{-0.15in}
+	\caption{The network architecture of ShadowDiffusion. 
+	%
+	(1) The reverse diffusion process (\textcolor{myblue}{blue}) of our shadow removal starts from the noise map $\x_T$ with the conditional shadow inputs $\xw$. 
+	%
+	The ShadowDiffusion sample image $\xt$ at each time step $t$. 
+	%
+	Our ShadowDiffusion has a noise prediction network $\bm{\epsilon}_\theta(\xw,\x_t,t)$, which has a U-Net architecture.
+	%
+	(2) To focus on shadow regions, we inject a classifier (\textcolor{mypup}{purple}) into the noise prediction network. Using the binary classification of the shadow and non-shadow classes, our reverse diffusion focuses on shadow regions.
+	%
+	(3) To guide the diffusion process to output the semantic meaningful structures, we have a structure preservation loss $\mathcal{L}_{\rm stru}$ (\textcolor{myred}{red}), extracted keys from pre-trained DINO-ViT.
+	(4) To maintain the consistent colors of the regions where the shadows have been removed, we introduce a chromaticity consistency loss $\mathcal{L}_{\rm ch}$ (\textcolor{myyellow}{yellow}).}
+	\vspace{-0.1in}
+	\label{fig:network}
+\end{figure*}
+
+GAN-based shadow removal methods have also been studied.
+ST-CGAN~\cite{wang2018stacked} detects and removes shadows jointly using conditional GANs.
+ARGAN~\cite{ding2019argan} has LSTM attention to detect shadows.
+DHAN~\cite{cun2020towards} has SMGAN to generate shadow matting. 
+RIS-GAN~\cite{zhang2020ris} explores the relationship between the residual images and the inverse illumination maps.
+SG-ShadowNet~\cite{wan2022sg} treats shadow removal as intra-image style transfer.
+These supervised methods are Conditional GAN~\cite{isola2017image} or StyleGAN~\cite{karras2019style} based.
+%
+Unsupervised shadow removal methods (e.g. Mask-ShadowGAN~\cite{hu2019mask}, LG-ShadowNet~\cite{liu2021shadow}, DC-ShadowNet~\cite{jin2021dc}) are CycleGAN-based~\cite{zhu2017unpaired}, learn from unpaired data and exploit mask-guided cycle consistency constraints.
+%
+Weakly supervised shadow removal method wSP+M-Net~\cite{le2020shadow} learn from shadow images, requiring shadow masks to distinguish shadow and non-shadow patches.
+G2R-ShadowNet~\cite{liu2021shadow} employs the shadow generators to produce pseudo shadow pairs for joint training.
+
+However, none of these methods can handle hard, soft and self shadows in one unified framework.
+Recently, Denoising Diffusion Probabilistic Models~\cite{Sohl:2015,Ho:2020} (DDPM) and Denoising Diffusion Implicit Models (DDIM)~\cite{song2021ddim}  show promising generative capability. 
+Unlike CNN-based and GAN-based methods, our ShadowDiffusion uses DDPM as the backbone, to address hard, soft and self shadows in a single integrated framework.
+
+
+\section{Proposed Method}
+\label{sec:method}
+
+Fig.~\ref{fig:network} shows our pipeline, consisting of the forward diffusion and reverse denoising (generative) processes.
+%
+The main goal of ShadowDiffusion is to remove hard, soft and self shadows using a diffusion-based network.
+%
+To guide the diffusion model to focus on shadow regions, we propose classifier-driven attention, and inject the classifier into the U-Net noise estimator network.
+%
+During the reverse diffusion, it is challenging to preserve the structures of the image.
+%
+Therefore, we guide the reverse diffusion process using structure preservation loss.
+%
+
+\subsection{Diffusion Models}
+We use Denoising Diffusion Probabilistic Models~\cite{Ho:2020} as our generative model.
+%
+DDPM is trained on a non-shadow image $\x_0 \sim q(\x_0)$ via a forward diffusion process $q(\x_t|\x_{t-1})$ that sequentially adds the Gaussian noise at every time steps $t$,~\ie, $q(\x_{t}\vert\x_{t-1}) = \mathcal{N}(\x_{t};\sqrt{1-\beta_t}\x_{t-1},\beta_t \I)$, where $\{\beta\}_{t=0}^{T}$ is a variance schedule. The forward diffusion process follows a Markov chain of length T expressed as:
+\begin{align}\label{eq:forward}
+q(\x_{1:T}\vert\x_0) = \prod_{t=1}^T q(\x_{t}\vert\x_{t-1}).
+\end{align}
+
+
+DDPM learns to reverse the process in Eq.\eqref{eq:forward} with the Gaussian transitions,~\ie, $p_{\theta}(\x_{t-1}\vert\x_t) = \mathcal{N}(\x_{t-1};\bm{\mu}_{\theta}(\x_t,t),\mathbf{\Sigma}_{\theta}(\x_t,t))$, at each time step. 
+%
+The reverse denoising (generative) process is parameterized by a trainable network (e.g., U-Net), which estimates the mean $\bm{\mu}_{\theta}(\x_t,t)$ and variance $\mathbf{\Sigma}_{\theta}(\x_t,t)$ with parameter $\theta$.
+%
+This reverse process starts from a standard normal distribution $p(\x_T)=\mathcal{N}(\x_T;\mathbf{0},\I)$ and follows: 
+\begin{align}\label{eq:reverse}
+p_{\theta}(\x_{0:T}) = p(\x_{T}) \prod_{t=1}^T p_{\theta}(\x_{t-1}\vert\x_t).
+\end{align}
+%
+The DDPM model is optimized by considering the variational lower bound~\cite{Dhariwal:2021}.
+%
+The noise prediction network $\bm{\epsilon}_{\theta}(\x_t,t)$ can be optimized by this objective function:
+%
+\begin{align}\label{eq:objective}
+L_\theta(\text{DM}) = \mathbb{E}_{\x_0,\bm{\epsilon},t}\Big{[}\|\bm{\epsilon}-\bm{\epsilon}_\theta(\x_t,t)\|^2\Big{]}.
+\end{align}
+%
+After the optimization, we can sample from the learned parameterized Gaussian transitions $p_{\theta}(\x_{t-1}\vert\x_t)$ by:
+%
+\begin{align}\label{eq:ddim}
+\rvx_{t-1} = \bm{\mu}_{\theta}(\rvx_t, t) +\mathbf{\Sigma}_{\theta}^{1/2}(\rvx_t, t)\bm{\epsilon},~~~~\bm{\epsilon} \sim \gN(\mathbf{0}, \mathbf{I}).
+\end{align}
+%
+Denoising Diffusion Implicit Models (DDIM)~\cite{song2021ddim} shares the same objective in Eq.\eqref{eq:objective} as that of DDPM, yet has a deterministic and consistent reverse process.
+%
+Our ShadowDiffusion use conditional DDIM to output deterministic and consistent samples.
+
+\paragraph{Conditional Diffusion Models}
+For the conditional diffusion models~\cite{saharia2022palette,unitddpm}, we conditionally reverse process $p_{\theta}(\x_{0:T}|\xw)$, 
+%
+without changing the diffusion process $q(\x_{1:T}|\x_0)$ for $\x$ in Eq.\eqref{eq:forward}.
+%
+We replace the noise prediction network $\bm{\epsilon}_{\theta}(\x_t,t)$ in Eq.\eqref{eq:objective} with
+$\bm{\epsilon}_\theta(\xw,\x_t,t)$, where $\xw$ denotes the spatial conditional image.
+%
+
+Here, we use the conditional DDIM~\cite{song2021ddim} and with input $(\xw,\x_t)$ to produce the output shadow-free image.
+%
+The SRD~\cite{qu2017deshadownet} and AISTD~\cite{le2019shadow} shadow datasets provide shadow images $\xw$ and shadow-free images $\x_0$, which are used in ShadowDiffusion training.
+%
+We concatenate $\xw$ and $\x$ channel-wisely, and input them to the deterministic reverse process.
+%
+Therefore, we treat shadow removal as a reverse process with the loss function $L_\theta(\text{CDM})$ and parameterize $\vect{f}_\theta$ as a noise prediction network $\bm{\epsilon}_\theta(\xw,\x_t,t)$: 
+\begin{align}\label{eq:objective_c}
+L_\theta(\text{CDM})&=\mathbb{E}_{\x_0,\bm{\epsilon},t}\Big{[}\|\bm{\epsilon}-\bm{\epsilon}_\theta(\xw,\x_t,t)\|^2\Big{]},\\
+\vect{f}_\theta(\xw,\x_t,t) &= \frac{1}{\sqrt{{\bar{\alpha}_t}}}\left( 
+\xt - \sqrt{1 - {\bar{\alpha}_t}} \cdot \vect\bm{\epsilon}_\theta(\xw,\x_t,t)
+\right).
+\nonumber
+\end{align}
+%
+The shadow removal starts from the noise map, $\x_T\sim\N(\mathbf{0},\I)$, with the condition shadow input $\xw$, and applies the diffusion towards the target non-shadow image $\x_0$.
+%
+The sampling from the reverse process $\x_{t-1}\sim p_{\theta}(\x_{t-1}\vert\x_t,\xw)$ employs:
+\begin{equation}\label{eq:cddim}
+\x_{t-1} =  \vect{f}_\theta(\xw,\x_t,t) \sqrt{\bar{\alpha}_{t-1}}   + \bm{\epsilon}_{\theta}(\xw,\x_t,t) \sqrt{1-\bar{\alpha}_{t-1}}.
+\end{equation}
+
+\begin{figure}[t!]
+	\centering
+	\captionsetup[subfigure]{font=small, labelformat=empty}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{zzz}{Shadow}}\hspace{0.018cm}
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/attention/ssi.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/attention/si.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/attention/i.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/attention/hi.png}}\hfill\\
+	\vspace{0.025cm}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{zzz}{Attention}}\hspace{0.018cm}
+	\subfloat[Self Shadow]{\includegraphics[width=0.233\columnwidth]{fig/attention/ssa.png}}\hfill
+	\subfloat[Soft Shadow]{\includegraphics[width=0.233\columnwidth]{fig/attention/sa.png}}\hfill
+	\subfloat[Hard Shadow]{\includegraphics[width=0.233\columnwidth]{fig/attention/a.png}}\hfill
+	\subfloat[Hard Shadow]{\includegraphics[width=0.233\columnwidth]{fig/attention/ha.png}}\hfill\\
+	\caption{The results of classifier-driven attention that enables our ShadowDiffusion network to focus on hard, soft and self shadows.}
+	\label{fig:attention}
+\end{figure}
+
+
+\subsection{Classifier-driven Attention}
+ShadowDiffusion employs time-conditional U-Net as the backbone, which has an encoder $E$ and a decoder $D$. To guide latent code $z$ to focus on shadow regions during reverse sampling, we inject a classifier in between the encoder and decoder.
+The conditional latent diffusion itself has a cross-attention mechanism with query, key, value $\text{Attention} (Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right) \cdot V$, where:
+\begin{equation*}
+Q = W^{(i)}_Q \cdot  \varphi_i(z_t), \; K = W^{(i)}_K \cdot \conditioner(y),
+\; V = W^{(i)}_V \cdot \conditioner(y) . \nonumber
+%
+\end{equation*}
+In the equations, $\varphi_i(z_t) \in \R^{N \times d^i_\epsilon}$ denotes a (flattened) intermediate representation of U-Net.
+The variables  $W^{(i)}_V \in \R^{d \times d^i_\epsilon}$, $W^{(i)}_Q \in \R^{d \times d_\tau} $ \& $W^{(i)}_K \in \R^{d \times d_\tau}$ are learnable projection matrices.
+%
+We add a classifier into the encoder and decoder architecture, therefore injecting shadow attention during the reverse diffusion iterations.
+%
+This attention mechanism is based on the binary classification of the shadow class and non-shadow class, by using CAM (class activation map)~\cite{Zhou_2016_CVPR}.  
+%
+As shown in Fig.~\ref{fig:attention}, we can obtain the activated attention to the shadow regions, particularly for soft and self shadow regions.
+
+\subsection{Structure Preservation Loss}
+\begin{figure}[t!]
+	\centering
+	\captionsetup[subfigure]{font=small, labelformat=empty}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{z}{Input}}\hspace{0.02cm}
+	\subfloat{\includegraphics[width=0.186\columnwidth]{fig/VIT/tfile_image-4/s.png}}\hfill
+	\subfloat{\includegraphics[width=0.186\columnwidth]{fig/VIT/4/s.png}}\hfill
+	\subfloat{\includegraphics[width=0.186\columnwidth]{fig/VIT/IMG_6578/s.png}}\hfill
+	\subfloat{\includegraphics[width=0.186\columnwidth]{fig/VIT/_MG_5821/s.png}}\hfill
+	\subfloat{\includegraphics[width=0.186\columnwidth]{fig/VIT/_MG_6498/s.png}}\hfill\\
+	\vspace{0.03cm}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{z}{ViT Key}}\hspace{0.02cm}
+	\subfloat{\includegraphics[width=0.186\columnwidth]{fig/VIT/tfile_image-4/ourf.png}}\hfill
+	\subfloat{\includegraphics[width=0.186\columnwidth]{fig/VIT/4/ourf.png}}\hfill
+	\subfloat{\includegraphics[width=0.186\columnwidth]{fig/VIT/IMG_6578/ourf.png}}\hfill
+	\subfloat{\includegraphics[width=0.186\columnwidth]{fig/VIT/_MG_5821/ourf.png}}\hfill
+	\subfloat{\includegraphics[width=0.186\columnwidth]{fig/VIT/_MG_6498/ourf.png}}\hfill\\
+	\vspace{0.03cm}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{z}{Output}}\hspace{0.02cm}
+	\subfloat[Self Shadow]{\includegraphics[width=0.186\columnwidth]{fig/VIT/tfile_image-4/our.png}}\hfill
+	\subfloat[Self Shadow]{\includegraphics[width=0.186\columnwidth]{fig/VIT/4/our.png}}\hfill
+	\subfloat[Soft Shadow]{\includegraphics[width=0.186\columnwidth]{fig/VIT/IMG_6578/our.png}}\hfill
+	\subfloat[Soft Shadow]{\includegraphics[width=0.186\columnwidth]{fig/VIT/_MG_5821/our.png}}\hfill
+	\subfloat[Hard Shadow]{\includegraphics[width=0.186\columnwidth]{fig/VIT/_MG_6498/our.png}}\hfill\\
+	\caption{We visualize the deep DINO-ViT features used in structure preservation loss $\mathcal{L}_{\rm stru}$. These semantic meaningful ViT features help ShadowDiffusion preserve the structure of the objects/scenes (e.g., dog, fire hydrant in self shadow examples, duck, bag, bear in soft shadow examples).}
+	\label{fig:vit}
+\end{figure}
+
+Recent shadow removal methods do not consider the semantic information, which is strongly associated with the object structures, leading to unsatisfactory shadow removal results~\cite{qu2017deshadownet}.
+%
+Moreover, during the reverse process of the diffusion model, it is challenging to maintain the original image structures.
+%
+However, preserving structures is critical for shadow removal.
+%
+For example, in Fig.~\ref{fig:vit}, we want to maintain the overall structures of the dog, fire hydrant in the non-shadow regions, 
+%
+and also to recover the structures of bag, duck, and bear in the shadow regions.
+%
+To preserve the structures, our key idea is to exploit a self-similarity prior~\cite{shechtman2007matching}.
+%
+For the soft shadow example in Fig.~\ref{fig:vit}, the left and right parts of the bag contain different lighting conditions and appearances, but they do share similar structures (i.e., self-similarity).
+
+
+A pre-trained DINO-ViT can provide more meaningful semantic features, compared to the CNN backbone (ResNet50), other transformer-based backbones (DeiT, ViT-Random), and a combination of them (ResNet50-DINO) shown in~\cite{karmali2022hierarchical}.
+%
+Motivated by this, we use a pre-trained DINO-ViT~\cite{caron2021emerging} as our feature extractor, enabling us to capture deep features~\cite{amir2021deep}, and providing useful feature supervision to our ShadowDiffusion. 
+% 
+
+\paragraph{DINO-ViT keys}
+We extract keys (deep features) from the pre-trained DINO-ViT.
+%
+In the multi-head self-attention layer, the keys contain the structure information~\cite{tumanyan2022splicing}.
+%
+In Fig.~\ref{fig:vit}, we show the Principal Component Analysis (PCA) visualization of the keys' self-similarity and demonstrate the top three components as RGB at the deepest layer of DINO-ViT. 
+%
+As one can observe, the feature representations capture the object structures, helping our ShadowDiffusion preserves and recovers semantically meaningful structures.
+
+We propose a structure preservation loss between intermediate keys of the non-shadow image and the estimated denoised output image during the reverse diffusion sampling: 
+\begin{align}\label{eq:loss_structure}
+\mathcal{L}_{\rm stru} (\mathbf{\x},\mathbf{\x_0}) = \left \|  S^l(\mathbf{\x})-S^l(\mathbf{\x_0}) \right \| _{F},
+\end{align}
+where $S$ is the self-similarity descriptor,
+$S^{l}(x) \in \mathbb{R}^{(n)\!\times\!(n)}$, 
+with $n \times n$ dimension, where $n$ is the number of patches. 
+In DINO-ViT, the input image is split into $n$ non-overlapping patches.
+%
+$l=11$ is the deepest ViT layer.
+%
+$\left \| \cdot \right \| _{F}$ is the Frobenius norm.
+%
+The self-similarity descriptor is defined as:
+\small
+\begin{align}\label{eq:loss_sel}
+S^l(\mathbf{\x})_{ij} = \text{cos}(k^{l}_i(\mathbf{\x}), k^{l}_j(\mathbf{\x})) = 1 - \frac{k^{l}_i(\mathbf{\x}) \cdot k^{l}_j(\mathbf{\x})} {\left \| k^{l}_i(\mathbf{\x}) \right \| \cdot \left \| k^{l}_j(\mathbf{\x}) \right \| },
+\end{align}
+\small
+where $\text{cos}(\cdot)$ is the cosine similarity between spatial keys $k_i$ and $k_j$.
+
+\subsection{Chromaticity Consistency Loss}
+
+\begin{figure}[t]
+	\centering
+	\captionsetup[subfigure]{labelformat=empty}
+	{\includegraphics[width=0.49\textwidth]{chloss.pdf}}
+	\vspace{-0.15in}
+	\caption{Our chromaticity consistency loss $\mathcal{L}_{\rm chinf}$ (\textcolor{mygrey}{grey}). We calculate the corresponding projection direction $\alpha$ of the surface line using~\cite{finlayson2009entropy}. Using $\alpha$, we can obtain the light-invariant map and chromaticity map, which provide initial shadow-free guidance to ShadowDiffusion.} 
+	\label{fig:chself}
+\end{figure}
+
+
+\begin{figure}[t!]
+	\centering
+	\captionsetup[subfigure]{font=small, labelformat=empty}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{zz}{Shadow}}\hspace{0.018cm}
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/DSC01538/s.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/real271_shad/s.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/DSC_0587_shad/s.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/77-2/s.png}}\hfill\\
+	\vspace{0.025cm}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{zz}{Invar}}\hspace{0.018cm}
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/DSC01538/1d.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/real271_shad/1d.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/DSC_0587_shad/1d.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/77-2/1d.png}}\hfill\\
+	\vspace{0.025cm}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{zz}{Chro}}\hspace{0.018cm}
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/DSC01538/2d.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/real271_shad/2d.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/DSC_0587_shad/2d.png}}\hfill
+	\subfloat{\includegraphics[width=0.233\columnwidth]{fig/chrom/77-2/2d.png}}\hfill\\
+	\vspace{0.025cm}
+	\setcounter{subfigure}{0}
+	\rotatebox{90}{\small \phantom{zz}{Ours}}\hspace{0.02cm}
+	\subfloat[Self Shadow]{\includegraphics[width=0.233\columnwidth]{fig/chrom/DSC01538/our.png}}\hfill
+	\subfloat[Soft Shadow]{\includegraphics[width=0.233\columnwidth]{fig/chrom/real271_shad/our.png}}\hfill
+	\subfloat[Soft Shadow]{\includegraphics[width=0.233\columnwidth]{fig/chrom/DSC_0587_shad/our.png}}\hfill
+	\subfloat[Hard Shadow]{\includegraphics[width=0.233\columnwidth]{fig/chrom/77-2/our.png}}\hfill\\
+	\caption{We visualize the light-invarint map and chromaticity map used in chromaticity consistency loss $\mathcal{L}_{\rm ch}$. By removing the light color, the surface color of the shadow and non-shadow regions are consistent (e.g. the surface color of the wall is orange, and the color restoration of shadow regions is supposed to be orange in the second soft shadow example).}
+	\label{fig:color}
+\end{figure}
+
+%
+In outdoor scenes, non-shadow regions are mostly lit by both the sunlight and skylight, while shadow regions are mostly lit by the skylight~\cite{finlayson1995color,kawakami2005consistent}. Depending on the skylight when an image is captured, the light colors between the shadow and non-shadow regions might be different, even when the surface colors in both regions are the same. 
+Ideally, the colors of the shadow regions after shadow removal should be consistent with those of the non-shadow regions of the same object.
+In other words, once we remove the shadows, we need to ensure that the recovered colors are the same as those under the sunlight and skylight. 
+%
+In indoor, this problem normally is not as significant as in outdoor, unless the inter-reflected light has a color that is considerably different from that of the ambient light.
+
+
+In our framework, ShadowDiffusion learns how to diffuse input shadow images to our output shadow-free images. Besides learning the shadow characteristics, our ShadowDiffusion also learns how to transform the colors of shadow regions to those of non-shadow regions based on the initial non-shadow images.
+%
+However, there is no explicit constraint that enforces color consistency before and after shadow removal.
+%
+For this reason, we propose the use of a chromaticity consistency loss. 
+%
+The key idea of this loss is to keep image chromaticity consistent and independent from the light colors.
+
+
+Finlayson et al.~\cite{finlayson2009entropy} introduce the log-chromaticity space where a surface color under different light colors can form a single line (the projection direction is $\alpha$) and thus can be projected into a single log-chromaticity value. 
+%
+Note, ${\{\chi_{1},\chi_{2}\}}$ is the log-chromaticity value ${\{\log(B/G),\log(R/G)\}}$, where $R,G,B$ are the color channels. 
+%
+Based on this, we can enforce that a pixel's color should have the same projected log-chromaticity value before and after shadow removal, which can be expressed as a light-invariant map $\mathcal{I}_\alpha = {\chi_1\cos\alpha + \chi_2\sin\alpha}$, and chromaticity map ${\chi_\alpha} = {P_\alpha} \cdot {\chi}$, where $P_\alpha$ is a projector matrix.
+Our chromaticity consistency loss is defined as:
+\begin{align}\label{eq:loss_ch}
+\mathcal{L}_{\rm ch} (\x,\x_0) = \left \| \chi_\alpha(\x)-\chi_\alpha(\x_0) \right \| _{1}.
+\end{align}
+
+Note that, for the self shadow example in Fig.~\ref{fig:chself} or other shadow examples in Fig.~\ref{fig:color}, which do not have the paired clean images $\x_0$ used in training, our chromaticity consistency loss can work during inference. The chromaticity consistency used in inference is defined as: 
+\begin{align}\label{eq:loss_ch_nogt}
+\mathcal{L}_{\rm chinf} (\x,\xw) = \left \| \chi_\alpha(\x)-\chi_\alpha(\xw) \right \| _{1}.
+\end{align}
+The reason is from the input shadow image $\xw$ and the corresponding projection direction $\alpha$, using the surface line constraint, the light-invariant map and the chromaticity map provide the initial shadow-free guidance (see Fig.~\ref{fig:chself}) to the ShadowDiffusion network.
+%
+This constraint helps enforce the consistency of the colors/chromaticities of the pixels, so that the colors are at least not transformed into arbitrary colors by our network. 
+
+
+\section{Experiments}
+\label{sec:experiments}
+\begin{figure}[t]
+	\centering
+	\captionsetup[subfigure]{font=small, labelformat=empty}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/object/USR_shadow_0099/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/object/USR_shadow_0099/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/object/USR_shadow_0099/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/object/USR_shadow_0099/pami21.png}}\hfill%~\cite{le2021physics}
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/object/USR_shadow_0099/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/object/USR_shadow_0099/iccv21.png}}\hfill\\
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat[Input]{\includegraphics[width = 0.078\textwidth]{fig/AISTD/117-1/s.png}}\hfill
+	\subfloat[Ours]{\includegraphics[width = 0.078\textwidth]{fig/AISTD/117-1/our.png}}\hfill
+	\subfloat[G2R~\cite{liu2021from}]{\includegraphics[width = 0.078\textwidth]{fig/AISTD/117-1/g2r21.png}}\hfill
+	\subfloat[SP+M+I]{\includegraphics[width = 0.078\textwidth]{fig/AISTD/117-1/pami21.png}}\hfill
+	\subfloat[SG~\cite{wan2022sg}]{\includegraphics[width = 0.078\textwidth]{fig/AISTD/117-1/eccv22.png}}\hfill
+	\subfloat[DC~\cite{jin2021dc}]{\includegraphics[width = 0.078\textwidth]{fig/AISTD/117-1/iccv21.png}}\hfill\\
+	\vspace{0.025cm}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6602/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6602/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6602/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6602/cvpr22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6602/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6602/iccv21.png}}\hfill
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/_MG_5812/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/_MG_5812/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/_MG_5812/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/_MG_5812/cvpr22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/_MG_5812/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/_MG_5812/iccv21.png}}\hfill
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6425/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6425/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6425/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6425/cvpr22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6425/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6425/iccv21.png}}\hfill
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat[Input]{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6160/s.png}}\hfill
+	\subfloat[Ours]{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6160/our.png}}\hfill
+	\subfloat[G2R~\cite{liu2021from}]{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6160/g2r21.png}}\hfill
+	\subfloat[BM~\cite{zhu2022bijective}]{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6160/cvpr22.png}}\hfill
+	\subfloat[SG~\cite{wan2022sg}]{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6160/eccv22.png}}\hfill
+	\subfloat[DC~\cite{jin2021dc}]{\includegraphics[width = 0.078\textwidth]{fig/SRD/IMG_6160/iccv21.png}}\hfill
+	\caption{Hard shadow removal results on the USR (top row), AISTD (second row) and SRD (bottom four rows) datasets.}
+	\label{fig:hard}
+\end{figure}
+
+
+\begin{table}[t!]
+	\small
+	\centering
+	\renewcommand{\arraystretch}{1.2}
+	\caption{Quantitative results on the SRD dataset. S, NS and ALL represent shadow, non-shadow and entire regions, respectively. M shows that ground truth shadow masks are also used in training.}
+	%
+	\setlength{\tabcolsep}{4pt}
+	\resizebox{0.48\textwidth}{!}{
+		\begin{tabular}{l|c|ccc|ccc|ccc}
+			\hline
+			\multicolumn{1}{l|}{\multirow{2}{*}{Methods}} &\multicolumn{1}{c|}{\multirow{2}{*}{Train}} & \multicolumn{3}{c|}{RMSE $\downarrow$} & \multicolumn{3}{c|}{PSNR $\uparrow$} & \multicolumn{3}{c}{SSIM $\uparrow$} \\ \cline{3-11} 
+			~ & & S & NS & ALL & S & NS & ALL & S & NS & ALL\\\cline{2-10} 
+			\hline
+			DC~\cite{jin2021dc}  &UP & 7.70 & 3.65 & 4.66 & 34.00 & 35.53 & 31.53 & 0.975 & 0.981 & 0.955 \\
+			\hline			
+			DHAN \cite{cun2020towards}   &P+M   & 8.94 & 4.80 & 5.67 & 33.67 & 34.79 & 30.51 & 0.978 & 0.979 & 0.949 \\
+			Auto~\cite{fu2021auto}&P+M & 8.56 & 5.75 & 6.51 & 32.26 & 31.87 & 28.40 & 0.966 & 0.945 & 0.893 \\
+			%CANet$^*$ \cite{chen2021canet} &P+M & 7.82 & 5.88 & 5.98 & - & - & - & - & - & -\\
+			EM'22~\cite{zhu2022efficient}&P+M &10.00 & 6.04 &7.20  & 29.44 & 26.67 & 24.16 & 0.937 & 0.879 & 0.779 \\
+			BM'22 \cite{zhu2022bijective}&P+M &\underline{6.61} & 3.61 & 4.46 &\underline{35.05} &36.02 &\underline{31.69} &\underline{0.981} & 0.982 & 0.956 \\
+			SG'22~\cite{wan2022sg} &P+M & 7.53 &\underline{3.08} &\underline{4.33} & 33.88 &\underline{36.43} & 31.38 &\underline{0.981} &\underline{0.987} &\underline{0.959}\\
+			\hline
+			DSC \cite{hu2019direction}          &P   & 8.81 & 4.41 & 5.71 & 30.65 & 31.94 & 27.76 & 0.960 & 0.965 & 0.903 \\
+			DeSh~\cite{qu2017deshadownet}&P   & 11.79& 4.84 & 6.64 & - & - & - & - & - & -\\
+			Ours &P &\textbf{5.70} & \textbf{2.72} & \textbf{3.59} &\textbf{37.45} &\textbf{38.12} &\textbf{34.11} &\textbf{0.984} &\textbf{0.988} &\textbf{0.968}\\\hline
+	\end{tabular}}
+	\label{tb:srd}
+\end{table}
+
+\begin{figure*}[t]
+	\centering
+	\captionsetup[subfigure]{font=small, labelformat=empty}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real262/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real262/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real262/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real262/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real262/pami21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real262/iccv21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real262/guo.png}}\hfill\\
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real258/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real258/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real258/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real258/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real258/pami21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real258/iccv21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/real258/guo.png}}\hfill\\
+	\vspace{0.025cm}
+	\setcounter{subfigure}{0}
+	\subfloat[Input]{\includegraphics[width = 0.140\textwidth]{fig/object/real271/s.png}}\hfill
+	\subfloat[Ours]{\includegraphics[width = 0.140\textwidth]{fig/object/real271/real271_shad.png}}\hfill
+	\subfloat[SG'22~\cite{wan2022sg}]{\includegraphics[width = 0.140\textwidth]{fig/object/real271/eccv22.png}}\hfill
+	\subfloat[G2R~\cite{liu2021from}]{\includegraphics[width = 0.140\textwidth]{fig/object/real271/g2r21.png}}\hfill
+	\subfloat[SP+M+I~\cite{le2021physics}]{\includegraphics[width = 0.140\textwidth]{fig/object/real271/pami21.png}}\hfill
+	\subfloat[DC~\cite{jin2021dc}]{\includegraphics[width = 0.140\textwidth]{fig/object/real271/iccv21.png}}\hfill
+	\subfloat[Guo~\cite{Guo12}]{\includegraphics[width = 0.140\textwidth]{fig/object/real271/guo.png}}\hfill
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6466/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6466/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6466/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6466/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6466/pami21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6466/iccv21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6466/cvpr22.png}}\hfill\\
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.140\textwidth,height=2.2cm]{fig/SRD/DSCF0466/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth,height=2.2cm]{fig/SRD/DSCF0466/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth,height=2.2cm]{fig/SRD/DSCF0466/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth,height=2.2cm]{fig/SRD/DSCF0466/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth,height=2.2cm]{fig/SRD/DSCF0466/pami21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth,height=2.2cm]{fig/SRD/DSCF0466/iccv21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth,height=2.2cm]{fig/SRD/DSCF0466/cvpr22.png}}\hfill\\
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat[Input]{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6577/s.png}}\hfill
+	\subfloat[Ours]{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6577/our.png}}\hfill
+	\subfloat[SG'22~\cite{wan2022sg}]{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6577/eccv22.png}}\hfill
+	\subfloat[G2R~\cite{liu2021from}]{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6577/g2r21.png}}\hfill
+	\subfloat[SP+M+I~\cite{le2021physics}]{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6577/pami21.png}}\hfill
+	\subfloat[DC~\cite{jin2021dc}]{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6577/iccv21.png}}\hfill
+	\subfloat[BM'22~\cite{zhu2022bijective}]{\includegraphics[width = 0.140\textwidth]{fig/SRD/IMG_6577/cvpr22.png}}\hfill
+	\caption{Shadow removal results on the soft shadow dataset LRSS (top three) and SRD (bottom three rows) datasets.}
+	\label{fig:soft}
+\end{figure*}
+
+
+\begin{table}[t!]
+	\small
+	\centering
+	\renewcommand{\arraystretch}{1.2}
+	\caption{RMSE results (lower is better) on the AISTD dataset.}
+	\setlength{\tabcolsep}{4pt}
+	\resizebox{0.48\textwidth}{!}{
+		\begin{tabularx}{\columnwidth}{ l|c|Y|Y|Y }
+			\toprule
+			Methods                       &Train &All &S &NS\\
+			\hline
+			Input Image                  &-        &8.5  &40.2 &2.6\\
+			\hline
+			MaskS.GAN~\cite{hu2019mask}   &UP &5.3 &12.5 &4.0\\
+			DC~\cite{jin2021dc} 	   &UP &4.6 &10.3 &3.5\\
+			LG~\cite{liu2021shadow}  &UP &4.4 &9.9 &3.4\\
+			\hline
+			Yang~\textit{et al.} \cite{Yang12}     &-        &16.0 &24.7 &14.4\\
+			Gong~\textit{et al.} \cite{Gong14}     &-        &-  &13.3 &-\\
+			wSP+M-Net~\cite{le2020shadow}      &M     &4.1  &9.7 &3.0\\
+			G2R~\cite{liu2021shadow}    &M     &3.9  &8.8 &\bf{2.9}\\
+			\hline
+			Guo~\textit{et al.} \cite{Guo11}      &P+M &6.1  &22.0 &3.1\\
+			ST-CGAN~\cite{wang2018stacked}        &P+M &8.7 &13.4 &7.9\\
+			DHAN~\cite{cun2020towards}            &P+M &7.9 &11.4 &7.2\\
+			Auto~\cite{fu2021auto}       &P+M &4.2 &6.5 &3.8\\
+			SP+M-Net~\cite{le2019shadow}          &P+M &3.9 &7.9 &3.1\\
+			SP+M+I-Net~\cite{le2021physics}       &P+M &3.6 &\underline{6.0} &3.1\\
+			BMNet'22 \cite{zhu2022bijective}      &P+M &\underline{3.5} &6.1 &\bf{2.9}\\
+			SG'22~\cite{wan2022sg}                &P+M &\underline{3.5} &\underline{6.0} &3.1\\
+			\hline
+			Deshadow~\cite{qu2017deshadownet}  &P   &7.6 &15.9 &6.0\\
+			SP+M-Net~\cite{le2019shadow}          &P &4.0  &8.2 &3.3\\
+			SP+M+I-Net~\cite{le2021physics}       &P   &4.0 &6.6 &3.5\\
+			
+			\hline
+			Ours                                   &P &3.6 &\bf{5.9} &\bf{2.9}\\
+			\bottomrule
+	\end{tabularx}}	
+	\label{tb:aistd}
+\end{table}
+
+
+To ensure fair comparisons in our experiments, all the baselines, including ours are trained and tested on the same datasets. 
+We trained our ShadowDiffusion on each dataset and tested on the corresponding dataset, 
+e.g., for SRD~\cite{qu2017deshadownet}, we used 2680 SRD and 408 SRD images for training and testing, respectively.
+
+\paragraph{Evaluation Metrics}
+%\noindent \textbf{Evaluation Metrics}
+Following~\cite{Guo12,hu2019mask}, the evaluation metrics we use is the root mean square error (RMSE)\footnote{As mentioned in~\cite{gitcoderef}, the RMSE evaluation used by all methods computes MAE (mean absolute error).} in the LAB color space between the shadow remove the output and its ground truth.
+Following~\cite{fu2021auto}, we calculated the peak signal-to-noise ratio (PSNR) and structural similarity (SSIM) in the RGB color space; the higher, the better.\footnote{The evaluation codes adopt from~\cite{fu2021auto}.} 
+
+\paragraph{Baselines}
+%\vspace{0.02cm}
+%\noindent \textbf{Baselines}
+We include SOTA supervised methods SG-ShadowNet'22~\cite{wan2022sg}, BMNet'22~\cite{zhu2022bijective}, SP+M+I-Net~\cite{le2021physics}; 
+the SOTA weakly supervised method G2R-ShadowNet~\cite{liu2021shadow};
+and the SOTA unsupervised method DC-ShadowNet~\cite{jin2021dc}.
+We also compared ShadowDiffusion to the traditional method Guo\cite{Guo12}.
+%More baseline results are in the supplementary material. 
+
+\subsection{Shadow Removal on Hard Shadows} 
+The SRD dataset consists of 2680 training and 408 testing pairs of shadow and shadow-free images without shadow masks. It contains hard shadows and soft shadows. 
+For the baseline methods that require shadow masks, we additionally use the processing results of DHAN~\cite{cun2020towards} for SRD shadow masks.
+
+Fig.~\ref{fig:hard} (bottom four rows) and Table~\ref{tb:srd} show the hard shadow removal results on the SRD dataset.
+Fig.~\ref{fig:soft} (bottom three rows) show the soft shadow removal results on the SRD dataset, which show our ShadowDiffusion outperforms the SOTA methods.
+The best and the second-best values for each metric are highlighted in \textbf{bold} and \underline{underlined}, respectively.
+Our ShadowDiffusion presents a competitive shadow removal performance by outperforming~\cite{zhu2022bijective} by 14\% error reduction (from 6.61 to 5.70) in terms of RMSE on shadow areas, 25\% (from 3.61 to 2.72) on non-shadow areas and 20\% (from 4.46 to 3.59) on the overall areas.
+Moreover, ShadowDiffusion achieves the highest PSNR and SSIM values in shadow, non-shadow and overall areas.
+
+The AISTD dataset contains 1870 image triplets (shadow images, shadow-free images, and shadow masks), with 1330 triplets for training and 540 triplets for testing. The shadows in AISTD dataset are mainly hard shadows. 
+The AISTD dataset (A means adjusted) reduced the color discrepancy between shadow and shadow-free images of the original ISTD dataset~\cite{wang2018stacked}, thus is more reliable to use in training.
+%
+Fig.~\ref{fig:hard} (second row) and Table~\ref{tb:aistd} show results on the AISTD dataset, which demonstrate the superiority of our ShadowDiffusion compared to baseline results in terms of RMSE in shadow regions and non-shadow regions.
+%
+
+The USR dataset~\cite{hu2019mask} is an unpaired dataset, including hard, soft, and self shadows. 
+We evaluate on USR test shadow images and show results in Fig.~\ref{fig:hard} (first row).
+ 
+\subsection{Shadow Removal on Soft and Self Shadows} 
+The LRSS~\cite{gryka2015learning} is a soft shadow dataset with 134 shadow images\footnote{LRSS Dataset are obtained from their project website: http://visual.cs.ucl.ac.uk/pubs/softshadows/}; we followed~\cite{jin2021dc,gryka2015learning}, using the same 34 LRSS images with their corresponding shadow-free images for evaluation shown in Table~\ref{tb:lrss}. Our ShadowDiffusion achieves the highest PSNR and lowest RMSE.
+
+Fig.~\ref{fig:soft} (top three rows) show results on the LRSS dataset. 
+Besides the SOTA baselines, we compared to the traditional hard and soft shadow removal method~\cite{guo2012paired}.
+Since the majority of the SOTA baselines need the shadow mask for evaluation, we use the shadow mask provided by LRSS dataset~\cite{gryka2015learning}.
+However, the provided binary shadow mask does not consider the ambiguous boundaries of soft and self shadows, thus leading to remaining shadows in the ambiguous boundaries.
+
+UCF~\cite{zhu2010learning} and UIUC dataset~\cite{guo2011single}, contain 245 and 108 images. 
+UIUC provides 30 images where shadows are caused by objects in the scene, which are used for self shadow evaluation,
+the results are shown in Fig.~\ref{fig:self}.
+For the baseline methods require shadow masks, we additionally use the detection results of BDRAR~\cite{zhu2018bidirectional}.
+
+\begin{figure*}[t]
+	\centering
+	%\captionsetup[subfigure]{font=small, labelformat=empty}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/in-9/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/in-9/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/in-9/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/in-9/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/in-9/pami21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/in-9/iccv21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/in-9/iccv19.png}}\hfill\\
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01633/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01633/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01633/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01633/g2r21.png}}\hfill	
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01633/pami21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01633/iccv21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01633/iccv19.png}}\hfill\\
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/IMG_8180/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/IMG_8180/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/IMG_8180/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/IMG_8180/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/IMG_8180/pami21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/IMG_8180/iccv21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/IMG_8180/iccv19.png}}\hfill\\
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/tfile_image-4/s.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/tfile_image-4/our.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/tfile_image-4/eccv22.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/tfile_image-4/g2r21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/tfile_image-4/pami21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/tfile_image-4/iccv21.png}}\hfill
+	\subfloat{\includegraphics[width = 0.140\textwidth]{fig/object/tfile_image-4/iccv19.png}}\hfill\\
+	\vspace{0.02cm}
+	\setcounter{subfigure}{0}
+	\subfloat[Input]{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01538/s.png}}\hfill
+	\subfloat[Ours]{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01538/our.png}}\hfill
+	\subfloat[SG'22~\cite{wan2022sg}]{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01538/eccv22.png}}\hfill
+	\subfloat[G2R~\cite{liu2021from}]{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01538/g2r21.png}}\hfill
+	\subfloat[SP+M+I-Net~\cite{le2021physics}]{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01538/pami21.png}}\hfill
+	\subfloat[DC~\cite{jin2021dc}]{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01538/iccv21.png}}\hfill
+	\subfloat[SP+M-Net~\cite{le2019shadow}]{\includegraphics[width = 0.140\textwidth]{fig/object/DSC01538/iccv19.png}}\hfill
+	\caption{Self shadow removal results on UIUC dataset. (a) Input images. (b) Our results. (c)$\sim$(g) Results of the state-of-the-art methods.}
+	\label{fig:self}
+\end{figure*}
+
+\subsection{Ablation Studies}
+Fig.~\ref{fig:ab} and Table.~\ref{tb:ablation} show the effectiveness of classifier-driven attention, structure preservation loss and chromaticity loss used in ShadowDiffusion.
+For the ablation studies of classifier-driven attention shown in Fig.~\ref{fig:ab} (first row), we remove the classifier in the U-Net architecture and can observe the remaining shadows. The activated shadow attention features are shown in Fig.~\ref{fig:attention}.
+From Fig.~\ref{fig:ab} (second row), the structure preservation loss help in maintaining the structures of the mountain, owing to the structure features (the self-similarity keys) of the pre-trained DINO-ViT.  
+The chromaticity loss enables our diffusion model to have consistent colors.
+%More results are in the supplementary material.
+
+\begin{table}
+	\small
+	\centering
+	\thickmuskip=3mu
+	\renewcommand{\arraystretch}{1.2}
+	\caption{Results on the LRSS (soft shadow) dataset. M and S represent ground truth shadow masks and synthetic data are used in training. Our ShadowDiffusion does not need shadow masks.}
+	\setlength{\tabcolsep}{4pt}
+	\resizebox{1\columnwidth}{!}{
+	\begin{tabular}{c|c|cccc|cc|cc}
+		\toprule
+		Method   &\cite{Guo12}   &\cite{gryka2015learning} &\cite{cun2020towards}  &\cite{le2019shadow} &\cite{hu2019mask} &\cite{jin2021dc} &\cite{Guo12}\footnotesize(auto) &Our\\\hline
+		RMSE$\downarrow$   &6.02     &4.38       &7.92 &7.48   &7.13     &\underline{3.48}  &5.87 &\bf{3.01}\\
+		PSNR$\uparrow$        &27.88    &29.25      &25.57&23.93  &25.12    &\underline{31.01} &28.02 &\bf{33.95} \\\hline
+		Train     &P+M           &P+M+S      &P+M+S      &P+M  &UP &UP &P &P\\
+		\bottomrule
+	\end{tabular}}
+	\label{tb:lrss}
+\end{table}
+
+\begin{table}[t!]
+	\small
+	\centering
+	\thickmuskip=3mu
+	\renewcommand{\arraystretch}{1.2}
+	\caption{Ablation experiments of our method using the SRD dataset. The numbers represent RMSE, lower is better.}
+	\setlength{\tabcolsep}{4pt}
+	\resizebox{0.39\textwidth}{!}{	
+	\begin{tabularx}{\columnwidth}{ c|Y|Y|Y }\hline
+		Method					   &S &NS &Overall\\\hline
+		w/o $\mathcal{L}_{\rm stru}$&6.21 &2.99 &3.94\\\hline
+		w/o attention              &5.88 &2.83 &3.72\\\hline
+		w/o $\mathcal{L}_{\rm ch}$ &5.79 &2.77 &3.66\\\hline
+		Our 			           &\bf 5.70 &\bf 2.72  &\bf 3.59\\\bottomrule	
+	\end{tabularx}}
+	\label{tb:ablation}
+\end{table}
+
+
+\begin{figure}[t]
+	\centering
+	%\captionsetup[subfigure]{font=small, labelformat=empty}
+	\setcounter{subfigure}{0}	
+	\subfloat[Input]{\includegraphics[width = 0.156\textwidth]{fig/object/DSC01624/s.png}}\hfill
+	\subfloat[w/o attention]{\includegraphics[width = 0.156\textwidth]{fig/ablation/DSC01624.png}}\hfill
+	\subfloat[w attention]{\includegraphics[width = 0.156\textwidth]{fig/object/DSC01624/our.png}}\hfill\\
+	\setcounter{subfigure}{0}
+	\subfloat[Input]{\includegraphics[width = 0.156\textwidth]{fig/object/DSC01609/s.png}}\hfill
+	\subfloat[w/o $\mathcal{L}_{\rm stru}$]{\includegraphics[width = 0.156\textwidth]{fig/ablation/22.png}}\hfill
+	\subfloat[w/ $\mathcal{L}_{\rm stru}$]{\includegraphics[width = 0.156\textwidth]{fig/object/DSC01609/our.png}}\hfill\\
+	\setcounter{subfigure}{0}
+	\subfloat[Input]{\includegraphics[width = 0.156\textwidth]{fig/object/p8010001-45/s.png}}\hfill
+	\subfloat[w/o $\mathcal{L}_{\rm ch}$]{\includegraphics[width = 0.156\textwidth]{fig/ablation/p8010001-45.png}}\hfill
+	\subfloat[w/ $\mathcal{L}_{\rm ch}$]{\includegraphics[width = 0.156\textwidth]{fig/object/p8010001-45/our.png}}\hfill\\
+	\caption{Ablation studies on classifier-driven attention, structure preservation loss and chromaticity loss.}
+	\label{fig:ab}
+\end{figure}
+
+
+
+\section{Conclusion}
+\label{sec:conclusion}
+In this paper, we have proposed ShadowDiffusion, the first conditional diffusion-based shadow removal framework.
+We inject classifier-driven attention to our ShadowDiffusion framework, so that our ShadowDiffusion can focus on hard, soft and self shadow regions.
+To guide our diffusion process to  preserve and recover structure information, we propose structure preservation loss. 
+Moreover, our chromaticity consistency loss keeps image chromaticity consistent and helps recover the color of shadow regions.
+Unlike existing methods, our ShadowDiffusion performs shadow removal robustly on hard, soft and self shadows. 
+%
+Our experiments show our method outperforms a SOTA method~\cite{zhu2022bijective} by 14\% error reduction (from 6.61 to 5.70) in terms of RMSE on shadow areas, 25\% (from 3.61 to 2.72) on non-shadow areas and 20\% (from 4.46 to 3.59) on the overall areas.
+
+\section*{Acknowledgment}
+This research/project is supported by the National Research Foundation, Singapore under its AI Singapore Programme (AISG Award No: AISG2-PhD/2022-01-037[T]), and partially supported by MOE2019-T2-1-130. 
+Robby T. Tan's work is supported by MOE2019-T2-1-130.
+
+%\clearpage
+
+{\small
+\bibliographystyle{ieee_fullname}
+\bibliography{egbib}
+}
+
+\end{document}

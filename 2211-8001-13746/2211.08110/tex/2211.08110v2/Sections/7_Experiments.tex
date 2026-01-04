@@ -1,0 +1,257 @@
+% \vspace{-5pt}
+\section{Experimental Results}
+% \vspace{-5pt}
+\label{sec:experiments}
+
+\subsection{Experimental Setup}
+
+Our experiments include adaptive token pruning and hardware implementation for ViTs with different pruning settings. Note that after token pruning we will apply 8-bit quantization on weight and activation, and all the quantization processes do not lose accuracy, except for 1.2\% on DeiT-T.
+
+\subsubsection{Training Setup for ViT Pruning}
+
+The baseline models with 32-bit floating-point precision are from the TorchVision library~\cite{Torchvision}.
+Our experiments are conducted on the ImageNet-1K dataset with various transformers backbones, including DeiT-T, DeiT-S, DeiT-B, LV-ViT-S, and LV-ViT-M, as shown in Table~\ref{tab:vit_backbone}.
+We follow the training settings in DeiT.
+Training on one selector insertion costs 30 epochs on 8 NVIDIA A100-SXM4-40GB GPUs.
+The training effort on block-to-stage training is listed in Table~\ref{tab:vit_backbone} which illustrates that the training effort of the entire block-to-stage pipeline is equivalent to the train-from-scratch of the backbone ViT.
+Through our training pipeline, we observe that 3$\sim$4 token selectors are suitable for most of the models.
+
+
+% Please add the following required packages to your document preamble:
+% \usepackage{multirow}
+\begin{table}[htb]
+\centering
+\vspace{-0.1in}
+\caption{Training effort for ViTs with different backbones.}
+\label{tab:vit_backbone}
+\vspace{-0.1in}
+\begin{tabular}{c|c|c|c|cc}
+\hline
+\multirow{2}{*}{\textbf{Model}} & \multirow{2}{*}{\textbf{\#Heads}} & \multirow{2}{*}{\textbf{\begin{tabular}[c]{@{}c@{}}Embed. \\ Dim.\end{tabular}}} & \multirow{2}{*}{\textbf{Depth}} & \multicolumn{2}{c}{\textbf{\#Epochs for Training}}                   \\ \cline{5-6} 
+                                &                                   &                                                                                  &                                 & \multicolumn{1}{c|}{\textbf{Baseline}} & \textbf{Ours} \\ \hline
+DeiT-T                          & 3                                 & 192                                                                              & 12                              & \multicolumn{1}{c|}{300}               & 270                            \\ \hline
+DeiT-S                          & 6                                 & 384                                                                              & 12                              & \multicolumn{1}{c|}{300}               & 270                            \\ \hline
+DeiT-B                          & 12                                & 768                                                                              & 12                              & \multicolumn{1}{c|}{300}               & 270                            \\ \hline
+LV-ViT-S                        & 6                                 & 384                                                                              & 16                              & \multicolumn{1}{c|}{400}               & 390                            \\ \hline
+LV-ViT-M                        & 8                                 & 512                                                                              & 20                              & \multicolumn{1}{c|}{400}               & 390                            \\ \hline
+\end{tabular}
+\vspace{-0.2in}
+\end{table}
+
+\subsubsection{Hardware Platform}
+
+Our hardware accelerator designs are evaluated on the Xilinx ZCU102 platform~\cite{ZCU102} with Zynq UltraScale+ MPSoC, containing 2520 DSPs, 912 BRAM blocks, and 274.1k LUTs.
+We use Vitis HLS to generate the FPGA accelerators.
+The synthesis and implementation of the designs are performed with the Xilinx Vitis 2020.1 tool~\cite{vitis}. The working frequency is set to 150 MHz.
+The data in all models are represented in an 8-bit fixed-point format.
+The hardware design for \M~is built based on state-of-the-art FPGA design for ViT~\cite{lizh2022logic} with the GEMM engine described in Section~\ref{sec:loop_GEMM}. Additionally, the \M~hardware design incorporates a token selector and polynomial approximation of nonlinear functions
+%into the GEMM engine to execute the token selection procedure 
+explained in Section~\ref{sec:token_selection} and~\ref{sec:approx}.
+
+\subsection{Accuracy and GMACs Results}
+
+Fig.~\ref{fig:user-trade-off} demonstrates that our models achieve better accuracy-computation trade-offs compared to other pruned or scaled models.
+Our \M~reduces the computation cost by $16.1\% {\sim} 42.6\%$ for various backbones with negligible $\leq 0.75\%$ accuracy degradation, which surpasses existing methods on both accuracy and efficiency.
+% On the lightweight DeiT-T, the proposed \M~ still reduces GMACs by $31\%$ with a negligible $0.1\% $ decrease of accuracy (72.10\% vs. 72.20\%).
+To explore model scaling on ViT, we train more DeiT models with the embedding dimension of 160/256/288/320 as our baselines.
+The accuracy improvement of HeatViT is 4\% (72.1\% vs. 68.1\% with 0.9 GMACs) over DeiT-T-160, 4.67\% (76.87\% vs. 72.20\% with 1.3 GMACs) over DeiT-T, and 0.81\% (79.34\% vs. 78.53\% with 2.64 GMACs) over DeiT-S-288.
+Additionally, our method can prune up to 23.1\% on DeiT-T and 16.1\% on DeiT-S without any accuracy degradation.
+
+% \input{Tables/ViT_Pruning_Works}
+% \input{Tables/Main_Results}
+% \begin{figure*}[htb]
+% \centering
+% \includegraphics[width=1.5\columnwidth]{Figs/fpga_main_flops_acc_test.pdf}
+% \caption{Computation (GMACs) and top-1 accuracy trade-offs on ImageNet. Our models can achieve better trade-offs compared to other pruned or scaled models.}% GMACs and accuracy reductions are calculated from their corresponding dense model.} %Note that ``*'' refers to our reproduced results to obtain models with similar FLOPs for comparison. Baseline/160/192/288/384/512/768 indicates the embedding dimensions.}
+% \label{fig:main_flops}
+% \end{figure*}https://www.overleaf.com/project/6338bee4ec1dd54d2be36bee
+% \begin{table}[htb]
+% \centering
+% \tabcolsep 4pt
+% \caption{Effect of multi-heads in DeiT-T.}
+% \vspace{-0.1in}\label{tab:multihead}
+% % \resizebox{0.95\columnwidth}{!}{
+% \begin{tabular}{ccccc}
+% \toprule
+%     \bf Method & \bf Pruning & \bf Multi-Head &\bf \#GMACs &\bf Top-1 Acc. (\%)   \\
+% \midrule
+% \M & Yes & Yes  & 0.77 & 71.60 \\
+% \M & Yes & No  & 0.77 & 71.06 \\
+% \hline 
+% \M & Yes & Yes & 0.54 & 70.30 \\
+% \M & Yes & No  & 0.54 & 69.32\\
+% \bottomrule
+% \end{tabular}
+% \vspace{-0.4cm}
+% % }
+% \end{table}
+
+
+
+% \subsection{Ablation Studies--Software Side}
+% \subsubsection{Token Selector with Multi-Heads or Single-Head}
+
+% We employ our method both with multi-head and single-head structure respectively.
+% As shown in Table~\ref{tab:multihead} our multi-head design can improve the accuracy by 0.54\% (71.6\% vs. 71.06\%), and 0.98\% (70.30\% vs. 68.32\%).
+\begin{figure}[tb]
+\centering
+\vspace{-0.2in}
+\includegraphics[width=1 \columnwidth]{Figs/token_selector.pdf}
+\vspace{-0.3in}
+\caption{Comparison of different token selector structures. We use DeiT-T (72.2\%, 1.3 GMACs) as the baseline.}
+\label{fig:selector_structure}
+\vspace{-0.1in}
+\end{figure}
+\input{Tables/Hardware_Utilization}
+
+\subsubsection{Operations in Token Selector}
+We compare different selector structures with the same computation cost of 0.9 GMACs in Fig.~\ref{fig:selector_structure}.
+MLP-based token selectors outperform convolution-based ones under different combinations. 
+In addition, MLP-based selectors bring more benefits than convolution-based ones, since we reuse the GEMM on the FC operation of original ViTs without opening additional resources for the new computation design.
+
+For the activation functions, GELU outperforms ReLU~\cite{agarap2018deep} and Hardswish~\cite{howard2019searching} continuously.
+Even though ReLU and Hardswish can be directly deployed on FPGAs, the resource utilization of GELU can be improved to $35\times$$\sim$$572\times$ by the polynomial approximation (Section~\ref{sec:approx}).
+
+
+
+% \subsubsection{Effect of the Token Packager}
+
+% We apply our method both with and without the token packager.
+% As shown in Table~\ref{tab:token_pack}, our token packager can improve the accuracy by 0.52\% (72.10\% vs. 71.58\% under 0.9 GMACs), and 1.74\% (70.30\% vs. 68.56\% under 0.54 GMACs). 
+% \begin{table}[htb]
+% \centering
+% \tabcolsep 4pt
+
+% \caption{Effect of token pruning and packaging for DeiT-T.}
+% \label{tab:token_pack}
+% \vspace{-0.1in}
+% % \resizebox{0.95\columnwidth}{!}{
+% \begin{tabular}{ccccc}
+% \toprule
+% \bf Method & \bf Pruning & \bf Packaging &\bf \#GMACs &\bf Top-1 Acc. (\%)   \\
+% \midrule
+% Baseline & No & Yes & 1.30  & 72.20 \\\hline 
+% \M & Yes & Yes & 0.90 & 72.10 \\
+% \M & Yes & No  & 0.90 & 71.58 \\\hline 
+% \M & Yes & Yes & 0.54 & 70.30 \\
+% \M & Yes & No  & 0.54 & 68.56\\
+% \bottomrule
+% \end{tabular}
+% \vspace{-0.4cm}
+% % }
+% \end{table}
+
+% \subsubsection{Effect of Token Selector Number and Location}
+
+% Based on the trend of Figure~\ref{fig:model_location}, we divide the evolution of the pruning rate into 2, 3, and 4 stages.
+% We keep the appropriate selectors and re-finetune the whole model (10$\sim$15 epochs).
+% In Table~\ref{selector_location}, the 3-6-9 division style has the highest accuracy and the lowest computation cost, just like 3-5-7-9.
+% In order to achieve a hardware-efficient design, we choose 3-6-9 as the best.
+% For another 3-stage style, 1-6-9, the accuracy and computation cost are both not ideal.
+% Due to insufficient encoding, it is difficult to perform token pruning in the front blocks of ViTs.
+% Meanwhile, for the 3-6-11 style, both the accuracy and computation cost are slightly inferior to the 3-6-9 style.
+% The possible reason is the pruning rate of the second stage should be smaller than the third stage and the coverage of the second stage is too wide.
+% The similar reason can support the 2-stage style, 6-9.
+% \begin{table}[htb]
+% % \small
+% \centering
+% \tabcolsep 4pt
+
+% \caption{Comparison between different token selector insertion strategies on DeiT-S with 12 blocks.}
+% \label{selector_location}
+% \vspace{-0.1in}
+% % \resizebox{1.0\columnwidth}{!}{
+% \begin{tabular}{lccc}
+% \toprule
+% \textbf{\makecell[l]{Token Selector \\ Location}} &\bf Params (M) &\bf \#GMACs &\bf Top-1 Acc. (\%)   \\
+%  \hline
+%   3-6-9          &22.13     &\textbf{2.65}      & \textbf{79.34} \\
+%   1-6-9          &22.13     &2.70      & 76.10 \\
+%   3-6-11         &22.13     &2.72      &78.76  \\\hline 
+%   6-9            &22.10     &2.71      &78.53  \\\hline 
+%   3-5-7-9        &22.16     &2.66      & 79.34 \\
+% \bottomrule
+% \end{tabular}
+% \vspace{-0.4cm}
+% % }
+% \end{table}
+
+% \input{Tables/Hardware_Utilization}
+% \begin{figure*}[tb]
+% \centering
+% \includegraphics[width=1.8\columnwidth]{Figs/hardware_tmp.pdf}
+% \vspace{-0.15in}
+% \caption{\rev{Accuracy and hardware results under different pruning settings for various ViTs on ImageNet dataset.}}
+% \label{fig:hd_tmp_results}
+% \vspace{-0.3cm}
+% \end{figure*}
+
+
+\subsection{Hardware Results} 
+
+Multiple hardware accelerators are designed according to the number of heads in a specific ViT. As shown in Table~\ref{tab:result_hardware}, with the same total degree of computation parallelism, the resource utilization and power of DeiT-S and LV-ViT-S designs are higher than those of DeiT-T ones, since DeiT-T has 3 heads while DeiT-S and LV-ViT-S all have 6 heads, requiring more BRAM space to accommodate data of all the attention heads. This trend is similar for DeiT-B (12 heads).
+
+Compared with the baseline hardware designs (16-bit and no token pruning), the accelerators with token selector in \M~framework utilize 9\% more DSPs and 8\% more LUTs for DeiT-T, 8\% more DSPs and 5\% more LUTs for DeiT-S and LV-ViT-S, 11\% more DSPs and 6\% more LUTs for DeiT-B.
+This demonstrates that the control flow to support adaptive token pruning introduces negligible resource utilization overhead.
+After the token pruning, the frame rate increases from 78.3 FPS to 142.7 FPS (1.82$\times$) for DeiT-T,  from 25.9 FPS to 57.6 FPS (2.22$\times$) for DeiT-S, from 19.4 FPS to 46.9 FPS (2.42$\times$) for LV-ViT-S, and from 11.2 FPS to 28.9 FPS (2.58$\times$) for DeiT-B.
+Furthermore, we deploy the 8-bit fixed-point quantization on models to achieve another 1.90$\times$ speedup, ending up the final speedup with 3.46$\times$ (271.2 FPS) for DeiT-T, 4.22$\times$ (109.2 FPS) for DeiT-S, 4.59$\times$ (89.1 FPS) for LV-ViT-S, and 4.89$\times$ (54.8 FPS) for the DeiT-B.
+% Note that all the quantization process do not lose accuracy, except for 1.2\% on DeiT-T.
+
+\subsubsection{Comparisons with CPUs and GPUs}
+
+% \begin{figure}[htbp]
+% \centering
+% % \vspace{-0.2in}
+% \includegraphics[width=1\columnwidth]{Figs/cpu-gpu.pdf}
+% \vspace{-0.1in}
+% \caption{Comparison of energy efficiency and speedup between \M~over and embedded CPU/GPU. %\zf{update this figure with the correct reults. Right figure, add another breakdown of speedup from quantization, i.e., FPGA-16bit, FPGA-8-bit.}
+% }
+% \label{fig:speedup_energy}
+% \vspace{-0.2cm}
+% \end{figure}
+
+% \begin{figure}[tb]
+% \vspace{-0.1cm}
+% \begin{minipage}{0.50\linewidth}
+%     \centering
+%     % \captionsetup{type=figure}
+%     \includegraphics[width=1.1\columnwidth]{Figs/energy_efficiency_breakdown.pdf}
+%     % \caption{}
+%     \label{fig:headattention}
+% 	\end{minipage}\hfill
+% 	\begin{minipage}{0.50\linewidth}
+%         \centering
+%         % \captionsetup{type=figure}
+%         \includegraphics[width=1.1\columnwidth]{Figs/speedup_breakdown.pdf}
+% % \caption{The CKA between the final CLS token and other tokens.}
+% 	\end{minipage}
+% \vspace{-0.4cm}
+% \caption{\rev{Comparison with energy efficiency between HeatViT over and embedded CPU/GPU. Speedup by pruning is shown here.}}
+% \label{fig:comparison}
+% \end{figure}
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=1\columnwidth]{Figs/speedup_breakdown.pdf}
+\vspace{-0.3in}
+\caption{Comparison of energy efficiency between HeatViT and TX2 CPU/GPU with the improvement breakdown of different techniques.}
+\label{fig:comparison}
+\vspace{-0.1in}
+\end{figure}
+
+We also test DeiT-T, DeiT-S, LV-ViT-S, and DeiT-B on Jetson TX2 with 4-core ARM CPU and NVIDIA Pascal GPU, and compared them with our FPGA (ZCU102) implementation.
+Since MSA and FFN computations are reduced by token pruning, CPUs and GPUs can also be accelerated.
+And TX2 CPU/GPU does not support low-bit computation,  so we only present the full precision model for them with adaptive token pruning as shown in Fig.~\ref{fig:comparison}.
+All the results are normalized against the original model on TX2 CPU without token pruning. 
+First, our final FPGA implementation achieves the highest $1827\times\sim3013\times$ speedup with 9.453W, 10.697W, and 11.352W power for different designs. 
+While the baseline FPGA design~\cite{lizh2022logic} (16-bit and no token pruning) achieves 373$\times$$\sim$870$\times$ speedup, token pruning can bring 1.82$\times$$\sim$2.58$\times$ speedup and ambitious 8-bit quantization can contribute another 1.90$\times$ speedup.
+Second, with token pruning, TX2 GPU achieves 647$\times$$\sim$814$\times$ speedup with 12W power and TX2 CPU achieves 1.78$\times$$\sim$2.67$\times$ speedup with 4W power.
+For the energy efficiency, our FPGA implementation achieves 4.8 FPS/W$\sim$28.7 FPS/W, which is 242.6$\times$$\sim$719.0$\times$ higher than TX2 CPU and 3.0$\times$$\sim$4.7$\times$ higher than TX2 GPU (with token pruning).
+%Eventually, the speed of \M~is significantly improved, demonstrating the effective combination of data-level pruning and 8-bit fixed-point quantization techniques in \M.
+%Moreover, it has a highly parallelized structure and all the computation components are friendly to be accelerated.
+
+
+% \subsubsection{End-to-End Performance with Approximation}
+% \textbf{Roofline Analysis;}
+% \subsubsection{Breakdown of Speedup}
+% \textbf{Efficiency-Accuracy Trade-offs.}

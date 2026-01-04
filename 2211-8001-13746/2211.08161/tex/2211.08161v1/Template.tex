@@ -1,0 +1,828 @@
+% Template for ICIP-2022 paper; to be used with:
+%          spconf.sty  - ICASSP/ICIP LaTeX style file, and
+%          IEEEbib.bst - IEEE bibliography style file.
+% --------------------------------------------------------------------------
+\documentclass{article}
+\usepackage{spconf,amsmath,graphicx,multirow,subcaption}
+\usepackage{comment}
+\usepackage{color, colortbl}
+\usepackage[usenames,dvipsnames]{xcolor}
+\usepackage{makecell}
+% Example definitions.
+% --------------------
+\def\x{{\mathbf x}}
+\def\L{{\cal L}}
+\newcommand{\COMMENT}[1]{}
+
+% Title.
+% ------
+%\title{FEATURE BASED DISTILLATION FOR CONTINUAL LEARNING  IN SPOKEN LANGUAGE UNDERSTANDING}
+%\title{REHEARSAL AND DISTILLATION STRATEGIES FOR CONTINUAL LEARNING IN SPOKEN LANGUAGE UNDERSTANDING}
+
+%\title{CORROBORATING THE COMPLEMENTARY USE OF REHEARSAL AND KNOWLEDGE DISTILLATION IN CONTINUAL LEARNING FOR SPOKEN LANGUAGE UNDERSTANDING}
+
+\title{EXPLORING THE JOINT USE OF REHEARSAL AND KNOWLEDGE DISTILLATION IN CONTINUAL LEARNING FOR SPOKEN LANGUAGE UNDERSTANDING}
+
+%
+% Single address.
+% ---------------
+
+%\name{Umberto Cappellazzo, Daniele Falavigna, Alessio Brutti}
+%\address{Author Affiliation(s)}
+
+%
+% For example:
+% ------------
+%\address{School\\
+%	Department\\
+%	Address}
+%
+% Two addresses (uncomment and modify for two-address case).
+% ----------------------------------------------------------
+%\twoauthors
+%  {A. Author-one, B. Author-two\sthanks{Thanks to XYZ agency for funding.}}
+%	{School A-B\\
+%	Department A-B\\
+%	Address A-B}
+%  {C. Author-three, D. Author-four\sthanks{The fourth author performed the work
+%	while at ...}}
+%	{School C-D\\
+%	Department C-D\\
+%	Address C-D}
+%
+
+\twoauthors
+  {Umberto Cappellazzo}
+	{University of Trento, Trento, Italy\\{\tt{umberto.cappellazzo@unitn.it}}}
+  {Daniele Falavigna, Alessio Brutti}
+	{Fondazione Bruno Kessler, Trento, Italy\\{\tt (falavi,brutti)@fbk.eu}}
+
+\newcommand{\df}[1]{{\bf [\textcolor{red}{Daniele. #1}{\bf ]}}}
+\newcommand{\uc}[1]{{\bf [\textcolor{blue}{Umberto. #1}{\bf ]}}}
+\newcommand{\ab}[1]{{\bf [\textcolor{orange}{Alessio. #1}{\bf ]}}}
+
+\begin{document}
+\ninept
+%\linespread{0.55}
+%
+\maketitle
+%
+\begin{abstract}
+%In this paper we address continual learning on a spoken language understanding domain. 
+%\COMMENT{Starting from the result that replay based methods are the most effective for continual learning in many applications} We propose to use a novel knowledge distillation approach 
+%by regularizing the usual cross-entropy  loss with a mean squared error loss computed over
+%feature vectors encoded by the employed neural model.
+%We experiment on several losses combination, involving different amounts of 
+%historical (rehearsal) data, and perform an ablation study also comparing with the most popular
+%continual learning methods. We  demonstrate that, in the considered application scenario,
+%the use of feature based distillation is  effective, particularly if
+%applied only to the data in the  rehearsal memory, thus simplifying the whole continual learning  process. 
+
+Continual learning refers to a dynamical framework in which a model or agent receives a stream of non-stationary data over time and must adapt to new data while preserving previously acquired knowledge. Unfortunately, deep neural networks fail to meet these two desiderata, incurring the so-called catastrophic forgetting phenomenon. Whereas a vast array of strategies have been proposed to attenuate forgetting in the computer vision domain, for speech-related tasks, on the other hand, there is a dearth of works.
+
+In this paper, we turn our attention toward the joint use of rehearsal and knowledge distillation (KD) approaches for spoken language understanding under a class-incremental learning scenario. We report on multiple KD combinations at different levels in the network, showing that combining feature-level and predictions-level KDs leads to the best results. Finally, we provide an ablation study on the effect of the size of the rehearsal memory that corroborates the appropriateness of our approach for low-resource devices.
+
+
+\end{abstract}
+%
+\begin{keywords}
+Continual Learning, Spoken Language Understanding, Experience Rehearsal, Knowledge Distillation
+\end{keywords}
+%
+\section{Introduction}
+\label{sec:intro}
+%\ab{forse ridurre} 
+Nowadays speech-related applications, such as voice assistants and home devices, have become ubiquitous in our society. Although current acoustic models can be trained on very large datasets consisting even of hundreds of thousands of hours, it is often necessary to adapt these models to domains and scenarios never seen during training, and so deviating from the standard i.i.d. paradigm. Unfortunately, deep models tend to completely erase the past knowledge when data from a new domain emerge, leading to the so-called catastrophic forgetting phenomenon \cite{mccloskey1989}.
+This effect is also detrimental for large-scale speech pre-trained models, such as \cite{wav2vec, wavlm}, for which a retraining phase is computationally very costly~\cite{jin2021lifelong}.
+%To tackle this problem a set, usually small, of target domain data is employed to adjust the parameters of previously trained models. Unfortunately, data from previous classes are often not present or are poorly represented in the adaptation set, leading to the so called
+%When models based on deep neural networks (DNNs)  are used in applications,  this adaptation process can cause performance drawback   due to {\em catastrophic forgetting} \cite{mccloskey1989}, i.e. the removal of most of the past information from the given models. 
+ %performance drawback due to 
+% {\em catastrophic forgetting} \cite{mccloskey1989} effect, i.e. the removal of most of the past information from the models, in particular when deep neural networks (DNNs) are used.
+
+
+%To overcome this limitation 
+A possible solution is represented by continual learning (CL) (or life-long learning) \cite{parisi2019continual,lesort2020continual}: a set of machine learning tools, %largely investigated in the past especially in the area of image processing, 
+ largely investigated in computer vision \cite{li2017learning,rebuffi2017icarl,chaudhry2018riemannian,hou2019learning}, aimed at learning without forgetting.
+The goal of CL is to adapt a given model to the task required by a new, never seen, domain while preserving the ability to handle the tasks of previous domains. CL approaches proposed in the literature can be divided into three categories: {\em a)} methods based on a regularisation loss \cite{li2017learning, kirkpatrick2017overcoming} that prevents the parameters from changing widely, {\em b)} rehearsal methods based on the replay of historical data \cite{hayes2021replay, rebuffi2017icarl} (either training samples \cite{lopez2017gradient} or model weights \cite{rosenfeld2018incremental}), and {\em c)} methods that apply some modifications to the architecture of the model \cite{rusu2016progressive,yan2021dynamically}. 
+%CL (or long-life learning) based approaches  try to adapt  the parameters of a given DNN model in order to solve the task required by a new, never seen, domain  while preserving the ability of the model to handle the tasks of the source or old domains. The approaches proposed in the literature for addressing CL  can be divided into two different categories: methods based on the usage of a regularisation loss \cite{li2017learning, kirkpatrick2017overcoming}  that prevents the parameters of existing models to change widely, and methods based on the  replay of historical data \cite{hsu2018re, rebuffi2017icarl} (either training samples \cite{lopez2017gradient} or model weights \cite{xu2018reinforced, rosenfeld2018incremental}).
+
+%In this work, similarly to previous works \cite{huang2022progressive} \uc{Daniele suggests that we should add some other papers. Which kind of paper? Others related to CL for speech/KWS?} on keyword spotting applications, we apply CL in a class incremental learning setting, derived from a spoken language understanding (SLU) application domain. To the best of our knowledge this is the first time that CL is experimented on such a task. Basically, a given speech  utterance has to be mapped into one, among $N$, intents using an end-to-end framework based on a neural model. Intents are supposed to be seen incrementally, along successive training steps (also called tasks), during the usage of the system.
+
+Similarly to what has been done in \cite{huang2022progressive} for keyword spotting (KWS), we apply CL in a class-incremental learning (CIL) setting,
+%\uc{Possiamo abbreviare Class Incremental CL con CiCL, può andare bene? Così usiamo questo acronimo ogniqualvolta lo citiamo.}
+derived from a spoken language understanding (SLU) domain, where a given speech utterance is to be mapped into one, among $N$, intent using an end-to-end framework. Intents are seen incrementally, along successive training steps (also called tasks).
+
+%Many past works  \cite{D3Former: Debiased Dual Distilled Transformer
+%for Incremental Learning, Online Continual Learning of End-to-End Speech Recognition Models, Online Continual Learning under Extreme Memory Constraints, ...}  have proven that the most effective approaches to reduce the tendency to forget of the model are based on  historical data replay, that is on the usage of a set of "rehearsal" data chosen in each adaptation step and placed in a system memory (hereinafter called "rehearsal memory"). The data in the rehearsal memory, together with those in the actual task,  contribute to define the loss function to optimize for the model. Furthermore, it has also been shown  that adding  a regularization term to the loss, defined  by the "soft" labels obtained from the model trained in the immediately preceding task, allows to increase the performance.
+
+Many works \cite{lopez2017gradient,rebuffi2017icarl,buzzega2020dark} have proven that an extremely  effective approach to reducing catastrophic forgetting relies on a set of rehearsal data, chosen in each adaptation step and stored in the rehearsal memory, that contribute to the loss function together with those in the actual task. The additional use of a distillation loss \cite{li2017learning}, which alone falls through in a CIL scenario, is not always beneficial to the model, as pointed out in \cite{belouadah2019il2m,masana2020class}, who contend that it can even lead to a deterioration in the performance. 
+
+
+For this reason, inspired by our previous work on porting models on edge devices \cite{cerutti2019neural}, we investigate the interrelationship between applying the knowledge distillation (KD) at different levels in the model, namely in the predictions and in the feature space, and the rehearsal approach. We demonstrate that the joint use of predictions-level and feature-level KDs leads to the best results.
+
+
+
+Our contributions to the CL problem are the following: i) we define a CIL scenario for SLU over the Fluent Speech Command dataset \cite{lugosch2019speech}; ii) we provide a thorough analysis of the combination of rehearsal and KDs for 4 CL strategies, and we prove its efficacy in our scenario; iii) we point out that a careful design of the KD weights is crucial for obtaining optimal results, and we foster the CL community to place more emphasis on this aspect; iv) we provide an ablation study about the size of the rehearsal buffer, and we conclude that our approach attains larger gains for smaller sizes, thus making it appealing for low-resource devices.
+
+\COMMENT{
+i) we define a CIL scenario for SLU over the Fluent Speech Command dataset \cite{lugosch2019speech}, for which well-established benchmarks are available; %\uc{La seconda contribuzione non è più valida poiché nel feature space è lo standard applicare la MSE solo nei dati di rehearsal.}
+ii) we propose a  features based distillation approach which regularizes the cross-entropy (CE) loss with an MSE loss computed over latent feature vectors; iii) we experiment on several losses combination, involving different amounts of rehearsal data, and perform an ablation study also comparing with the most popular rehearsal based, CL methods; %\uc{Userei un po' di "hedging" qui, alla fine consideriamo 3 metodi, di cui uno è random. Possiamo dire che usiamo alcuni dei più popolari metodi di rehearsal CL.} 
+iv) we demonstrate that, in the considered SLU scenario, the use of feature based distillation is effective.}
+%    \item we experiment on several losses combination, involving different amounts of rehearsal data, and perform an ablation study also comparing with the most popular CL methods
+%\begin{itemize}
+%    \item we define a CL scenario for SLU over a well known set of data, the Fluent Speech Command (FSC) \cite{}  data-set, for which well-established benchmarks are available; \uc{we need to provide performance we achieve in a non CL scenario using TCN and compare with state-of-the art.}
+%    \item we propose to use a novel features based distillation approach consisting in regularizing the usual cross-entropy (CE) loss  with an MSE loss computed over feature vectors encoded by the employed neural model;
+%    \item we experiment on several losses combination, involving different amounts of rehearsal data, and perform an ablation study also comparing with the most popular CL methods;
+%    \item we demonstrate that, in the considered SLU scenario, the use of feature based distillation is more effective if applied only to the data in the rehearsal memory, thus simplifying the whole CL process. 
+%\end{itemize}
+
+%This paper is organized as follows, \uc{penso che possiamo fare a meno di dire come è strutturato il paper, così risparmiamo spazio.} ....
+
+\section{RELATED WORK}
+\label{sec:related work}
+
+\COMMENT{\textbf{1st related work possibility}: \\
+
+As mentioned above, continual learning strategies can be categorized into three main groups \cite{de2021continual, parisi2019continual}: regularization methods, experience replay methods, and architectural methods. 
+
+\textit{Regularization} approaches mitigate catastrophic forgetting by endowing the standard cross-entropy loss with supplementary regularization terms to avoid abrupt changes in the model weights. LwF \cite{li2017learning} extends the loss function by adding a weighted knowledge distillation (KD) loss \cite{hinton2015distilling} that forces the outputs of the current network to be similar to the predictions obtained through the network from the previous iteration. \cite{kirkpatrick2017overcoming} resorts to the Fisher information matrix to estimate the importance of the model weights and protect them afterwards to prevent forgetting. \cite{douillard2020podnet} advances a spatial-based distillation loss computed for every intermediate layer of the model. 
+
+\textit{Architectural} methods apply some modifications to their internal architecture, such as adding layers to the model or freezing specific parts of the model, as soon as a new incremental task commences. An emblematic example is \cite{yan2021dynamically}, which at each new task annexes a novel feature extractor, freezes the previous one, and it employs a pruning strategy to shrink the model size. For each task, \cite{wortsman2020supermasks} learns a subnetwork, called supermask, from the original model. At inference time, the weighted combination of the learned supermasks that minimizes the entropy of the output distribution is evaluated.
+These methods, although successful, do not scale to the number of seen tasks, thus limiting their application in practical scenarios.
+
+\textit{Experience Replay} methods keep in memory some of the past data while learning the new task to mitigate forgetting. A key aspect lies in the selection strategy used for retaining past data. The simplest, but relatively effective, approach consist in randomly choosing some samples from the last task \cite{chaudhry2018riemannian}. \cite{gal2017deep} selects the rehearsal samples by maximizing the mutual information between the predictions and the posterior of the model's parameters using Monte Carlo dropout. ICaRL\cite{rebuffi2017icarl} herds the samples whose features are the closest to their moving barycenter. GEM \cite{lopez2017gradient} attenuates forgetting by projecting the gradient update along a direction that does not interfere with the previously acquired knowledge. More recently, in \cite{sarfraz2022synergy}, a dual memory system is described. A semantic memory alongside an episodic memory cooperates to fortify information throughout the tasks. 
+
+\textbf{2nd related work possibility}: \\}
+
+% Here starts the correct versione for the related works.
+As mentioned above, CL strategies can be categorized into three main groups \cite{de2021continual, parisi2019continual}: regularization, rehearsal, and architectural approaches.
+
+%\textit{Regularization} approaches mitigate catastrophic forgetting by supplying the standard cross-entropy loss with supplementary regularization terms to avoid abrupt changes in the model weights. Learning without forgetting (LwF \cite{li2017learning}) extends the loss function by adding a weighted knowledge distillation (KD) loss \cite{hinton2015distilling} that forces the outputs of the current network to be similar to the predictions obtained through the network trained in the previous task. \cite{kirkpatrick2017overcoming} resorts to the Fisher information matrix to estimate the importance of the model weights and protect them afterwards to prevent forgetting. \cite{douillard2020podnet} advances a spatial-based distillation loss computed for every intermediate layer of the model. 
+\textit{Regularization} approaches mitigate catastrophic forgetting by supplying the standard cross-entropy (CE) loss with regularization terms to avoid abrupt changes in the model weights. Learning without forgetting (LwF) \cite{li2017learning} employs a weighted knowledge distillation loss \cite{hinton2015distilling} that forces the outputs of the model to be similar to those obtained by the model trained in the previous task. The work by \cite{kirkpatrick2017overcoming} resorts to the Fisher information matrix to estimate the importance of the model weights and protect them afterward to prevent forgetting, while \cite{douillard2020podnet} advance a spatial-based distillation loss computed for every intermediate layer of the model.
+%\ab{differenze col nostro?}\df{noi aggiungiamo un termine di distillation sulle features, ma e` gia detto sopra.}
+
+%\textit{Experience Replay} methods keep in memory some of the past data while learning the new task to mitigate forgetting. A key aspect lies in the selection strategy used for retaining past data. The simplest, but relatively effective, approach consist in randomly choosing some samples from the last task \cite{chaudhry2018riemannian}. \cite{gal2017deep} selects the rehearsal samples by maximizing the mutual information between the predictions and the posterior of the model's parameters using Monte Carlo dropout. ICaRL\cite{rebuffi2017icarl} fosters the samples whose features are the closest to their moving center of gravity. Gradient Episodic Memory (GEM \cite{lopez2017gradient}) attenuates forgetting by projecting the gradient update along a direction that does not interfere with the previously acquired knowledge. More recently, in \cite{sarfraz2022synergy}, a dual memory system is described. A semantic memory alongside an episodic memory cooperates to fortify information throughout the tasks. 
+\textit{Rehearsal} or \textit{Experience Replay} methods keep in memory some of the past data  %while learning the new task 
+to mitigate forgetting. A key aspect lies in the selection strategy for retaining past data. The simplest, but relatively effective, approach  randomly chooses some samples from the last task \cite{chaudhry2018riemannian}. ICaRL \cite{rebuffi2017icarl} fosters the samples whose features are the closest to their moving center of gravity. Gradient Episodic Memory (GEM  \cite{lopez2017gradient}) attenuates forgetting by projecting the gradient update along a direction that does not interfere with the previously acquired knowledge. \cite{gal2017deep} select the rehearsal samples by maximizing the mutual information between the predictions and the posterior of the model's parameters using Monte Carlo dropout.
+
+%More recently, in \cite{sarfraz2022synergy}, a dual memory system is described. A semantic memory alongside an episodic memory cooperates to fortify information throughout the tasks. 
+%Finally, it is worth mentioning \textit{Architectural} methods for continual learning. These ones apply some modifications to their internal architecture, such as adding layers to the model or freezing specific parts of the model, as soon as a new incremental task commences. An example is reported \cite{yan2021dynamically}, where  at each new task a novel feature extractor is instantiated, while the previous one is frozen, and  a pruning strategy is applied to shrink the model size. \cite{wortsman2020supermasks} learns a subnetwork in a each task, called supermask. At inference time, the weighted combination of the learned supermasks that minimizes the entropy of the output distribution is evaluated.
+%These methods, although successful, do not scale to the number of seen tasks, thus limiting their application in practical scenarios.
+
+Finally, \textit{Architectural} methods apply modifications to the network architecture, such as adding layers or freezing specific parts of the model, to handle new incremental tasks. An example is \cite{yan2021dynamically}, where, at each new task, a novel feature extractor is instantiated, while the previous one is frozen, and pruning is applied to shrink the model. Similarly, \cite{wortsman2020supermasks} learn a subnetwork in each task, called supermask. At inference time, the weighted combination of the supermasks that minimizes the entropy of the output distribution is evaluated.
+These methods, although successful, do not scale to the number of seen tasks, thus limiting their application in practical scenarios.
+
+%To the best of our knowledge, we are the first to explore SLU in a CL scenario. In the speech domain some works have investigated  a  progressive continual learning strategy \cite{huang2022progressive} for a KWS task,  consisting in creating a sub-network for each new task and keeping in memory the processed features from the past tasks. Also important to notice is the usage of CL in Automatic Speech Recognition (ASR) \cite{yang2022online}, \cite{sadhu2020continual}.
+
+Although the literature is mainly related to computer vision, CL has also been investigated in the speech domain. For example,  \cite{huang2022progressive} address a KWS incremental-learning task, creating a sub-network for each new task and keeping in memory the processed features from the past tasks. It is also worth noting the use of CL in Automatic Speech Recognition (ASR). The work in  \cite{yang2022online} proposes an online GEM method for model updates together with a selective sampling strategy. 
+
+%The work in \cite{kessler2021} 
+%applies CL to the problem of learning a new language without forgetting  previous learned languages. 
+If we narrow it down to SLU, we can find few works that only consider a domain-incremental CL scenario: \cite{shen2019progressive} propose a progressive architecture for the slot-filling task that expands the network for each new task; \cite{mi2020continual} consider the combination of rehearsal and regularization techniques for natural language generation. 
+%\ab{o mettiamo dettagli di tutto (ASR e KWS) oppure di nessuno e semplifichiamo la frase.}\df{Do you agree on this now?} 
+%
+Nevertheless, to the best of our knowledge, we are the first to explore SLU in a CIL scenario, in particular, we study the adoption of the KD at a features and predictions level, and applied to only the rehearsal data or the rehearsal data plus the current data. 
+\COMMENT{adopting  a novel knowledge distillation from the sole set of rehearsal data. }  
+
+\section{Proposed approach}
+\label{sec:methodology}
+
+\vspace{-0.5cm}
+\begin{figure}[htb]
+\centering
+\includegraphics[width=8cm]{Model_pipeline.pdf}
+\caption{Complete overview of our proposed CIL approach.}
+\label{fig:model_pipeline}
+\end{figure}
+
+
+In a CL scenario, a classification model, which comprises a multilayered feature extractor $\text{ENC}_{\theta}$ and a classifier $\text{FC}_\phi$, is trained over a sequence of $T$ distinct training phases, that is $\mathcal{D}=\{\mathcal{D}_0,\ldots,\mathcal{D}_{T-1}$\}. The dataset $\mathcal{D}_t$ related  to the $t^{th}$ training step is interpreted  as a task defined by audio signals $\mathcal{X}_t$
+%=(x_1,\ldots,x_{\mid\mathcal{X}_t\mid})$ 
+and associated class labels $\mathcal{Y}_t$, i.e. $\mathcal{D}_t=(\mathcal{X}_t,\mathcal{Y}_t)$. In CIL scenarios all task label sets are mutually exclusive, i.e. $\mathcal{Y}_i\cap\mathcal{Y}_j=\O, i\neq j$.
+
+\COMMENT{In CL scenarios we assume to observe the training data $\mathcal{D}$}
+
+%Targets  may or may not overlap along the various tasks, if they don't overlap, i.e. $\mathcal{Y}_i\cap\mathcal{Y}_j=\O, i\neq j$ the scenario is said to be incremental continual learning (ICL,  this is the case addressed in this work). \uc{I'd directly say that we consider a Class-Incremental sceanrio (CIL) w/out saying there are 2 possibilities depending on the overlapping or not.
+
+
+At the end of task $t-1$ we select a set of data $\mathcal{R}_{t-1}\subset\mathcal{D}_{t-1}$ for the rehearsal memory. Then, all the rehearsal data, from task $0$ to task $t-1$, $\mathcal{R}_0^{t-1}= \{\mathcal{R}_0, \dots, \mathcal{R}_{t-1}\}$ are joined with the training data $\mathcal{D}_{t}$ in order to train the model  for the $t^{th}$ task. A naive CL strategy optimizes the CE loss computed over $\mathcal{D}_t\cup\mathcal{R}_0^{t-1}$:
+
+%\uc{We can say that the memory is: $\mathcal{R} = \{\mathcal{R}_0, \dots, \mathcal{R}_{t-1}\}$. $\mathcal{R}_t$ denotes the rehearsal samples from task $t$, and in the sums for the losses we can use simply $\mathcal{R}$ for denoting the memory up to task $t-1$. When we apply the computation on both memory and training data, we use $\mathcal{D}_t \cup \mathcal{R}$ (and not $\mathcal{DR}_t$), if we use only the rehearsal data we just use $\mathcal{R}$}.
+
+\begin{equation}
+%\mathcal{L}^t_{CE}=- \frac{1}{|\mathcal{D}_t\cup\mathcal{R}_0^{t-1}|} \sum_{(x,y)\in\mathcal{D}_t\cup\mathcal{R}_0^{t-1}}\log(p[y|x;\theta_{t}])
+\hspace{-1cm}\mathcal{L}^t_{CE}=-\sum_{(x,y)\in\mathcal{D}_t\cup\mathcal{R}_0^{t-1}}\log(p[y|x;(\theta_{t},\phi_{t})]),
+\label{eq:ce}
+\end{equation}
+where $p[y|x;(\theta_{t},\phi_{t})]$ is the output probability distribution of the model given the parameters $\theta_t$ and $\phi_t$ at task $t$. %\ab{attenzione x,y mentre prima avevamo il set di X e Y}. 
+\COMMENT{The use of $\mathcal{R}_0^{t-1}$ provides an absolute performance improvement from 10\% to 20\%, as reported in section ~\ref{sec:experiments}}
+
+A common approach is to further regularize the model adaptation through a KD loss. In this paper, we experiment with two different distillation terms in combination with the CE loss. The first one is the Kullback Leibler Divergence (KLD) between the output probability distribution at task $t$ and the distribution predicted with the model trained at task $t-1$, i.e.:
+\begin{equation}
+\mathcal{L}_{KLD}^t = \sum_{(x,y)\in\mathcal{I}_t}p[y|x;(\theta_{t-1},\phi_{t-1})]\log(p[y|x;(\theta_{t},\phi_{t})]).   
+\label{eq:kld}
+\end{equation}
+In the equation above $\mathcal{I}_t$ represents the training set for task $t$, consisting of only the rehearsal data ($\mathcal{I}_t=\mathcal{R}_0^{t-1}$), or the union of the rehearsal and current data of task $t$ ($\mathcal{I}_t=\mathcal{D}_t\cup\mathcal{R}_0^{t-1}$). %\uc{Secondo me conviene usare il pedice $t$ su $\mathcal{I}$, quindi $\mathcal{I}_t$}.
+The second regularization term is given by the mean squared error (MSE) loss between the output of the model encoder at tasks $t-1$ and $t$, i.e.:
+\begin{equation}
+\mathcal{L}_{MSE}^t=\sum_{x\in\mathcal{I}_t}\Vert \text{ENC}_{\theta{_{t-1}}}(x)-\text{ENC}_{\theta_{t}}(x)\Vert^2.
+\label{eq:mse}
+\end{equation}
+Also in this case we experiment with both $\mathcal{I}_t=\mathcal{R}_0^{t-1}$ and $\mathcal{I}_t=\mathcal{D}_t\cup\mathcal{R}_0^{t-1}$. 
+%
+The total loss to optimize in each task $t$ is therefore a linear combination of the CE loss in eq.~\ref{eq:ce} and the regularization losses in eqs.~\ref{eq:kld} and ~\ref{eq:mse}: %$\mathcal{L}^t_{TOT}=(1-\lambda)\mathcal{L}^t_{CE}+\lambda\mathcal{L}^t_{*}$, 
+%where the $*$ means one  between either KLD or MSE loss. \uc{define $\lambda$ for both cases. %If we use all 3 losses:
+\begin{equation}
+\mathcal{L}^t_{TOT}=\lambda_{CE}\mathcal{L}^t_{CE}+\lambda_{KD}\mathcal{L}^t_{MSE} +  \lambda_{KD}\mathcal{L}^t_{KLD}
+\label{eq:ltot}
+\end{equation}
+
+Figure~\ref{fig:model_pipeline} shows a schematic illustration of the proposed CIL approach.
+
+\COMMENT{
+Topics to include:
+\begin{enumerate}
+    \item Class-Incremental (CI) CL definition (similar to CL project's definition)
+    \item CI scenario applied to SLU
+    \item CL strategies at issue: - \textbf{Experience Rehersal (ER) strategies} (number of samples considered (i.e., memory size); the memory is not kept full, but its size increments upon a new task arrives with fresh classes; selection strategy employed (k-means, Icarl, random, CAL) ); - \textbf{Knowledge Distillation} (KD) strategies: applied on the model predictions, on the model's feature space or on both (to try?)
+    \item What happens when we combine ER and KD? KD on feature space (MSE loss works better). Study how to select the weights for the CE loss and MSE/KD loss optimally. 
+    \item What happens when we change the memory size?
+    
+\end{enumerate}
+}
+
+\section{Experiments}
+\label{sec:experiments}
+We evaluate our proposed approach on the Fluent Speech Commands (FSC) dataset \cite{lugosch2019speech}. 
+FSC includes 30,043 English utterances, recorded at 16 kHz. The dataset provides 248 different utterances that are mapped in 31 different intents. The CIL scenario consists of 10 tasks, and each task contains some unique intents. The first task has 4 intents, whereas the subsequent 9 tasks include 3 intents each. 
+
+Concerning the rehearsal memory, its entire capacity is not exploited since the beginning, but each class has a pre-allocated space that is used when that class is seen for the first time. In this way, we avoid a possible imbalance among the classes between the first and the last tasks.  
+\vspace{-0.3cm}
+\subsection{Model architecture and KD weights}
+\label{sec:implementation}
+
+The neural network architecture used in the experiments is depicted in Figure~\ref{fig:nn-arch}. It is inspired by the temporal convolutional network (TCN) used in the separation block of Conv-Tas-Net \cite{luo2019conv}, a recently proposed model for speech separation.
+
+\begin{figure}[htb]
+
+\centering
+\begin{subfigure}[b]{\columnwidth}
+         \centering
+         \includegraphics[width=\textwidth]{TCN}
+         \caption{The TCN architecture.}
+         \label{fig:sequential}
+     \end{subfigure}
+    \begin{subfigure}[b]{\columnwidth}
+         \centering
+         \includegraphics[width=\textwidth]{Conv1D}
+         \caption{The Conv1D residual block.}
+         \label{fig:conv1d}
+     \end{subfigure}
+  %\centerline{\includegraphics[width=8.5cm]{TCN}}
+%\end{figure}
+%\begin{figure}[htb]
+%\centering
+  %\centerline{\includegraphics[width=8.5cm]{Conv1D}}
+\caption{The block diagram of the TCN encoder performing feature extraction and the corresponding Conv1D block structure.}%\uc{Non si potrebbe togliere il blocco "Output probabilities"?} \df{Potrei mettere il classifier al posto delle output probabilities}}
+\label{fig:nn-arch}
+\end{figure}
+
+\begin{table}[!htb]
+\centering % used for centering table
+\caption{List of the hyperparameters of the TCN.}
+\begin{tabular}{l|c}
+\Xhline{2\arrayrulewidth}
+\textbf{Hyperparameter} & \textbf{Value} \\
+\hline
+Input channels & 40 \\
+Hidden channels & 128 \\
+Output channels & 64 \\
+\# 1-D conv blocks & 5 \\
+\# Repetitions & 2 \\
+Kernel size for the depthwise conv & 3 \\
+\Xhline{2\arrayrulewidth}
+\end{tabular}
+\label{table:tcn_hyperparams}
+\end{table}
+
+%The TCN receives
+%in input 40 Mel filterbanks energies computed using a sliding window length of 25 ms, with 10 ms stride, then it applies a global layer normalization (gLN) and a bottleneck layer (1x1 conv
+%block) that maps the input features into  64 channels.  The input layer is followed by 2 convolutional blocks, each of them includes 5 residual blocks (a single block is depicted in Figure~\ref{fig:nnarch-b})
+%formed by two symmetrical pipelines surrounding a depth-wise separable convolutional layer that maps the 64 bottleneck features into 128 channels. Each pipeline is formed by point-wise convolution (1 x 1conv) and global layer normalization with  Parametric Rectified Linear Unit (pReLU) activation function.
+%Finally, the output of the TCN "encoder" is sent to a linear classifier with soft-max activation function.
+%\uc{Some comments on Daniele's TCN description: 1) TCN is a component of ConvTas-Net. ConvTas-Net comprises an encoder, a separation module (TCN) and a decoder. 2) We should emphasize the fact that we have the TCN ($\theta$), which extract the features, and a classifier ($\phi$), which computes the logits. 3) I'd avoid the term "encoder" because I expect a "decoder" somewhere, but this is not our case.}
+
+%\uc{I suggest the following description for the TCN, which is the one I wrote for the CL project: \textit{The reference Deep Learning model that we use in these experiments is the temporal convolutional network (TCN) (cite TCN paper here). A schematic diagram of the proposed network architecture is shown in Fig. 1. The network resembles as much as possible the original one in terms of hyperparameters. The TCN is structured into 2 repetitions of 5 consecutive 1-D dilated convolutional blocks. The network receives in input Mel Spectrograms computed using a sliding window length of 25 ms, with 10 ms stride and 40 mel filterbanks, then it applies a global layer normalization (gLN) and a bottleneck layer (1x1 conv block). Then the processed input goes through several 1-D conv blocks, which are the core of the TCN. A single block is depicted in Fig. 2. Each block resorts to exponentially increasing dilation factors to broaden the temporal context window and exploit the long-range dependencies of the speech signal. The depthwise separable convolution is sandwiched by two series of PReLU activations plus gLN. A pointwise convolution is applied at the input and as a final operation. A residual branch connects the original input to the output. The output features of the last block are applied a mean pooling operation, followed by gLN and a linear linear. A softmax activation gives the final class scores.}}
+%\ab{Ho fatto un po' un misto tra i 2} 
+The network receives in input 40 Mel-spaced log filter-banks, computed using a sliding window of length 25 ms, with 10 ms stride. Then it applies a global layer normalization (gLN) and a bottleneck layer (1x1 conv block) that maps the input features into 64 channels. The input layer is followed by 2 repetitions of 5 consecutive 1-D dilated convolutional residual blocks. Each residual block is formed by two symmetrical pipelines surrounding a depth-wise separable convolutional layer that maps the 64 bottleneck features into 128 channels. Each pipeline has a point-wise convolution (1x1 conv block) followed by a gLN with Parametric Rectified Linear Unit (PReLU) activation function. A pointwise convolution is applied at the input and as a final operation. A residual branch connects the original input to the output. Mean pooling is applied to the output of the last block, followed by gLN and a linear layer. A softmax activation layer gives the final class scores. 
+
+We train the TCN model for 50 epochs per task with Adam optimizer \cite{kingma2014adam}, with a learning rate equal to $5e^{-4}$. The CIL scenario is implemented with the Continuum library \cite{douillard2021continuum}, and the rest of the code is based on PyTorch. Table~\ref{table:tcn_hyperparams} reports the whole set of hyperparameters of the TCN. We also release our code on GitHub\footnote{https://github.com/umbertocappellazzo/CL\_SLU}.
+
+The selection of the KD weights deserves special attention. A common choice for the $\lambda_{KD}$ weight is $\frac{n}{n+m}$, where $n$ is the number of old (seen) classes and $m$ is the number of new classes \cite{wu2019large,zhao2020maintaining}. This choice was originally proposed for works that used only KD as CL strategy, and it gives more and more importance to $\lambda_{KD}$ over time because the past model retains the knowledge from more and more past classes. The subsequent works that considered KD and rehearsal together, adhered to this choice. Nonetheless, we speculate that relying on this option gives worse results. 
+
+When we use both KD and rehearsal approaches applied to rehearsal and current data ($\mathcal{I}_t=\mathcal{D}_t\cup\mathcal{R}_0^{t-1}$), the importance of the past model is damped by the fact that the current model sees the rehearsal data, so we still would like $\lambda_{KD}$ to increase, but at a slower pace, and this can be accomplished by using a log function. When we use the KD applied only to the rehearsal data ($\mathcal{I}_t=\mathcal{R}_0^{t-1}$), we give it a weight proportional to the fraction of rehearsal data in the mini-batch. Since this number is too small during the first tasks, we apply the square root operation to enlarge it.
+
+We ultimately set $\lambda_{KD}$ as follows:
+
+\begin{equation}
+\lambda_{KD} =  
+\begin{cases}
+\log(1+\frac{n}{n+m}) & \text{if }  \mathcal{I}_t=\mathcal{D}_t\cup\mathcal{R}_0^{t-1} \\
+\sqrt{\frac{b_{rehe}}{b_{all}}} & \text{if }  \mathcal{I}_t=\mathcal{R}_0^{t-1}
+\end{cases}
+\label{eq:KD}
+\end{equation}
+where $b_{rehe}$ counts the number of rehearsal data in the current mini-batch, and $b_{all}$ is the current mini-batch size. We found empirically that using $\lambda_{KD}$ as defined in eq. \ref{eq:KD} brought about a 1\% to 2\% improvement in the accuracy. This study suggests that a careful choice of the KD weights is essential. 
+
+\COMMENT{
+\begin{table*}[ht]
+    \centering
+    \begin{tabular}{|l|l|cc|cc||cc|}
+    \hline
+    \multicolumn{8}{|c|}{Baselines}\\
+    \hline
+    Offline &\multicolumn{7}{l|}{0.985}\\
+    Finetuning &\multicolumn{7}{l|}{0.073  0.267}\\
+    Pred. KD (no rehe) &\multicolumn{7}{l|}{0.080 0.272}\\
+    %Random &\multicolumn{4}{l|}{0.660 0.720} \\
+    %iCaRL &\multicolumn{4}{l|}{0.682 0.741} \\
+    %GEM &\multicolumn{4}{l|}{0.573 0.710} \\
+    \hline
+    \hline
+    \multicolumn{8}{|c|}{Memory size = 930 samples}\\
+    \hline
+    Feat. KD & Pred. KD  & \multicolumn{2}{c|}{Random} & \multicolumn{2}{c||}{GEM} & \multicolumn{2}{c|}{iCaRL}\\
+    data &data & last acc & avg acc& last acc & avg acc& last acc & avg acc\\
+    \hline
+    - & - & 0.660 & 0.720 & 0.573& 0.710 & 0.682& 0.74\\
+    \hline
+   $\mathcal{R}$ & - & 0.737 & 0.779 & 0.567 &0.692 & 0.789& 0.802 \\
+   $\mathcal{D}\cup\mathcal{R}$  & - & 0.594 &0.643 & 0.669 &0.722 & 0.600 &0.643  \\
+    \hline
+    - & $\mathcal{R}$ & 0.676 & 0.736 & 0.575 & 0.699 & 0.662 &0.726 \\
+    - &  $\mathcal{D}\cup\mathcal{R}$ & 0.757& 0.764 & 0.693& 0.748 & 0.780& 0.795 \\
+    \hline
+
+    $\mathcal{R}$ & $\mathcal{R}$ & 0.752& 0.770& 0.564 & 0.696 & 0.788 & 0.787\\
+    $\mathcal{R}$ & $\mathcal{D}\cup\mathcal{R}$ & 0.771 & 0.796 & 0.668 & 0.755 & {\bf 0.811}& {\bf 0.812} \\
+    \hline
+    \end{tabular}
+    \caption{Intent classification accuracy with 930 samples in rehearsal memory, using different distillation strategies in combination with 3 sample selection approaches.}
+    \label{tab:tabel_930_firstvers}
+\end{table*}
+}
+%\begin{comment}
+\begin{table*}[ht]
+    \centering
+    \caption{Intent classification accuracy with 930 samples in the rehearsal memory, using different distillation strategies. The highest accuracies are reported in bold while we use italics for the best KD of each CL method.}
+    \begin{tabular}{llcccccccc}
+    \hline
+    %\multicolumn{8}{c}{\textbf{Baselines}}\\
+    \multicolumn{2}{l}{\textbf{Baselines}} & \multicolumn{2}{c}{\textbf{last acc}} &
+    \multicolumn{2}{c}{\textbf{avg acc}} \\
+    \hline
+    %Offline &\multicolumn{7}{l}{0.985}\\
+    \multicolumn{2}{l}{Offline} & \multicolumn{2}{c}{0.985} &
+    \multicolumn{2}{c}{-} \\
+    \multicolumn{2}{l}{Finetuning} & \multicolumn{2}{c}{0.073} &
+    \multicolumn{2}{c}{0.267} \\
+    \multicolumn{2}{l}{Pred. KD (no rehe)} & \multicolumn{2}{c}{0.080} &
+    \multicolumn{2}{c}{0.272} \\
+    
+    %Finetuning &\multicolumn{7}{l}{0.073  0.267}\\
+    %Pred. KD (no rehe) &\multicolumn{7}{l}{0.080 0.272}\\
+    %Random &\multicolumn{4}{l|}{0.660 0.720} \\
+    %iCaRL &\multicolumn{4}{l|}{0.682 0.741} \\
+    %GEM &\multicolumn{4}{l|}{0.573 0.710} \\
+    %\hline
+    %\hline
+    %\multicolumn{8}{|c|}{Memory size = 930 samples}\\
+    %\hline
+    \Xhline{2\arrayrulewidth}
+    \textbf{Feat. KD} & \textbf{Pred. KD}  & \multicolumn{2}{c}{Random} & \multicolumn{2}{c}{Closest\_to\_mean}  &\multicolumn{2}{c}{iCaRL \cite{rebuffi2017icarl}} &
+    \multicolumn{2}{c}{GEM \cite{lopez2017gradient}}\\
+    \textbf{data} &\textbf{data} & \textbf{last acc} & \textbf{avg acc}& \textbf{last acc} & \textbf{avg acc}&  \textbf{last acc} & \textbf{avg acc} & \textbf{last acc} & \textbf{avg acc}\\
+    \hline
+    - & - & 0.660 & 0.720 & 0.650& 0.694 & 0.682& 0.740 & 0.573 & 0.710 \\
+    \hline
+   \rowcolor{green}
+    \multicolumn{10}{c}{\textbf{Feature space KD}}\\
+    \hline
+   $\mathcal{R}$ & - & 0.737 & 0.779 &  0.728& 0.740 & 0.789 & 0.802 & \it{0.773} & 0.789  \\
+   $\mathcal{D}\cup\mathcal{R}$  & - & 0.594 &0.643 & 0.562 &0.609 &  0.600 &0.643  & 0.710 & 0.714  \\
+    \hline
+    \rowcolor{pink}
+    \multicolumn{10}{c}{\textbf{Predictions space KD}}\\
+    \hline
+    - & $\mathcal{R}$ & 0.676 & 0.736 & 0.632 &0.690 & 0.662 & 0.726 & 0.624 & 0.735 \\
+    - &  $\mathcal{D}\cup\mathcal{R}$ & 0.757& 0.764 & 0.690& 0.717 & 0.780& 0.795 & 0.600 & 0.710 \\
+    \hline
+    \rowcolor{lightgray}
+    \multicolumn{10}{c}{\textbf{Double KDs}}\\
+    \hline
+    $\mathcal{R}$ & $\mathcal{R}$ & 0.752& 0.770& 0.728 & 0.739 & 0.788 & 0.787 & 0.764 & \it{0.799}  \\
+    $\mathcal{R}$ & $\mathcal{D}\cup\mathcal{R}$ & {\it 0.771} & {\it 0.796} & {\it 0.729}& {\it 0.740}  & {\bf 0.811} & {\bf 0.812} & 0.751 & 0.796 \\
+    \hline
+    \end{tabular}
+    \label{tab:tabel_930_new}
+\end{table*}
+%\end{comment}
+\begin{comment}
+
+\begin{table*}[ht]
+    \centering
+    \begin{tabular}{|l|l|cc|cc|cc|}
+    \hline
+    \multicolumn{8}{|c|}{Baselines}\\
+    \hline
+    Offline &\multicolumn{7}{l|}{0.985}\\
+    Finetuning &\multicolumn{7}{l|}{0.073  0.267}\\
+    Pred. KD (no rehe) &\multicolumn{7}{l|}{0.080 0.272}\\
+    %Random &\multicolumn{4}{l|}{0.660 0.720} \\
+    %iCaRL &\multicolumn{4}{l|}{0.682 0.741} \\
+    %GEM &\multicolumn{4}{l|}{0.573 0.710} \\
+    %\hline
+    %\hline
+    %\multicolumn{8}{|c|}{Memory size = 930 samples}\\
+    \hline
+    Feat. KD & Pred. KD  & \multicolumn{2}{c|}{Random} & \multicolumn{2}{c|}{iCaRL}  &\multicolumn{2}{|c|}{GEM}\\
+    data &data & last acc & avg acc& last acc & avg acc&  last acc & avg acc\\
+    \hline
+    - & - & 0.660 & 0.720 & 0.682& 0.74 & 0.573& 0.710  \\
+    \hline
+    \rowcolor{green}
+    \multicolumn{8}{|c|}{Feature space KD}\\
+    \hline
+   $\mathcal{R}$ & - & 0.737 & 0.779 &  0.789& 0.802 & 0.567 &0.692  \\
+   $\mathcal{D}\cup\mathcal{R}$  & - & 0.594 &0.643 & 0.600 &0.643 &  0.669 &0.722    \\
+    \hline
+    \rowcolor{pink}
+    \multicolumn{8}{|c|}{Predictions space KD}\\
+    \hline
+    - & $\mathcal{R}$ & 0.676 & 0.736 & 0.662 &0.726 & 0.575 & 0.699   \\
+    - &  $\mathcal{D}\cup\mathcal{R}$ & 0.757& 0.764 & 0.780& 0.795 & 0.693& 0.748   \\
+    \hline
+    \rowcolor{lightgray}
+    \multicolumn{8}{|c|}{Double KDs}\\
+    \hline
+    $\mathcal{R}$ & $\mathcal{R}$ & 0.752& 0.770& 0.788 & 0.787 & 0.564 & 0.696  \\
+    $\mathcal{R}$ & $\mathcal{D}\cup\mathcal{R}$ & 0.771 & 0.796 & {\bf 0.811}& {\bf 0.812}  & 0.668 & 0.755  \\
+    \hline
+    \end{tabular}
+    \caption{%Intent classification accuracy with 930 samples in rehearsal memory, using different distillation strategies in combination with 3 CIL approaches.
+    Intent classification accuracy with 930 rehearsal samples using different distillation strategies in combination with 3 CIL approaches.}
+    \label{tab:tabel_930}
+\end{table*}
+\end{comment}
+
+Based on the considered experiment, eq. \ref{eq:ltot} changes accordingly. When we do not apply any KD loss, then the weights boil down to $\lambda_{KD} = 0$, $\lambda_{CE} = 1$ (in practice, only the CE loss is used). When we use the KD only in the feature space, the KLD loss is not present, $\lambda_{KD}$ follows eq. \ref{eq:KD}, and $\lambda_{CE}$ = 1 - $\lambda_{KD}$. If we use the KD in the predictions space, the same as before applies with the KLD loss and the MSE loss inverted. Lastly, when both the KLD loss and the MSE loss are employed, their coefficient $\lambda_{KD}$ follows eq. \ref{eq:KD}, and $\lambda_{CE}$ is set to 1. Note that in this last case the interpolation coefficients in eq.~\ref{eq:KD} do not sum to 1.
+
+\subsection{Results}
+
+
+
+\label{sec:results}
+Table~\ref{tab:tabel_930_new} reports the intent classification accuracy for different KD strategies in combination with 4 \COMMENT{state-of-the-art} CL approaches, i.e. a rehearsal approach with 3 different sample selection strategies (random, iCaRL \cite{rebuffi2017icarl}, and ``closest\_to\_mean'', where the samples which are closest to their class mean in the feature space are chosen), and GEM \cite{lopez2017gradient}. The rehearsal memory size is 930 (around 4\% of the dataset size). We consider 2 random class orders, and for each, we run 4 experiments and take the average. We use 2 metrics to test the efficacy of each strategy: the average accuracy (\textbf{avg acc}), which is defined as the average of the accuracies after each task, and the accuracy after the last task (\textbf{last acc}). For better stability, the accuracy of each task is the average of the last 5 epochs.
+
+%Variance is not reported in the table because not significant. 
+In the upper part of Table~\ref{tab:tabel_930_new} three baselines are presented: {\em i)} the offline upper bound (i.e., no incremental learning), which is in line with the current state-of-the-art methods on the FSC dataset; {\em ii)} %This confirms that our architecture is a solid model for our experiments. 
+the results obtained with the naive fine-tuning method, and {\em iii)} the results we achieve applying solely the KD in the predictions space without rehearsal. %\uc{qua si potrebbe specificare tipo "applying KD in the prediction space", ma do per scontato che quando non si ha rehearsal, 3 casi su 4 non sussistono, quindi per esclusione stiamo considerando KD predictions all data. Quindi va bene non specificare.}. 
+
+The lower part of the table shows the accuracies when rehearsal data are employed. The rows show the accuracies for the cases in which the distillation is performed at the feature level, predictions level, and both levels, respectively. For each configuration, the table also reports the performance when distillation is applied to either rehearsal data alone (denoted with $\mathcal{R}$ in the table) or to the union  of rehearsal and actual task data (denoted with $\mathcal{D}\cup\mathcal{R}$).
+
+When we endow the model with the KD in the feature space, we see a considerable difference in the accuracy between using only the rehearsal data or the rehearsal and the current data, with the former case that improves both the average accuracy and the last accuracy. On the contrary, the joint use of rehearsal and current data deteriorates the performance. This can be explained by observing that if we use both rehearsal and new data, we are forcing the current model, $\theta_t$, to produce feature representations that are similar to the ones obtained with the previous model, $\theta_{t-1}$. Whereas this is desirable for the rehearsal data (the previous model has been trained on them), this is not the case for the new data, since we want our model to learn throughout the actual task new clusters which should be far apart from the past clusters.
+
+Considering the KD in the predictions space, instead, we witness a trend inversion. The jointly use of rehearsal and current  data ($\mathcal{D}\cup\mathcal{R}$) achieves better results than just using the data in the memory, albeit the difference is not as pronounced as for the feature-space KD. This can be explained by the fact that in the predictions space the KD forces the current model to make similar predictions as the previous one (the classifier is particularly affected by this), and so the presence of both new and old classes benefits the system. It is worth noting that in almost all cases the feature-level KD attains slightly better results than its predictions counterpart. We point out that GEM achieves slightly better results when only rehearsal data are considered, and this may be because it already employs a regularization on the gradients using only the rehearsal data.
+\vspace{-0.3cm}
+\begin{figure}[htb]
+\centering
+\includegraphics[width=8cm]{WaB_plot.png}
+\caption{Trend of the avg accuracy for 4 different combinations of the iCaRL method. %Note that the last experience corresponds to the \textit{last acc} metric and 
+Each experience has 50 steps (i.e., epochs).}
+\label{fig:avg_acc_trend}
+\end{figure}
+
+The last two rows of Table \ref{tab:tabel_930_new} consider the combination of feature-level and predictions-level KDs (the configurations with $\mathcal{D}\cup\mathcal{R}$ in the feature space are not considered since we have shown they are harmful to the model). The use of the features-space KD applied to $\mathcal{R}$ in conjunction with the predictions-space KD applied to $\mathcal{D}\cup\mathcal{R}$ gives the best results (0.811 and 0.812 for the last acc and avg acc by iCaRL, respectively), proving the effectiveness of integrating both KDs.
+%\vspace{-0.5cm}
+\begin{figure}[h]
+\centering
+\includegraphics[width=7.5cm]{Bar_plot.pdf}
+\caption{Average accuracy for different values of the memory size for the iCaRL strategy.}
+\label{fig:bar_plot}
+\end{figure}
+Fig. \ref{fig:avg_acc_trend} depicts the trend of 4 different configurations for the iCaRL strategy. The concurrent use of both KDs (red curve) leads to the best overall performance, even though the last task accuracy (last acc) is pretty similar to the methods employing single KDs.
+
+
+
+
+
+\begin{comment}
+What we actually want to actually achieve is that our model produces clusters for the past data similar to the ones obtained with the previous model, while the clusters for the actual data are learn throughout the current task without the aid of the previous models.
+
+
+This happens because we are forcing the current model to cluster new data using the previous saved model trained on the rehearsal data. Instead, we want our to model to produce cluster which are similar to the ones produced by the previous model, whereas the new data must be clustered through the new data only. 
+This can be explained by the fact that in the feature space, we want our model to cluster the new data into 
+
+
+
+
+Note from the first row that,  without using any distillation, the performance of the 3 CIL approaches is very similar,  with {iCaRL} slightly better.
+
+The other rows reports accuracies when distillation is performed at feature level (i.e. $\mathcal{L}_{MSE}\ne 0$ \uc{forse andrebbe specificato anche che $\mathcal{L}_{KLD} = 0$} in eq.~\ref{eq:ltot}), prediction level (i.e. $\mathcal{L}_{KLD}\ne 0$ \uc{forse andrebbe specificato anche che $\mathcal{L}_{MSE} = 0$}) and when both distillation losses in eq.~\ref{eq:ltot} are used, respectively. The table also reports the performance when distillation is applied to either rehearsal data alone (denoted with $\mathcal{R}$ in the table) and the union  of rehearsal and actual task data (denoted with $\mathcal{D}\cup\mathcal{R}$).
+
+ Note that the benefits provided by KD are rather clear in quite all the conditions, in particular if distillation is carried out at the feature level. 
+\end{comment}
+
+
+
+
+\begin{comment}
+The different behavior between the prediction level and the feature level could be that while at prediction we need also negative samples for the previous classes, in the feature space the goal of KD is to help the feature extractor, properly clustering the previous samples. 
+Interestingly to observe is the better accuracy achieved when only rehearsal data are used in feature space distillation, both using random and {iCaRL} selection, making the approach effective when there are memory constraints (e.g. on small devices) \uc{can we explain briefly ...? questo non e` proprio vero, perche` i dati attuali del task comunque li usiamo per addestrare...}. On the contrary,   when GEM is employed the usage of all data is effective also at feature level distillation. One possible motivation is that \uc{can we explain briefly...?}.
+Overall, the best performance achieved by {iCaRL} is 81.2\% accuracy on average over all tasks, 10\% points above the baseline. 
+
+It is worth noting that, considering both random and iCaRL selection,  the last accuracy  results slightly lower than the related average accuracy. This indicates that feature space distillation improves the long term memory of the model, since  the last tasks are those that have the largest number of intents to recognize.
+
+\end{comment}
+
+Finally, Figure~\ref{fig:bar_plot} shows the average accuracies achieved by different KDs approaches when using smaller rehearsal memory sizes. We can note the consistency of the  performance trends as the memory size changes. In particular, the gain in accuracy provided by the KDs is larger when a rehearsal memory with a smaller capacity is used, thus showing the effectiveness of the methods also for limited-budget buffers.
+
+%\begin{figure}[htb]
+%\centering
+%  \centerline{\includegraphics[width=8.5cm]{Final_table_930.png}}
+%%\caption{Final table w/ all experiments for memory size = 930.}
+%\end{figure}
+
+%\begin{figure}[htb]
+%\centering
+ % \centerline{\includegraphics[width=8.5cm]{Final_table_465.png}}
+%\end{figure}
+
+\begin{comment}
+
+
+\begin{table*}[!ht]
+    \centering
+    \begin{tabular}{|l|c|c|c|c|}
+    \hline
+    \multicolumn{5}{|c|}{Baselines}\\
+    \hline
+    Offline &\multicolumn{4}{l|}{0.985}\\
+    Finetuning &\multicolumn{4}{l|}{0.073  0.267}\\
+    Random &\multicolumn{4}{l|}{0.482 0.580} \\
+    iCaRL &\multicolumn{4}{l|}{0.533 0.612} \\
+    GEM &\multicolumn{4}{l|}{/} \\
+    \hline
+    \hline
+    KD & Data & Random & GEM & iCaRL\\
+    \hline
+   \multirow{2}{*}{feats} & rehe & / & / & 0.632 0.684 \\
+     & all & / & / & 0.452 0.538  \\
+    \hline
+    \multirow{2}{*}{pred} & rehe & / & / & 0.523 0.610 \\
+     & all & 0.551 0.628 &  / & 0.609 0.656 \\
+    \hline
+    \hline
+    \multirow{2}{*}{feats+pred} & rehe+all & / & / & \bf{0.665} \bf{0.696} \\
+    & rehe+rehe& / & / & 0.6133 0.670 \\
+    \hline
+    \end{tabular}
+    \caption{Final results for mem size = 465}
+    \label{tab:tabel_465}
+\end{table*}
+
+\begin{table*}[!ht]
+    \centering
+    \begin{tabular}{|l|c|c|c|c|}
+    \hline
+    \multicolumn{5}{|c|}{Baselines}\\
+    \hline
+    Offline &\multicolumn{4}{l|}{0.985}\\
+    finetuning &\multicolumn{4}{l|}{0.073  0.267}\\
+    Random &\multicolumn{4}{l|}{/} \\
+    iCaRL &\multicolumn{4}{l|}{0.339 0.474} \\
+    GEM &\multicolumn{4}{l|}{/} \\
+    \hline
+    \hline
+    KD & Data & Random & GEM & iCaRL\\
+    \hline
+   \multirow{2}{*}{feats} & rehe & / & / & 0.430 0.538 \\
+     & all & / & / & 0.320 0.441  \\
+    \hline
+    \multirow{2}{*}{pred} & rehe & / & / & 0.361 0.493 \\
+     & all & / &  / & 0.386 0.514 \\
+    \hline
+    \hline
+    \multirow{2}{*}{feats+pred} & rehe+all & / & / & \bf{0.496} \bf{0.573} \\
+    & rehe+rehe& / & / & 0.449 0.543 \\
+    \hline
+    \end{tabular}
+    \caption{Final results for mem size = 231}
+    \label{tab:tabel_231}
+\end{table*}
+\end{comment}
+
+\begin{comment}
+\begin{figure}[htb]
+\centering
+  \centerline{\includegraphics[width=8.5cm]{fig1}}
+\caption{Various KD methods in comparison.}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+  \centerline{\includegraphics[width=8.5cm]{fig2}}
+\caption{Various selection strategies for ER + GEM.}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+  \centerline{\includegraphics[width=8.5cm]{fig3}}
+\caption{CAL with different percentages vs Random vs Icarl ER.}
+\end{figure}
+
+\end{comment}
+
+
+%\ab{Questa parte va compressa e spostata o nei risultati o nelle motivazioni}
+
+\vspace{-0.3cm}
+\section{Conclusions}
+\label{sec:conclusion}
+ This paper describes an approach for class-incremental continual learning in a SLU domain. We have shown that KD on rehearsal data is effective if applied to the encoded features.
+ Furthermore, the feature-level MSE loss, when added to the usual predictions-level KD loss, brings additional performance improvements. The efficacy of the approach is particularly evident when the rehearsal memory has small sizes, making it suitable for low-resources devices. Future work will address the extension of the proposed approach to different neural architectures, as well as its application to KWS and ASR tasks and to more complex SLU datasets, e.g. the Spoken Language Understanding Resource Package (SLURP) \cite{bastianelli2020slurp}.
+
+
+
+\begin{comment}
+\section{TYPE-STYLE AND FONTS}
+\label{sec:typestyle}
+
+To achieve the best rendering both in printed proceedings and electronic proceedings, we
+strongly encourage you to use Times-Roman font.  In addition, this will give
+the proceedings a more uniform look.  Use a font that is no smaller than nine
+point type throughout the paper, including figure captions.
+
+In nine point type font, capital letters are 2 mm high.  {\bf If you use the
+smallest point size, there should be no more than 3.2 lines/cm (8 lines/inch)
+vertically.}  This is a minimum spacing; 2.75 lines/cm (7 lines/inch) will make
+the paper much more readable.  Larger type sizes require correspondingly larger
+vertical spacing.  Please do not double-space your paper.  TrueType or
+Postscript Type 1 fonts are preferred.
+
+The first paragraph in each section should not be indented, but all the
+following paragraphs within the section should be indented as these paragraphs
+demonstrate.
+
+\section{MAJOR HEADINGS}
+\label{sec:majhead}
+
+Major headings, for example, "1. Introduction", should appear in all capital
+letters, bold face if possible, centered in the column, with one blank line
+before, and one blank line after. Use a period (".") after the heading number,
+not a colon.
+
+\subsection{Subheadings}
+\label{ssec:subhead}
+
+Subheadings should appear in lower case (initial word capitalized) in
+boldface.  They should start at the left margin on a separate line.
+ 
+\subsubsection{Sub-subheadings}
+\label{sssec:subsubhead}
+
+Sub-subheadings, as in this paragraph, are discouraged. However, if you
+must use them, they should appear in lower case (initial word
+capitalized) and start at the left margin on a separate line, with paragraph
+text beginning on the following line.  They should be in italics.
+
+\section{PRINTING YOUR PAPER}
+\label{sec:print}
+
+Print your properly formatted text on high-quality, 8.5 x 11-inch white printer
+paper. A4 paper is also acceptable, but please leave the extra 0.5 inch (12 mm)
+empty at the BOTTOM of the page and follow the top and left margins as
+specified.  If the last page of your paper is only partially filled, arrange
+the columns so that they are evenly balanced if possible, rather than having
+one long column.
+
+In LaTeX, to start a new column (but not a new page) and help balance the
+last-page column lengths, you can use the command ``$\backslash$pagebreak'' as
+demonstrated on this page (see the LaTeX source below).
+
+\section{PAGE NUMBERING}
+\label{sec:page}
+
+Please do {\bf not} paginate your paper.  Page numbers, session numbers, and
+conference identification will be inserted when the paper is included in the
+proceedings.
+
+\section{ILLUSTRATIONS, GRAPHS, AND PHOTOGRAPHS}
+\label{sec:illust}
+
+Illustrations must appear within the designated margins.  They may span the two
+columns.  If possible, position illustrations at the top of columns, rather
+than in the middle or at the bottom.  Caption and number every illustration.
+All halftone illustrations must be clear black and white prints.  Colors may be
+used, but they should be selected so as to be readable when printed on a
+black-only printer.
+
+Since there are many ways, often incompatible, of including images (e.g., with
+experimental results) in a LaTeX document, below is an example of how to do
+this \cite{Lamp86}.
+
+\section{FOOTNOTES}
+\label{sec:foot}
+
+Use footnotes sparingly (or not at all!) and place them at the bottom of the
+column on the page on which they are referenced. Use Times 9-point type,
+single-spaced. To help your readers, avoid using footnotes altogether and
+include necessary peripheral observations in the text (within parentheses, if
+you prefer, as in this sentence).
+
+% Below is an example of how to insert images. Delete the ``\vspace'' line,
+% uncomment the preceding line ``\centerline...'' and replace ``imageX.ps''
+% with a suitable PostScript file name.
+% -------------------------------------------------------------------------
+\begin{figure}[htb]
+
+\begin{minipage}[b]{1.0\linewidth}
+  \centering
+  \centerline{\includegraphics[width=8.5cm]{image1}}
+%  \vspace{2.0cm}
+  \centerline{(a) Result 1}\medskip
+\end{minipage}
+%
+\begin{minipage}[b]{.48\linewidth}
+  \centering
+  \centerline{\includegraphics[width=4.0cm]{image3}}
+%  \vspace{1.5cm}
+  \centerline{(b) Results 3}\medskip
+\end{minipage}
+\hfill
+\begin{minipage}[b]{0.48\linewidth}
+  \centering
+  \centerline{\includegraphics[width=4.0cm]{image4}}
+%  \vspace{1.5cm}
+  \centerline{(c) Result 4}\medskip
+\end{minipage}
+%
+\caption{Example of placing a figure with experimental results.}
+\label{fig:res}
+%
+\end{figure}
+
+
+% To start a new column (but not a new page) and help balance the last-page
+% column length use \vfill\pagebreak.
+% -------------------------------------------------------------------------
+%\vfill
+%\pagebreak
+
+\section{COPYRIGHT FORMS}
+\label{sec:copyright}
+
+You must submit your fully completed, signed IEEE electronic copyright release
+form when you submit your paper. We {\bf must} have this form before your paper
+can be published in the proceedings.
+
+\section{RELATION TO PRIOR WORK}
+\label{sec:prior}
+
+The text of the paper should contain discussions on how the paper's
+contributions are related to prior work in the field. It is important
+to put new work in  context, to give credit to foundational work, and
+to provide details associated with the previous work that have appeared
+in the literature. This discussion may be a separate, numbered section
+or it may appear elsewhere in the body of the manuscript, but it must
+be present.
+
+You should differentiate what is new and how your work expands on
+or takes a different path from the prior studies. An example might
+read something to the effect: "The work presented here has focused
+on the formulation of the ABC algorithm, which takes advantage of
+non-uniform time-frequency domain analysis of data. The work by
+Smith and Cohen \cite{Lamp86} considers only fixed time-domain analysis and
+the work by Jones et al \cite{C2} takes a different approach based on
+fixed frequency partitioning. While the present study is related
+to recent approaches in time-frequency analysis [3-5], it capitalizes
+on a new feature space, which was not considered in these earlier
+studies."
+
+\vfill\pagebreak
+\end{comment}
+%\section{REFERENCES}
+%\label{sec:refs}
+
+
+
+% References should be produced using the bibtex program from suitable
+% BiBTeX files (here: strings, refs, manuals). The IEEEbib.bst bibliography
+% style file from IEEE produces unsorted bibliography list.
+% -------------------------------------------------------------------------
+\bibliographystyle{IEEEbib}
+\bibliography{Template}
+
+
+
+\end{document}

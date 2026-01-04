@@ -1,0 +1,142 @@
+%Volume estimation
+\if\draft \subsection{State estimation} \fi %Position uncertainty as a function of environment
+%\ar{We now start with the uncertainty in positiona and orientation estimates originating from the sensor measurements and the state estimation.}
+%Assume there is a set of previously mapped, visually identifiable features in the environment. If a feature is in the field of view of the onboard camera and close enough to be identified, we can extract the set of points of the visible markers in the image plane coordinates.
+%\stef{Generally, the section very precisely defines how to compute volume of a stockpile but it lacks structure. Thus, it's hard to separate what is what. I would suggest to separate it into 4 subsections: 1) camera based position localization 2) surface measurements via onboard LiDAR sensor 3) surface model 4) volume estimation. Additionally, I would add figure to the subsection 1) since it's much easier to understand vison based localization once the image is present (in Robotics people like to draw everything, I am not sure what's the style in the control systems community so I might be wrong about this one :)  }
+%
+%\subsubsection{Feasibility}
+%\subsubsection{Minimum number of markers to ensure feasibility}
+%
+%\subsection{LiDAR model}
+%...at an angle $\alpha_k = \omega t_k$, as illustrated in Figure \ref{fig:alps}
+%where $\omega$ is the constant angular velocity of LiDAR sensor scan,
+%and $t_k$ is the discrete time when the sample is collected. A fixed $f_s$ samples are collected per unit time.
+
+Now that we know the position and orientation of the drone, as well as their uncertainties we consider the LiDAR model.
+The sensor rotates in a plane with constant angular velocity, collecting approximately $10\mathrm{K}$ distance samples per second, at discrete angles as illustrated in Figures~\ref{fig:alps} and~\ref{fig:DroneLidarHit}.
+We can compute the hit point coordinates of the LiDAR measurements with the geometric transformation
+\begin{equation}
+	z^m(\state, \alpha) = T_g^l(\state, \alpha) d_l,
+\end{equation}
+where
+%$P_m$ are the coordinates of a measurement hit point,
+$T_g^l(\state,\alpha)$ is the geometric transformation converting points in the LiDAR scan line frame to global coordinates,
+$\alpha$ is the angle of the sensor,
+$d_l$ is the measured distance, and
+$\zm\in\Reals^3$ are the coordinates of the hit point.
+Propagating the uncertainty of each of the variables we obtain an estimate of the covariance of the measurement $\zm$, where again we use the Jacobian of the geometric transformation
+\begin{equation}
+	\begin{aligned}
+		\Sigma^m &=  \nabla_\state T_g^l(\state, \alpha) d_l ~ \Sigma^\state ~ (\nabla_\state T_g^l(\state, \alpha) d_l)\tp\\
+		& + \nabla_\alpha T_g^l(\state, \alpha) d_l ~ \Sigma^\alpha ~ (\nabla_\alpha T_g^l(\state, \alpha) d_l)\tp \\
+		& + T_g^l(\state, \alpha)~ \Sigma^{d_l} ~ T_g^l(\state, \alpha)\tp,
+	\end{aligned}
+	\label{sigma-m}
+\end{equation}
+where $\Sigma^m$, $\Sigma^\state$, $\Sigma^\alpha$ and $\Sigma^{d_l}$ are the covariance matrices of a measurement, the drone position and orientation, the LiDAR angle, and measured distance, respectively.
+Note that due the intrinsic properties of the sensor, only obstacles in a certain distance range can be detected $d_l \in [d_{min}, d_{max}]$.
+Figure \ref{fig:DroneLidarHit} shows how the LiDAR scan obtains data about the surface.
+%
+\begin{figure}
+\begin{center}
+	\importsvg[.5\columnwidth]{img}{DroneLidarHit}    % The printed column width is 8.4 cm.
+	\caption{The 2D LiDAR measures the distance from the drone to the terrain $d_l$. The uncertainty in the drone position and orientation $\Sigma^\state$, LiDAR angle $\Sigma^\alpha$ and measurement distance $\Sigma^{d_l}$ are propagated to obtain the covariance of the measurement $\Sigma^m$.
+	Due to features of the terrain some areas might not be visible from current pose, marker as the shadow region in the bottom right.
+	%Additionally to the hit point, we are also informed that there are no additional obstacles in the measurement path, and get some information about the slope of the terrain at the hit point.
+\label{fig:DroneLidarHit}
+	}\end{center}
+\end{figure}
+%
+%
+\if\draft \subsection{Reducing errors-in-variables to z} \fi
+\begin{figure}
+\begin{center}
+	\importsvg[.9\columnwidth]{img}{Terrain}
+	\caption{The volume slope distribution can be approximated by a normal distribution $\mathcal{N}(0, \sigma_s)$, and it is a property of the material.} 
+	\label{fig:slope}
+\end{center}
+\end{figure}
+%\ar{We now incorporate modeling of the surface characteristics (slope, height points correlation).}
+We condense the position uncertainty $\Sigma^m$, propagating the errors-in-variables to errors in height, given known statistical information about the slope of the terrain
+%encoded in the matrix $A$
+\begin{equation}
+	%\Sigma^m_{(z)} = \sigma_s^2 ( \Sigma^m_1 + \Sigma^m_2) + \Sigma^m_3
+	\Sigma^m_{(z)} = \begin{bmatrix}\sigma_t &\sigma_t &1 \end{bmatrix} \Sigma^m \begin{bmatrix}\sigma_t &\sigma_t &1 \end{bmatrix}\tp,
+\end{equation}
+where $\sigma_t$ is the standard deviation of a Gaussian distribution fitted to an histogram of the slopes of this terrain, as shown in Figure \ref{fig:slope}.
+
+%\ar{Can you add additional explanation about this equation? Is it even needed - later A is not used? Clarify that now you will provide the way to encode statistical information about the terrain, and  later, when everything is clarified, go back to the equation.}
+%\stef{This equation is not clear to me as well. It needs further explanation. Also, I cannot make connection between equations 10, 11 and 12. I think we should be consistent with sub- and superscripts and write more clear definitions.}
+
+\subsection{Surface model}
+A common way to store the information about a 3D object is to use voxels, a generalization of the concept of pixel in 3D. Variations include sparse octree representations \cite{laine2010efficient}. However, if we assume that the surface can be described with a function from $x, y$ to $h$ we can simplify the representation.
+One option is to use kriging-based methods (\cite{krige1951statistical}) such as Gaussian process (GP) (\cite{rasmussen}). This is the method used in ~\cite{popovic2020informative} where an informative path planning framework is proposed.
+
+We parameterize the surface using a grid of heights. Each point of the grid is described by a univariate normal distribution
+\begin{equation}
+	h_{i,j} \sim \mathcal{N}(\mu_{ij},\sigma_{ij}^2),~i=\{1, \dots, N\}, ~j=\{1, \dots, M\},
+	\label{eq:h-diagonal}
+\end{equation}
+where $N$ and $M$ are the dimensions of the grid. Between the grid points, we represent the surface distribution (the surface height is a random variable due to uncertainty) using a Gaussian Process model where the height grid provides inducing points. 
+
+We use a specific kernel tailored to the physics of our surface. Due to their physical properties, the materials piled up in the region of interest have a volumetric organization which can be described statistically.
+%From the geostatiscs literature \ar{cite...? or skip this explanation related to the geostatics literature} we know that 
+The Matérn Kernel is a good choice to estimate the correlation of the heights of two points separated by a distance $s$
+\begin{equation}
+	k(s) =  \frac{1}{\Gamma(\nu)2^{\nu-1}}\Bigg(
+         \frac{\sqrt{2\nu}}{l} s
+         \Bigg)^\nu K_\nu\Bigg(
+         \frac{\sqrt{2\nu}}{l} s \Bigg),
+		 \label{eq:kernel}
+\end{equation}
+where $l$ is the lengthscale, $\nu$ is a positive parameter controlling the smoothness of the function, and $K_{\nu}$ and $\Gamma_{\nu}$ are Bessel and Gamma functions, respectively.
+We describe the surface as a sparse Gaussian Process with fixed inducing points $X$ which are obtained from the height grid,
+$f(x) \sim \mathcal{GP} (0, k(X, X'))$.
+%$f(x) \sim \mathcal{GP} (m(X), k(X, X'))$~\cite{Rasmussen}.
+At an arbitrary set of points $X_* \in \mathcal{D}$, we can predict the expected value and variance of the height of the surface using the equations
+\begin{subequations}
+	\begin{align}
+		%f_* | X_*, X, f \sim & ~\mathcal{N}(\mean^{f_*}, \cov^{f_*})\\
+		\mean^{f_*}_\info = \mathbb{E}[f_*] =&~ K_{X_*X}[K_{XX} + \Sigma^2 I ]^{-1} Z\\
+		\begin{split}
+			\cov^{f_*}_\info = \mathbb{V}[f_*] =&~ K_{X_*X_*} - \\
+					& K_{X_*X}[K_{XX} + \Sigma^2 I]^{-1} K_{XX_*}
+		\end{split}
+	\end{align}
+\end{subequations}
+where $\mathbb{E}$ is the expected value,
+$\mathbb{V}$ is the variance,
+$K_{X_*X}$ is the covariance between the points $X$ and $X_*$ computed with the kernel \eqref{eq:kernel},
+where $s$ is the pairwise distance between the points (\cite{rasmussen}),
+$Z$ is the vector of the $z$ coordinates of the inducing points, and
+$\Sigma$ the vector of their uncertainties.
+For a certain kernel lengthscale, the vector $\info \doteq [Z, \Sigma]$ contains all the information needed to make predictions.
+For computational reasons, the kernel is made sparse by setting to zero the correlation between points outside of a ball with radius $\gamma l$.
+With this model for the surface, we can readily compute the volume, its expected value and variance using the equations
+\begin{subequations}
+	\begin{align}
+		\Volume = &\iint_S f (x_*) dS \\%\approx A_\square \sum_{i=1}^N \sum_{j=1}^M (f_*)_{ij}, \label{eq:V} \\
+		\mu^\Volume = & ~ \mathbb{E}(\Volume) \approx  A_\square \sum_{i=1}^N \sum_{j=1}^M \mean^{f_*}_{ij},\label{eq:V-mu} \\
+		{(\sigma^\Volume)}^2 = & ~ \mathbb{V}(\Volume) \approx A_\square^2 \sum_{i=1}^N \sum_{j=1}^M \cov^{f_*}_{ij}, \label{eq:V-sigma}
+	\end{align}
+\end{subequations}
+where $A_\square$ is the area of the base of each square cuboid.
+
+\subsection{Update}
+When a new measurement is obtained we first propagate it to the grid points. This is accomplished using the kernel
+${\Sigma^m_{(z)}} + \sigma_t^2 (e^{s/l}-1)$,
+where $\sigma_t$ is the standard deviation of the normal distribution that approximates the slope distribution,
+$s$ is the distance between the measurement point and the grid coordinates, and
+$l$ is the lenghtscale used in \eqref{eq:kernel}. %\td{Clarify this paragraph}
+We then use a Kalman filter to update the parameters of the height model \eqref{eq:h-diagonal}
+\begin{equation}
+	\begin{aligned}
+		\mu_k		&= (I - K_k) \mu_{k-1} + K_k z_k \\
+		\sigma_k	&= (I - K_k) \sigma_{k-1} \\
+		K_k			&= \frac{\sigma_{k-1}^2}{\sigma_{k-1}^2 + ({\Sigma^m_{(z)}}_k + \sigma_t^2 (e^{s/l}-1))}
+	\end{aligned}
+\end{equation}
+where
+$\mu_{k-1}$, $\mu_k$, $\sigma_{k-1}$, and $\sigma_{k}$ are the mean and standard deviation of each point of the grid, before and after the update step, 
+$z_k$ and ${\Sigma^m_{(z)}}_k$ are the measurement value and covariance from \eqref{sigma-m}.
+$K_k$ is the Kalman gain.

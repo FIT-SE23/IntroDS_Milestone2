@@ -1,0 +1,836 @@
+A typical particle physics analysis requires construction of a likelihood function ${\cal L}$ 
+(or other means of inference), which describes a sum of contributing {\it processes} defined for
+a set of {\it observables} $\vec{x}_\mathrm{reco}$ reconstructed in an experiment 
+as a function of parameters of interest~$\vec{\theta}$. 
+In application to an EFT analysis, for example, $\vec{\theta}$ could represent the EFT parameters, 
+which describe the truth-level process, characterized by the quantities $\vec{x}_\mathrm{truth}$, 
+which could be the four-momenta of all partons involved in the process (incoming and outgoing particles
+in the hard process). The challenges in experimental analysis are related to the interplay of the
+reconstructed $\vec{x}_\mathrm{reco}$ and truth-level $\vec{x}_\mathrm{truth}$ quantities,
+where the parton shower, detector response, and reconstruction algorithms stand in between. 
+
+The probability density function (pdf) for a reconstructed process can be obtained with the transfer function
+from the truth-level process pdf as  
+%%%%%%%%%%%%%%%%%%%%%%%
+\begin{equation}
+{\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta}) = 
+\int \mathrm{d}\vec{x}_\mathrm{truth} ~p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth}) {\cal P}(\vec{x}_\mathrm{truth}|\vec{\theta}) \,,
+\label{eq:P} 
+\end{equation}
+%%%%%%%%%%%%%%%%%%%%%%%
+where $p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth})$ is the transfer function. 
+If ${\cal P}(\vec{x}_\mathrm{truth}|\vec{\theta})$ represents the matrix element squared of the hard process, 
+including the parton luminosities, propagators, and phase-space factors, 
+then the transfer function reflects the parton shower, detector response, and reconstruction algorithms. 
+In this case, the \emph{truth level} corresponds to the \emph{parton level}. 
+Alternatively, ${\cal P}(\vec{x}_\mathrm{truth}|\vec{\theta})$ could represent the \emph{particle-level} process 
+including the parton shower, which needs to be clarified based on the use case. 
+When treated as the probability density, ${\cal P}$ is normalized to unit area. 
+The assumption that $p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth})$ does not depend on EFT parameters
+$\vec{\theta}$ is often valid, but this assumes, for example, that QCD effects in parton shower factorize. 
+Let us also define $p(\vec{x}_\mathrm{reco},\vec{x}_\mathrm{truth}|\vec{\theta})=
+p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth}) {\cal P}(\vec{x}_\mathrm{truth}|\vec{\theta})$
+for future use in Section~\ref{sect:ml}. 
+
+More generally, the \emph{truth level} can refer 
+to any set of observables that are defined based on information in the Monte Carlo (MC) event record, however, two definitions 
+dominate most results; the \emph{particle level} and \emph{parton level}. At particle level, observables are 
+constructed using objects that closely resemble those at reco level and are built using only particles in the event record, usually 
+those with a mean lifetime $\tau \geq 3\cdot 10^{-9}$ s. For example, a particle level jet could be defined using the same 
+anti-k$_T$ algorithm as is used on reco level, with stable particles as input instead of calorimeter objects. Particle-level objects 
+and observables are agnostic to the choice of MC generator. The parton level is a more nebulous concept and seeks 
+to mimic the results of a fixed-order calculation using undecayed objects such as quarks and bosons. However, as each MC 
+generator calculates and stores the four vectors of such objects differently, it is challenging to establish a generator-agnostic 
+definition. In the area of top quark physics, for example, the parton-level definition of a top quark is commonly taken to be the 
+last top quark in the decay chain which decays to a $b$ quark and $W$ boson.
+%(in many generators, quarks often decay to themselves with slightly different momenta for technical reasons) 
+% but this is not guaranteed to be identical between generators. 
+
+The distinction of the \emph{particle level} and \emph{parton level} will become important when we discuss unfolding 
+techniques in Section~\ref{sect:unfold}, which are designed to invert the transformation in Eq.~(\ref{eq:P}). 
+It is not always possible to reverse the relationship in Eq.~(\ref{eq:P})
+and recover ${\cal P}(\vec{x}_\mathrm{truth}|\vec{\theta})$ from the observed reconstructed distributions,
+due to loss of information in the transfer. This loss could happen either because of loss in the detector, 
+e.g. particles lost along the beampipe, or because $\vec{x}_\mathrm{reco}$ does not match the full 
+set~$\vec{x}_\mathrm{truth}$. 
+However, if the truth-level observables are closely related to those at reco-level,
+the truth-level distributions might be recovered with good accuracy.
+
+Modeling of the transfer encoded in Eq.~(\ref{eq:P}) is often performed with MC techniques.
+The hard process ${\cal P}(\vec{x}_\mathrm{truth}|\vec{\theta})$ is usually modeled at parton level
+with an event generator, such as POWHEG~\cite{Frixione:2007vw}, MadGraph\_aMC$@$NLO~\cite{Alwall:2014hca}, 
+or another program (which are discussed in Area 2 of the group effort); 
+parton shower with e.g. Pythia~\cite{Sjostrand:2014zea}; detector response with e.g. GEANT~\cite{GEANT4:2002zbu}; 
+and the reconstruction software specific to an experimental approach is used for calculation of $\vec{x}_\mathrm{reco}$. 
+Data-driven techniques can be employed either to calibrate or to substitute for MC, but the general idea 
+remains the same: some approximation is used to predict ${\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta})$. 
+This predicted distribution should describe the observed distribution in experiment 
+${\cal P}_\mathrm{obs}(\vec{x}_\mathrm{reco})$, which, in general, 
+is represented by an unbinned distribution of observed events. 
+Based on distributions of observables, a quantitative {\it measurement} is derived, which could be 
+confidence intervals set on cross sections, parameters $\vec{\theta}$, or any other quantities, 
+which could later be used as input to a global~fit. 
+
+One particular application in EFT is a set of parameters $\vec{\theta}$ that consists of $(K+1)$ couplings, 
+including the standard model (SM) $\theta_0$ and $\vec{\theta}=(\theta_0,\theta_1,..,\theta_K)$.
+Let us consider the models $\vec{\theta}_i$, each corresponding to a non-zero coupling $\theta_i$.
+For simplicity in the equations and discussion, we assume $\theta_i$ are real, but
+complex couplings do not significantly change the situation.
+The full probability density is proportional to the sum of the amplitudes squared and can be written as
+%%%%%%%%%%%%%%%%%%%%%%%
+\begin{eqnarray}
+{\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta})  \propto
+{\cal P}_0(\vec{x}_\mathrm{reco}) 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+\nonumber  \\
++  \sum_{1\le k \le K} \left(\frac{2\theta_k}{\theta_0}\right) {\cal P}_{0k}(\vec{x}_\mathrm{reco}) 
++ \sum_{1\le k \le K} \left(\frac{\theta_k}{\theta_0}\right)^2 {\cal P}_k(\vec{x}_\mathrm{reco}) 
++ \sum_{1\le i<j\le K} \left(\frac{2\theta_i\theta_j}{\theta_{0}^2}\right) {\cal P}_{ij}(\vec{x}_\mathrm{reco}) \,, 
+\label{eq:probreco} 
+\end{eqnarray}
+%%%%%%%%%%%%%%%%%%%%%%%
+where the single index of the probability density indicates the model type $\vec{\theta}_k$ and
+double index indicates interference between the two models $\vec{\theta}_i$ and $\vec{\theta}_j$,
+and where we do not carry the overall normalization factor, which corresponds to the total cross section 
+measurement of a process. 
+Equation~(\ref{eq:probreco}) allows parameterization of the pdf as a function of parameters 
+of interest $\vec{\theta}$, and we will come back to this equation below. 
+
+
+\subsection{Approaches to experimental observables}
+\label{sect:obs}
+
+An ideal analysis would reconstruct the full set of observables $\vec{x}_\mathrm{reco}^\mathrm{\,full}=\vec{x}_\mathrm{truth}$,
+which completely describe the process of interest in Eq.~(\ref{eq:P}), without any loss of information. 
+For example, this may be the complete set of four-vectors describing the incoming and outgoing partons,
+or an equivalent set of observables which contains the same information. In reality, this often becomes either 
+impossible or impractical, and at the very least some information is lost or obstructed due to detector effects 
+or parton shower. 
+Such an approach is often considered impractical because it requires a highly multi-dimensional space of
+observables which would be hard to analyze. Therefore, $\vec{x}_\mathrm{reco}$ often becomes a
+reduced set of observables, often just one or two, characterizing an event. This could
+be illustrated with the following transformation, where $\vec{x}_\mathrm{reco}^\mathrm{\,full}$ represents
+the most information about the process that can be reconstructed from an event
+%%%%%%%%%%%%%%%%%%%%%%%
+\begin{equation}
+\vec{x}_\mathrm{reco} = f(\vec{x}_\mathrm{reco}^\mathrm{\,full})  \,.
+\label{eq:xreco} 
+\end{equation}
+%%%%%%%%%%%%%%%%%%%%%%%
+In the case of such reduction of information, it is important to choose observables in such a way that their
+differential distributions are sensitive to variation of the model parameters $\vec{\theta}$.
+
+We loosely group observables sensitive to EFT effects in the following categories, without necessarily 
+clear boundaries between those:
+\begin{itemize}
+	\item typical SM observables, such as invariant masses, transverse momenta $p_T$ of reconstructed particles, etc...
+	\item EFT-sensitive observables: angular information, four-momenta squared $q^2$ of the propagators, etc...
+	\item optimized observables: matrix-element-based calculations, machine learning, special construction, etc...
+	\item full information $\vec{x}_\mathrm{reco}^\mathrm{\,full}$ in any of the above forms. 
+\end{itemize}
+The distinction between the above is usually historical. The SM observables were often chosen for 
+the best background rejection and isolation of signal without necessarily targeting EFT effects. 
+The EFT-sensitive observables are typically individual calculations which emphasize certain features
+of higher-dimension operators in a simple and transparent manner. The optimized observables
+usually do not seek transparency but are targeting the maximal information possible. Observables
+which carry full information are meant to be used by advanced methods for statistical inference. 
+We note that even if the shapes of certain observables are not sensitive to EFT effects, 
+the rates measured using such observables still provide some sensitivity. 
+
+The choice of observables in experimental analysis depends on many factors. Ideally, there should be a minimal number
+of observables sensitive to the maximal information contained in a certain process, with minimal correlation 
+between these observables. This leads to the idea of optimized observables targeted to given operators. 
+Such an approach provides better sensitivity. At the same time, generic observables may have wider application 
+and usage, without being tuned to a particular set of operators. Reproducibility of observables is another important 
+consideration. For example, while an observable obtained with machine-learning techniques may appear most
+optimal, the differential distribution of such an observable may become hard to interpret. 
+Historically, many EFT measurements evolved from analyses which did not target EFT operators specifically and are 
+therefore based on generic observables.
+
+
+\subsubsection{Observables sensitive to EFT effects}
+\label{sect:obs-eft}
+
+One particular consideration in building EFT-sensitive observables is the fact that higher-dimension operators 
+typically lead to enhancement at the higher values of four-momenta squared $q^2$ distributions of the particles 
+appearing in the propagators. 
+Therefore, observables based on the $q^2$ calculations or correlated with those quantities become sensitive probes 
+of deviations from the SM. An example of such an observable correlated with $q^2$ could be the transverse momentum of 
+reconstructed objects. At the same time, such generic probes of $q^2$ may not be sensitive to distinguish multiple 
+operators that all lead to the same $q^2$ enhancement. One example of such a situation is the study of 
+$CP$-even and $CP$-odd operators, which may require special $CP$-sensitive observables to differentiate them. 
+
+Building EFT-sensitive observables usually follows certain features of the higher-dimension operators. 
+As an example of such a construction, let us consider the 
+vector boson scattering process with creation of an on-shell Higgs boson. The operators
+$C_{H\widetilde{W}B}$, $C_{H\widetilde{W}}$, and $C_{H\widetilde{B}}$ give rise to the $CP$-odd
+amplitudes in the $HVV$ interaction. The azimuthal angle between the two associated jets 
+$\Delta\Phi_\mathrm{JJ}$ is an observable sensitive to these amplitudes~\cite{Plehn:2001nj}, 
+as illustrated in Fig.~\ref{fig:obs}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[t!]
+  \begin{center}
+    \captionsetup{justification=centerlast}
+    \includegraphics[width=0.32\linewidth]{plots_area3/obsG.pdf}
+    \includegraphics[width=0.32\linewidth]{plots_area3/obsO1.pdf}
+    \includegraphics[width=0.32\linewidth]{plots_area3/obsO2.pdf}
+    \caption{
+    Observables reconstructed in production of the on-shell Higgs boson in the $ZZ$ and $WW$ fusion:
+    azimuthal angle between two associated jets $\Delta\Phi_\mathrm{JJ}$ (left);
+    observable ${\cal R}_\mathrm{opt,2}$ optimized for the quadratic term $\theta_1^2$ (middle);
+    observable ${\cal R}_\mathrm{opt,1}$ optimized for the linear term $\theta_1$ (right). 
+    Four distributions are shown: SM ($\theta_0$, black), $CP$-odd operator ($\theta_1$, red), 
+    and 50\% mixture with positive (green) and negative (blue) relative sign of $\theta_0$ and $\theta_1$. 
+    The study is inspired by Ref.~\cite{Gritsan:2020pib}. 
+     }
+    \label{fig:obs}
+  \end{center}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\subsubsection{Observables optimized with matrix-element calculations}
+\label{sect:obs-me}
+
+The idea of optimized observables was introduced in particles physics in Refs.~\cite{Atwood:1991ka,Diehl:1993br}. 
+For a simple discrimination of two hypotheses, the Neyman-Pearson lemma~\cite{Neyman:1933wgr} 
+guarantees that the ratio of probabilities 
+${\cal P}_1(\vec{x}_\mathrm{reco}^\mathrm{\,full})/{\cal P}_0(\vec{x}_\mathrm{reco}^\mathrm{\,full})$ for the two hypotheses 
+0 and 1 provides an optimal discrimination power.
+For a continuous set of hypotheses with an arbitrary quantum-mechanical mixture of two states, one could apply the 
+Neyman-Pearson lemma to each pair of points in the parameter space, but this would require a continuous, and 
+therefore infinite, set of probability ratios. 
+However, equivalent information is contained in a combination of only two probability ratios, 
+which can be chosen as two optimized observables~\cite{Anderson:2013afp}
+%%%%%%%%%%%%%%%%%%%%%%%
+\begin{eqnarray}
+{\cal R}_\mathrm{opt,2} =
+\frac{{\cal P}_1(\vec{x}_\mathrm{reco}^\mathrm{\,full})}
+{{\cal P}_0(\vec{x}_\mathrm{reco}^\mathrm{\,full})+c\cdot{\cal P}_1(\vec{x}_\mathrm{reco}^\mathrm{\,full})} \,,
+\label{eq:optimized2} 
+\\
+{\cal R}_\mathrm{opt,1} =
+\frac{2{\cal P}_{01}(\vec{x}_\mathrm{reco}^\mathrm{\,full})}
+{{\cal P}_0(\vec{x}_\mathrm{reco}^\mathrm{\,full})+c\cdot{\cal P}_1(\vec{x}_\mathrm{reco}^\mathrm{\,full})} \,,
+%{2\sqrt{{\cal P}_0(\vec{x}_\mathrm{reco}^\mathrm{\,full}){\cal P}_1(\vec{x}_\mathrm{reco}^\mathrm{\,full})}} \,,
+\label{eq:optimized1} 
+\end{eqnarray}
+%%%%%%%%%%%%%%%%%%%%%%%
+where the index of the probability density ${\cal P}$ is discussed in application to Eq.~(\ref{eq:probreco}). 
+The constant $c$ is introduced for convenience and could be set to $c=1$ when symmetric appearance 
+is desired, and these observables can also be defined with $c=0$.
+The information content of the two observables used jointly is the same for any fixed value of $c$,
+and the observable optimized for discrimination between two arbitrary hypotheses 
+can be written as a function of ${\cal R}_\mathrm{opt,1}$ and ${\cal R}_\mathrm{opt,2}$.
+In the case of a small contribution of $\theta_1$ to differential cross section, Eq.~(\ref{eq:optimized1})
+with $c=0$ reproduces the optimal observable defined in Ref.~\cite{Diehl:1993br}.
+
+Equation~(\ref{eq:probreco}) allows us to make several important observations. 
+When interference terms ${\cal P}_{ij}$ are absent, as for example in the case of non-interfering background,
+the optimized observables are of the type defined in Eq.~(\ref{eq:optimized2}).
+There is one optimized observable to separate signal from background, assuming background 
+does not depend on EFT parameters. 
+When interference is present and there are only two types of couplings with $K=1$, there are only
+two optimized observables defined in Eqs.~(\ref{eq:optimized2}) and~(\ref{eq:optimized1}),
+as stated above. This illustrates the power of the multivariate techniques when the 
+full information contained in the high-dimensional space of 
+$\vec{x}_\mathrm{reco}^\mathrm{\,full}$ can be preserved in just two observables. 
+This power is limited to the measurement of one parameter $\theta_1/\theta_0$, though. 
+However, when multiple couplings are present with $K>1$, the number of optimized observables 
+grows significantly as $(K+2)!/(2K!)-1$. 
+At the same time, one can observe that for the purpose of an EFT 
+measurement, the last two terms in Eq.~(\ref{eq:probreco}) are quadratic in non-SM couplings and
+can be neglected. This leaves $K$ linear terms, 
+describing interference with the SM amplitude, in the coupling expansion. 
+The $K$ observables, one for each term of the type defined in Eq.~(\ref{eq:optimized1}) with $c=0$,
+can be picked for optimal separation in an EFT analysis.
+Alternatively, the $2K$ observables, one for each term of each of the types defined in 
+Eqs.~(\ref{eq:optimized2}) and~(\ref{eq:optimized1}) with any fixed value of $c$, 
+will define the complete set of optimized observables. 
+
+Calculation of optimized observables as probability ratios in Eqs.~(\ref{eq:optimized2}) and~(\ref{eq:optimized1}) can be 
+performed with the help of the matrix-element calculations in Eq.~(\ref{eq:P}). The transfer functions 
+introduced in Eq.~(\ref{eq:P}), $p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth})$, are required 
+for proper probability calculations. However, as opposed to the matrix element method
+discussed in Section~\ref{sect:mem} where the transfer functions have to be modeled fully,
+in the case of probability ratios certain effects cancel, and in any case, any imperfection does not bias
+the result, but only reduces optimality somewhat. Therefore, the transfer functions 
+can often be omitted, with only minor effect on optimality, in cases where the process 
+is fully reconstructed with good enough resolution. 
+
+While multiple operators usually contribute to each process, it is often possible to isolate a small 
+number $K$ of operators that are preferably constrained in a given process. Other operators may 
+be much better constrained elsewhere. It is also important to pick the correct basis, or rotation, 
+of the operators, in which blind or weak directions are removed. When such a situation is possible, 
+the matrix-element calculations provide a prescription for calculating the observables optimal for 
+EFT measurements. Therefore, before a measurement can be attempted, one must obtain 
+a map of processes and operators with the weak directions resolved.
+
+Examples of the  ${\cal R}_\mathrm{opt,2}$ and ${\cal R}_\mathrm{opt,1}$ observables for the Higgs 
+boson production in the $ZZ$ and $WW$ fusion can be found in Fig.~\ref{fig:obs}~\cite{Gritsan:2020pib},
+and compared to the EFT-sensitive observable in this process $\Delta\Phi_\mathrm{JJ}$.
+Among the three operators, $C_{H\widetilde{W}B}$, $C_{H\widetilde{W}}$, and $C_{H\widetilde{B}}$,
+there are two weak directions, corresponding to the $H\gamma\gamma$ and $HZ\gamma$ couplings, 
+which are eliminated in the mass eigenstate basis. 
+The separation power can be quantified with Receiver Operating Characteristic (ROC)
+curves, shown in Fig.~\ref{fig:roc}.
+Performance of the ${\cal R}_\mathrm{opt,2}$ observable is validated with two samples
+corresponding to the $\vec\theta=(\theta_0,0)$ and $(0,\theta_1)$ models. 
+For a given selection ${\cal R}_\mathrm{opt,2}>$ threshold, a point with probabilities to
+select events from either one model $P(\theta_0)$ or the other $P(\theta_1)$ samples the ROC curve. 
+In a similar manner, 
+performance of the ${\cal R}_\mathrm{opt,1}$ observable is validated with two samples
+corresponding to the $\vec\theta=(\theta_0,+\theta_1)$ and $(\theta_0,-\theta_1)$ models. 
+The two models differ only by the sign of interference, and therefore the interference component
+is emphasized in this test. 
+Observables optimized with matrix element calculation exhibit the best performance
+in isolating the operator of interest. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[t!]
+  \begin{center}
+    \captionsetup{justification=centerlast}
+    \includegraphics[width=0.32\linewidth]{plots_area3/roc1.pdf}~~~~
+    \includegraphics[width=0.32\linewidth]{plots_area3/roc2.pdf}
+    \caption{
+    The ROC curves showing the separation power between the processes driven by a $CP$-odd coupling $\theta_1$
+    and the SM $\theta_0$ (left) and between the 50\% mixture of the two processes with the positive and negative
+    sign of interference (right). Three observables in the on-shell Higgs boson production in vector boson fusion 
+     are tested: $\Delta\Phi_\mathrm{JJ}$ (blue), optimized with matrix element (red) and machine learning (green). 
+    The study is inspired by Ref.~\cite{Gritsan:2020pib}. 
+     }
+    \label{fig:roc}
+  \end{center}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\subsubsection{Observables optimized with machine learning}
+\label{sect:obs-ml}
+
+While the matrix-element calculations guarantee optimal performance from first principles, there are practical 
+limitations to their applications. The most critical limitations are the transfer functions, which are difficult and
+time-consuming to model. Parton shower and detector effects may confuse and distort the input to matrix elements
+to such a degree that calculations become impractical. Machine-learning techniques may come to the rescue in 
+such a case. Training of machine-learning algorithms is still based on MC samples utilizing the same
+matrix elements that would be used for optimal discriminants discussed in Section~\ref{sect:obs-me}.
+However, these MC samples reflect the parton shower and detector effects, 
+and therefore allow construction of optimized observables which incorporate these effects. 
+
+There are two important aspects in this training: which observables should enter the learning process and 
+which samples should be used. 
+Matrix-element approach gives answers to both and provides insight into the process of constructing the 
+optimized observables with machine learning. 
+First, the input observables should provide full information $\vec{x}_\mathrm{reco}^\mathrm{\,full}$,
+which could be simply the four-vectors of all particles involved, like in the matrix elements, or better 
+derived physics quantities which are equivalent to those. 
+Second, there are two types of optimal observables, as pointed in Eqs.~(\ref{eq:optimized2}) 
+and~(\ref{eq:optimized1}). 
+The first observable corresponds to the classic problem of differentiating between two models, and 
+a machine-learning algorithm is trained on two samples corresponding to models $\theta_0$ 
+and $\theta_1$. The resulting observable is equivalent to Eq.~(\ref{eq:optimized2}).
+Training of the second discriminant is less obvious, as it is expected to isolate the interference component. 
+A discriminant trained to differentiate the two models with maximal quantum-mechanical mixing 
+$(\theta_0,+\theta_1)$ and $(\theta_0,-\theta_1)$ becomes a machine-learning equivalent 
+to that in Eq.~(\ref{eq:optimized1})~\cite{Gritsan:2020pib}. 
+
+Performance of the two optimized observables ${\cal R}_\mathrm{opt,2}^\mathrm{ML}$ and 
+${\cal R}_\mathrm{opt,1}^\mathrm{ML}$ obtained with machine learning (Boosted Decision Tree in this case) 
+is illustrated in Fig.~\ref{fig:roc} for the same example discussed in Section~\ref{sect:obs-me}.
+Since only acceptance effects were introduced in MC simulation for illustration purpose, 
+and those cancel in the ratios in Eqs.~(\ref{eq:optimized2}) and~(\ref{eq:optimized1}),
+the matrix-element and machine-learning optimized observables exhibit the same performance. 
+There is a small degradation in performance of the ${\cal R}_\mathrm{opt,1}^\mathrm{ML}$,
+which is attributed to the more challenging task of training in this case and should be recovered 
+in the limit of perfect training.
+
+This Section provides a straightforward path to observables optimized with machine learning.
+A more elaborate approach to inference with machine learning is discussed in Section~\ref{sect:ml}.
+
+
+\subsection{Approaches to experimental measurements}
+\label{sect:meas}
+
+The ideal situation  in Eq.~(\ref{eq:P}) would be 
+$p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth}) = \delta(\vec{x}_\mathrm{reco}-\vec{x}_\mathrm{truth})$,
+which means that the truth-level quantities could be reconstructed in experiment without any loss
+of information and $\vec{x}_\mathrm{reco}^\mathrm{\,full}=\vec{x}_\mathrm{truth}$.
+This never happens in practice, and experimental techniques are needed to analyze the data. 
+In experiment, the ${\cal P}_\mathrm{obs}(\vec{x}_\mathrm{reco})$ distribution is observed, 
+and it is matched to the predicted distribution in order to obtain the confidence intervals of $\vec{\theta}$.
+There are two conceptually different approaches taken in particle physics 
+to use Eq.~(\ref{eq:P}) for the measurements:
+%
+\begin{itemize}
+\item In the single-step approach, the observed ${\cal P}_\mathrm{obs}(\vec{x}_\mathrm{reco})$
+distribution is matched directly to the reconstruction-level prediction ${\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta})$
+to obtain constraints on $\vec{\theta}$. 
+%
+\item In the two-step approach, first the ${\cal P}_\mathrm{obs}(\vec{x}_\mathrm{reco})$ distribution is unfolded and 
+the best approximation to the truth-level ${\cal P}_\mathrm{obs}(\vec{x}^{\,\prime}_\mathrm{truth})$ distribution is reported,
+where $\vec{x}^{\,\prime}_\mathrm{truth}$ is a reduced set of quantities describing the truth-level process. 
+In the second step, the observed unfolded ${\cal P}_\mathrm{obs}(\vec{x}^{\,\prime}_\mathrm{truth})$ distribution 
+is matched to the truth-level prediction ${\cal P}(\vec{x}^{\,\prime}_\mathrm{truth}|\vec{\theta})$ 
+to obtain constraints on $\vec{\theta}$.
+\end{itemize}
+%
+In the above, $\vec{x}^{\,\prime}_\mathrm{truth}$ is a subset of 
+$\vec{x}_\mathrm{truth}=(\vec{x}^{\,\prime}_\mathrm{truth},\vec{x}^{\,\prime\prime}_\mathrm{truth})$ in Eq.~(\ref{eq:P}) which 
+matches the $\vec{x}_\mathrm{reco}$ as close as possible.  It does not have to be complete and 
+may represent just one quantity, e.g. the invariant mass of a system.
+% Calculation of $\vec{x}_\mathrm{reco}$ does not depend on $\vec{x}^{\,\prime\prime}_\mathrm{truth}$.
+The parton-level prediction for a reduced set of quantities can be expressed as
+%%%%%%%%%%%%%%%%%%%%%%%
+\begin{equation}
+{\cal P}(\vec{x}^{\,\prime}_\mathrm{truth}|\vec{\theta}) = 
+\int \mathrm{d}\vec{x}^{\,\prime\prime}_\mathrm{truth} {\cal P}(\vec{x}_\mathrm{truth}|\vec{\theta}) \,,
+\label{eq:partialP} 
+\end{equation}
+%%%%%%%%%%%%%%%%%%%%%%%
+where integration is performed over the degrees of freedom $\vec{x}^{\,\prime\prime}_\mathrm{truth}$ not used in differential distributions. 
+
+The two approaches have their pros and cons and both have been widely utilized in particle physics. 
+The single-step approach is conceptually straightforward and unbiased, if modeling 
+of the effects in Eq.~(\ref{eq:P}) is done correctly, e.g. with MC simulation. 
+It may also be the most optimal approach, if the choice of observables $\vec{x}_\mathrm{reco}$ is optimal
+and contains the full information as close to $\vec{x}_\mathrm{truth}$ as possible. 
+However, this approach suffers from two main drawbacks, which are complementary 
+to the two-step approach discussed below. 
+First of all, re-analysis of the data requires the full chain of experimental processing,
+starting from a modification of ${\cal P}(\vec{x}_\mathrm{truth}|\vec{\theta})$ in Eq.~(\ref{eq:P})
+and MC simulation of experimental apparatus with the new model, e.g. after changing the list
+of EFT operators targeted in analysis as described by $\vec{\theta}$. For this reason, 
+theoretical collaborations cannot easily reuse the results of such an analysis to adopt
+a new model. Second, this approach is rather complex because the EFT modeling should be done 
+with the full detector simulation, and leads to a much more involved process than the analysis of 
+unfolded distributions, which requires EFT modeling at parton level only. 
+
+The two-step approach is attractive for two main reasons: First of all, it allows wide dissemination and 
+preservation of the data in the form of differential truth-level distribution 
+${\cal P}_\mathrm{obs}(\vec{x}^{\,\prime}_\mathrm{truth})$
+for later re-analysis, e.g. by theoretical collaborations. Second, this approach 
+decouples the experimental effects in the first step from analysis of EFT effects in the second step,
+which greatly simplifies the EFT part of analysis. These two features make this approach especially 
+attractive for analysis of differential distributions outside of the experimental collaborations. 
+At the same time, this approach suffers from two main drawbacks, which potentially may lead to 
+a non-optimal and/or biased analysis. 
+The choice of $\vec{x}^{\,\prime}_\mathrm{truth}$ is usually limited to one or few observables, 
+resulting in significant loss of information compared to the complete set $\vec{x}_\mathrm{truth}$. 
+The unfolding from ${\cal P}_\mathrm{obs}(\vec{x}_\mathrm{reco})$ to  
+${\cal P}_\mathrm{obs}(\vec{x}^{\,\prime}_\mathrm{truth})$ depends on $\vec{\theta}$,
+but these parameters are not known in advance. The SM assumption is usually made in such unfolding,
+which may lead to bias. With multiple processes, background subtraction for a given process is also usually 
+done assuming SM parameters in the other processes, which may also lead to bias. 
+
+While measurements in the single-step approach can enter the global EFT fit directly by building 
+the joint likelihood of multiple measurements within experimental collaborations, reporting these
+measurements outside of such collaborations may represent a challenge. The usual practice of 
+reporting multi-gaussian approximation may not be sufficient for proper combination with other 
+measurements. The proper treatment requires that the experiments release the full likelihood associated to their 
+measurement, which represents technical challenges, but possible in principle. 
+Alternatively, the intermediate reco-level parameterization of a single-step approach could be
+reported, which would effectively lead to a two-step approach, but full information would be retained.
+In such a case, the observed 
+${\cal P}_\mathrm{obs}({x}^\prime_\mathrm{reco})$ distribution is reported by an experiment for a given observable 
+${x}^\prime_\mathrm{reco}$, along with the expected distributions ${\cal P}_\mathrm{reco}({x}^\prime_\mathrm{reco}|\theta_i)$ 
+for a variety of models of interest~$\theta_i$, and including background processes. This approach shares pros and 
+cons of the above two main approaches. This approach eliminates the unfolding procedure with its own complications 
+and allows easy interpretation of public differential distributions. However, this approach still limits the re-interpretation 
+to only those models $\theta_i$ which have been pre-computed with the tools used by the experiments.
+This approach also limits available information, as typically only 1D differential distribution of an observable 
+${x}^\prime_\mathrm{reco}$ is reported. However, the latter limitation could be overcome if several optimized 
+observables are utilized simultaneously. 
+
+The dependence of the unfolding procedure on the EFT parameters can be illustrated with the following. 
+Eliminating $\vec{x}^{\,\prime\prime}$ from Eq.~(\ref{eq:P}) leads to an equivalent expression
+%%%%%%%%%%%%%%%%%%%%%%%
+\begin{equation}
+{\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta}) = 
+\int \mathrm{d}\vec{x}^{\,\prime}_\mathrm{truth} ~p^\prime(\vec{x}_\mathrm{reco}|\vec{x}^{\,\prime}_\mathrm{truth};\vec{\theta}\,) 
+{\cal P}(\vec{x}^{\,\prime}_\mathrm{truth}|\vec{\theta}) \,,
+\label{eq:unfoldingP} 
+\end{equation}
+%%%%%%%%%%%%%%%%%%%%%%%
+with a very important difference in comparison to Eq.~(\ref{eq:P}): the modified transfer function \\
+$p^\prime(\vec{x}_\mathrm{reco}|\vec{x}^{\,\prime}_\mathrm{truth};\vec{\theta}\,)$ must, in general, 
+depend on the model parameters $\vec{\theta}$. This dependence becomes pronounced if 
+detector effects $p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth})$  are not uniform and distributions 
+${\cal P}(\vec{x}_\mathrm{truth}|\vec{\theta})$ vary with $\vec{\theta}$ over the degrees of 
+freedom~$\vec{x}^{\,\prime\prime}_\mathrm{truth}$. 
+A curious reader can confirm this conclusion by deriving the expression for 
+$p^\prime(\vec{x}_\mathrm{reco}|\vec{x}^{\,\prime}_\mathrm{truth};\vec{\theta}\,)$, 
+which is a non-trivial function of $\vec{\theta}$ in the case of non-trivial detector effects. 
+
+The reverse transformation of Eq.~(\ref{eq:unfoldingP}) 
+becomes the unfolding procedure, which is discussed in Section~\ref{sect:unfold}. 
+The dependence of unfolding on the model parameters $\vec{\theta}$ creates challenges in the EFT interpretation. 
+This is usually sidestepped by assuming SM parameters $\vec{\theta}=\vec{\theta}_0$ in the transformation
+%%%%%%%%%%%%%%%%%%%%%%%
+\begin{equation}
+{\cal P}_\mathrm{obs}(\vec{x}_\mathrm{reco}) \simeq
+\int \mathrm{d}\vec{x}^{\,\prime}_\mathrm{truth} ~p^\prime(\vec{x}_\mathrm{reco}|\vec{x}^{\,\prime}_\mathrm{truth};\vec{\theta}_0\,) 
+{\cal P}_\mathrm{obs}(\vec{x}^{\,\prime}_\mathrm{truth}) \,,
+\label{eq:unfoldingPobs} 
+\end{equation}
+%%%%%%%%%%%%%%%%%%%%%%%
+where the level of approximation in Eq.~(\ref{eq:unfoldingPobs}) with the assumption $\vec{\theta}=\vec{\theta}_0$
+needs to be reported for the range of parameters~$\vec{\theta}$ under consideration. 
+In practice, modeling of Eq.~(\ref{eq:unfoldingPobs}) is performed with MC simulation of the SM processes,
+and the level of approximation needs to be tested with alternative simulations, including detector effects, 
+for a range of $\vec{\theta}$. Ideally, experimental collaborations should also report prescription for correcting 
+the bias for certain popular models with parameters $\vec{\theta}$.
+These corrections are particularly important to evaluate for modification of EFT parameters because they can
+lead to dramatic detector effects, e.g. very different response due to substitution of $Z$ and $\gamma^*$ 
+particles in the propagators.
+
+The choice between the single-step vs. the two-step approaches to experimental measurements
+is driven by the tradeoff between the various pros and cons and by the available resources, data, and tools. 
+The single-step approach is the most optimal and can use the full knowledge of detector information, 
+and therefore it is most suitable for analysis by the experimental collaborations. 
+The two-step approach is easier for re-interpretation, even if this comes at the cost of some 
+loss of information and potential bias, and therefore it is most suitable for analysis by the 
+theoretical collaborations without access to detector information. 
+
+In the end, experimental measurements are experimentally delivered quantitative results, which are typically cross 
+sections or related quantities, and can be further used in global fits for EFT parameters $\vec{\theta}$. 
+(Applications of experimental measurements to global EFT fits are discussed in Area 4 of the group effort.)
+These experimental measurements are obtained from analysis of observables $\vec{x}_\mathrm{reco}$ 
+in a limited set of processes. 
+We group experimental measurements sensitive to EFT effects in several categories, which progress from
+simple to more involved:
+\begin{itemize}
+\item single-process cross section;
+\item single observable differential distribution affected by a single or multiple processes;
+\item multi-observable differential distribution or multiple single-observable differential distributions with correlations;
+\item binned sub-process cross sections, such as STXS (Section~\ref{sect:stxs}) in Higgs boson physics;
+\item dedicated EFT measurements, such as amplitude analysis with cross sections per EFT operator;
+\item dedicated EFT operator extraction by experiments.
+\end{itemize}		
+The first four types of measurements can be generically called differential and fall under the
+two-step approach. The last two types of measurements can be generically called dedicated 
+and fall under the single-step approach. 
+All of the above types of measurements can be either analyzed stand-alone or enter combination
+with other measurements in the global fits. 
+
+
+\subsection{Statistical methods for experimental measurements}
+\label{sect:stat}
+
+We discuss further ingredients of experimental measurements, such as unfolding techniques
+for calculation of differential distributions ${\cal P}_\mathrm{obs}(\vec{x}^{\,\prime}_\mathrm{truth})$, 
+and likelihood-based and likelihood-free inference techniques. 
+
+
+\subsubsection{Unfolding}
+\label{sect:unfold}
+
+Unfolding or \emph{signal deconvolution} is a broad term that refers to techniques that seek to translate data from one form, 
+which contains noise or distortions, into another, which does not. In the context of High Energy Physics, this usually refers 
+to correcting experimental data for detector acceptance, efficiency, and resolution effects. The reconstructed data (colloquially 
+referred to as the \emph{reco level}) is corrected for the effects of the detector to the \emph{truth level}. 
+This is equivalent to inverting the transformation in Eq.~(\ref{eq:unfoldingPobs}) 
+to convert the observed distribution of events ${\cal P}_\mathrm{obs}(\vec{x}_\mathrm{reco})$
+into the distribution at truth level ${\cal P}_\mathrm{obs}(\vec{x}^{\,\prime}_\mathrm{truth})$.
+As discussed at the beginning of Section~\ref{sect:area3_observables}, the \emph{truth level} can refer 
+to any set of observables that are defined based on information in the MC event record, 
+the \emph{particle level} or \emph{parton level}. 
+
+The results that are unfolded are almost always binned data presented in histograms. 
+Therefore, unfolding is, at its essence, a matrix inversion problem. 
+All unfolding techniques rely on construction a matrix that maps truth events in bin $i$ to reco 
+events in bin $j$ which is usually called a \emph{response matrix} or a \emph{migration matrix}. 
+A general representation of unfolding is given by:
+\begin{equation}
+\label{eq:unfolding}
+\frac{\mbox{d}\sigma}{\mbox{d}X_{i}} = \frac{1}{\mathcal{L}\cdot\mathcal{B}\cdot\Delta X_i \cdot \epsilon_{i}^{\mbox{\scriptsize{ext}}}} \cdot \sum_{j} R_{ij}^{-1} \cdot \epsilon^{\mbox{ \scriptsize{fid}}}_{j} \cdot (N_j^{\mbox{\scriptsize{obs}}} - N_j^{\mbox{\scriptsize{bkg}}})\mbox{ ,} 
+\end{equation}
+where $X$ is the observable to be unfolded, $\mathcal{L}$ is the integrated luminosity of the data, $\mathcal{B}$ 
+is the branching ratio of the channel being studied, $\Delta X_i$ is the width of the bin in observable $X$, $N_j^{\mbox{\scriptsize{obs}}}$
+ is the number of observed events in data in bin $j$, $N_j^{\mbox{\scriptsize{bkg}}}$ is the number of expected background events 
+ in bin $j$. $R_{ij}$ is the response matrix, $\epsilon_{i}^{\mbox{\scriptsize{ext}}}$ is a bin-by-bin correction factor that accounts 
+ for the limited phase-space of the event selection (sometimes called an \emph{extrapolation} correction, and 
+ $\epsilon^{\mbox{ \scriptsize{fid}}}_{j}$ is a bin-by-bin correction factor that accounts for reco events that are 
+ not present in the truth selection (sometimes called \emph{non-fiducial} backgrounds). Most unfolding techniques 
+ work by inverting $R_{ij}$ and applying that inverted matrix to the observed data to remove detector effects. 
+ Matrix inversion is a well-studied problem and, in the context of unfolding, the main challenge is to control 
+ harmonic fluctuations in the statistical uncertainties that are inherent to the process of inverting the response matrix. 
+ The key difference between different unfolding approaches are usually how these statistical uncertainties are controlled 
+ (a process often called \emph{regularisation}). For example, in Iterative Bayesian Unfolding \cite{DAgostini:1994fjx}, 
+ these fluctuations are regularised using an iterative technique based on Bayes theorem, whereas in Singular Value 
+ Decomposition \cite{Hocker:1995kb} the technique for which it is named is used to control the statistical fluctuations. 
+
+\subsubsection*{An aside on notation}
+Experimental collaborations are not consistent in the notation used in unfolded results, both within and without, 
+and great care must be taken to understand exactly how each result has formulated the unfolding problem. 
+Equation~\ref{eq:unfolding} is a fair representation of the most factorised form of the general unfolding problem. 
+However, some results may concatenate various aspects. For example, the matrix $R_{ij}$ may sometimes have 
+the effects of $\epsilon_{i}^{\mbox{\scriptsize{ext}}}$ and $\epsilon^{\mbox{ \scriptsize{fid}}}_{j}$ folded in, or the 
+denominator in the first fraction can be combined into a single factor. Experimental results also use the terms 
+\emph{response} and \emph{migration} matrix interchangeably and inconsistently so the specific definition 
+in each result must be taken into account.
+
+\subsubsection*{Using unfolded results in EFT fits}
+All unfolded results are, by definition, biased. The techniques that are used to tackle the matrix inversion problem, 
+as well as to control for other experimental effects, invariably introduces some dependence on the model used to 
+construct them, as discussed in reference to Eqs.~(\ref{eq:unfoldingP}) and~(\ref{eq:unfoldingPobs}).
+However, it is not true to say that this bias is always large or prohibits the use of results in EFT fits. 
+It is more correct to say that unfolded results have a \emph{region of validity} centred on the SM but which extends 
+beyond it. How far that model extends, and in particular if it extends sufficiently far to encompass shifts in various 
+Wilson Coefficients, depends on a number of things. The most important components to consider when using 
+unfolded results in EFT fits are $R_{ij}$, $\epsilon_{i}^{\mbox{\scriptsize{ext}}}$, $\epsilon^{\mbox{ \scriptsize{fid}}}_{j}$, 
+and $N_j^{\mbox{\scriptsize{bkg}}}$. $R_{ij}$ in its simplest form (i.e. without the $\epsilon$ factors folded in) 
+is usually the same regardless of the model used to build it as it is only probing the detector smearing effects. 
+Matrices that are highly diagonal and symmetric about the diagonal, are likely to have a much broader region 
+of validity than, say, a matrix that is diagonal but off-centre and which has significant one-sided smearing. 
+$\epsilon_{i}^{\mbox{\scriptsize{ext}}}$ is an extrapolation out of the phase space of the measurement and 
+into some other phase-space, usually that of the total cross-section. It is entirely dependent on the model that 
+constructs it. However, it can easily be undone post-hoc and redone with EFT effects included, and is therefore 
+not a huge problem when considering EFT fits. $\epsilon^{\mbox{ \scriptsize{fid}}}_{j}$ cannot be redone post-hoc 
+and is also somewhat dependent on the model used to construct it. In cases where this is flat and close to one, 
+the bias that it causes is negligible (especially for normalised differential cross-sections). However, significant 
+shapes in this curve is usually an indication that the region of validity of the result is small. Finally, 
+$N_j^{\mbox{\scriptsize{bkg}}}$ is only problematic for EFT fits if the background is non-negligible 
+and could be effected by the Wilson coefficients under study. Such effects can usually be avoided 
+by only selecting results with high signal purity, such as Drell-Yan, top quark, and dijet results, 
+though this is not an exhaustive list.
+
+\subsubsection*{Recommendations for unfolded results}
+The safest results to use in EFT fits have the following properties:
+\begin{itemize}
+	\item They have a very high signal to background ratio and, ideally, what backgrounds 
+	to penetrate the signal region are not sensitive to the Wilson coefficients being probed.
+	\item They have highly diagonal response matrices and/or response matrices which are highly 
+	symmetric about the diagonal which makes the detector smearing effects marginal and well-controlled.
+	\item They have flat $\epsilon^{\mbox{ \scriptsize{fid}}}_{j}$ curves. This is especially relevant for normalised 
+	differential cross-sections, as it means the shape of the unfolded data is decoupled from the normalisation 
+	and therefore safe to use in an EFT fit where the shape of the EFT effects is very different from the SM.
+	\item They are measured in a tight fiducial region and at particle level (which, by extension, 
+	means that $\epsilon_{i}^{\mbox{\scriptsize{ext}}}$ should be close to unity and flat.)
+\end{itemize}
+There are relatively few experimental results that satisfy all of these criteria (though, unfolded angular observables 
+are usually ideal) and omitting one or more of these recommendations is reasonable as long as some considerations 
+for the effect of the bias on any fits is considered in more detail.
+
+
+\subsubsection{Simplified template cross sections}
+\label{sect:stxs}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[t]
+  \begin{center}
+    \captionsetup{justification=centerlast}
+    \includegraphics[width=0.57\linewidth]{plots_area3/simplifiedXS_VBF_1_2.pdf}
+    \caption{
+Schematic representation of STXS 1.2 bins for the electroweak production of the Higgs boson in association with two jets~\cite{lhcxwg}.}
+    \label{fig:stxs}
+  \end{center}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%
+
+In the analysis of the Higgs boson data on LHC, a framework of the simplified template cross sections (STXS)~\cite{deFlorian:2016spz}
+has been developed, which is designed for the measurement of the single-$H$ cross sections in mutually exclusive 
+regions of the phase space $\vec{x}^{\,\prime}_\mathrm{truth}$ (which includes parton shower in this case). 
+The observable quantities are the bins of kinematic templates for each Higgs boson production process. 
+An example of such a template is shown in Fig.~\ref{fig:stxs} for the electroweak production of the Higgs boson 
+in association with two jets, where ten bins are defined based on the quantities characterizing the process. 
+These bins have been chosen to provide sensitivity to higher-dimension operators, which typically exhibit
+enhancement at higher transverse momenta. 
+
+This framework falls under the two-step measurement approach discussed in Section~\ref{sect:meas} and 
+shares its pros and cons. It resembles the differential distributions with the unfolding procedure discussed in
+Section~\ref{sect:unfold}, but has its unique features, and for this reason we discuss it in a separate section. 
+This framework takes advantage of the fact that characterization of the Higgs boson production is independent from 
+its decay. Therefore, the same quantities in STXS are measured with multiple Higgs boson decay channels. 
+At the same time, the production processes are separated during the data analysis and results are
+presented for each production process independently, which is different from the typical Higgs boson
+differential distributions. These features are unique to Higgs boson physics and 
+for this reason this framework has not found application in other areas so far. 
+The main advantage of this approach is wide dissemination of results for (re)interpretation in a uniform way. 
+The main disadvantage is its limited scope and potential dependence of cross section interpretation 
+on the parameters of the model, as discussed in reference to Eqs.~(\ref{eq:unfoldingP}) and~(\ref{eq:unfoldingPobs}). 
+
+\subsubsection{Template likelihood fit}
+\label{sect:template}
+
+The end goal of most analyses on LHC is to construct the likelihood ${\cal L}$ and maximize it to obtain 
+the best-fit values of $\vec{\theta}$ and set their confidence intervals. 
+This approach can be taken either in the single-step approach, when EFT-sensitive parameters $\vec{\theta}$ are measured directly, 
+or in the two-step approach, when intermediate cross sections $\vec{\theta}$ are measured, e.g. in the STXS approach. 
+There are various techniques to construct or approximate the likelihood, including the matrix element method and
+machine learning, discussed below, but the most straightforward and widely used approach is the so-called template
+approach. 
+
+In the template approach, the pdf ${\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta})$ is a histogram, or template, 
+of observables $\vec{x}_\mathrm{reco}$ binned in one or several dimensions. 
+The dependence on parameters $\vec{\theta}$ in the special case of EFT couplings
+is shown in Eq.~(\ref{eq:probreco}). 
+This allows analytical morphing of template parameterization by generating a discrete number of 
+$M=(K+2)!/(2K!)$ models corresponding to each term in Eq.~(\ref{eq:probreco}).
+Construction of such templates is illustrated in Fig.~\ref{fig:templates}, where the chain of MC modeling of 
+the pdf follows Eq.~(\ref{eq:P}). 
+An event generator produces LHE files~\cite{Alwall:2006yp} for $N$ hypotheses $\vec\theta_i$, 
+which are processed through full MC simulation, including parton shower and detector effects. It is important
+to pick a diverse enough set of $N$ hypotheses in such a way that all corners of phase space are sampled well. 
+However, this set does not need to be complete, as matrix element re-weighting of MC samples allows 
+generating any number of models $M$. This last step of re-weighting is a lot less time consuming than 
+the full MC simulation. Therefore, in order to minimize statistical uncertainties at minimal cost, any model
+can be re-weighting to any other model. In the end, constraints could be obtained on $\theta_i/\theta_0$
+and the overall cross section of the process. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[t]
+  \begin{center}
+    \captionsetup{justification=centerlast}
+    \includegraphics[width=0.39\linewidth]{plots_area3/diagram_templates.pdf}
+    \caption{
+The chain of MC modeling of probability density ${\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta})$
+as a function reconstructed observables $\vec{x}_\mathrm{reco}$ and EFT parameters $\vec{\theta}$
+following Eq.~(\ref{eq:P}). 
+An event generator produces LHE files for $N$ hypotheses $\vec\theta_i$, which are processed 
+through full MC simulation, including parton shower and detector effects, and further re-weighted
+into $M$ hypotheses necessary for analytical morphing of template parameterization.
+The diagram is inspired by Ref.~\cite{CMS:2021nnc}.
+     }
+    \label{fig:templates}
+  \end{center}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\subsubsection{Matrix element method}
+\label{sect:mem}
+
+The matrix element method (MEM) employs Eq.~(\ref{eq:P}) directly to construct a likelihood function. 
+It is important to draw distinction between MEM, discussed in this section, and the observables created
+with the help of matrix-element calculations, discussed in Section~\ref{sect:obs-me}. In the latter case, 
+matrix elements are used to calculate observables $\vec{x}_\mathrm{reco}$ following the general approach 
+of Eq.~(\ref{eq:xreco}). These observables can later be used in different measurements, from 
+differential distributions to machine-learning inference. The MEM approach, on the other hand, is the
+direct way to perform a measurement through construction of a likelihood with the help of transfer functions 
+$p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth})$. 
+
+The MEM approach is particularly suited to EFT measurements for two main reasons. 
+First of all, such an approach may be built close to optimal because nearly 
+the full information $\vec{x}_\mathrm{reco}^\mathrm{\,full}$ can be employed. Second, the
+large number of EFT parameters $\vec{\theta}$ can be easily incorporated in this approach because those 
+appear in the readily available matrix element calculation ${\cal P}(\vec{x}_\mathrm{truth}|\vec{\theta})$. 
+In other words, once the transfer functions are incorporated, there is no limitation on the matrix element 
+calculations, other than availability of the matrix elements themselves. Once a MEM analysis is built for the 
+SM process, it can easily be extended to EFT by plugging in the right matrix elements. 
+
+At the same time, the MEM approach has its own limitations. The first challenge is to build the transfer functions 
+$p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth})$, which is never possible to do from first principle and certain 
+approximations have to be employed. This becomes particularly challenging in the case of high multiplicity of 
+particles generated in parton shower and considered in analysis. Correct particles could escape detection,
+wrong particles could be picked, and permutations of particles could create confusion. Therefore, the MEM
+approach is most successful when full reconstruction of the process with little confusion is possible. 
+The second challenge is computational, as numerical technics for calculations and integration often have
+to be employed and would lead to significant CPU requirements. The MEM approach is most successful when 
+a large degree of analytical calculations could be maintained. The third challenge is availability of the matrix
+elements for all processes considered. In particular, not all background processes could be described 
+analytically, such as instrumental background. One may approximate such backgrounds either with 
+empirical functions or templates of observables. However, the former is not necessarily possible and 
+the latter eliminates some of the main advantages of the MEM approach.
+
+The first proposal of MEM in application to a non-trivial environment of hadron collisions with missing
+particles was made in Ref.~\cite{Kondo:1988yd}.
+There have been a number of successful applications of the MEM approach to the Higgs, top, electroweak, 
+and $b$-quark flavor measurements at LHC and other experiments. At the same time, the MEM approach 
+has not become the main approach in performing the measurements on LHC due to its challenges. 
+
+
+\subsubsection{Inference with machine learning}
+\label{sect:ml}
+
+The heart of the challenge for inferring the EFT parameters $\theta$ from data is that the likelihood function 
+defined by Eq.~(\ref{eq:P}) involves an intractable integral. As expressed in Eq.~(\ref{eq:P}) even the transfer 
+function $p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth})$ is intractable as it would involve an enormous 
+integral over the truth-level quantities that describe the parton shower, hadronization, and the electromagnetic 
+and hadronic showers that occur when final state particles interact with the detector. 
+We introduce $z$ to denote the full MC truth record that includes the hard scattering as well as 
+the other steps in the full simulation chain, and use it interchangeably with $\vec{x}_\mathrm{truth}$.
+In the language of statistics and machine learning, 
+our simulation chain is a generative model and all the random variables in the MC 
+simulation that we refer to as MC truth are referred to as latent variables. Simulators like this that can be 
+used to generate synthetic data with MC, but which do not admit a tractable likelihood are referred to as 
+implicit statistical models~\cite{Diggle1984MonteCM}. 
+%Thus the likelihood (or probability density) associated to a particular observation should integrate over the entire parton-level phase space, all possible shower histories, and all possible detector interactions compatible with the measurement $\vec{x}_\mathrm{reco}$. The integral over this enormous space clearly cannot be computed in practice, so we cannot directly evaluate the likelihood of an observed event under different parameter values $\theta$. This means that we cannot directly find the maximum-likelihood estimators that best fit a given observation, construct confidence limits based on a likelihood ratio test statistic
+
+The task of performing statistical inference when the data generating process does not have a tractable likelihood 
+is known as \emph{simulation-based} or \emph{likelihood-free inference}~\cite{Cranmer:2019eaq}. This case is not 
+at all unique to particle physics. The formulation of this problem in a common, abstract language has led to statisticians, 
+computer scientists, and domain scientists from various fields developing powerful methods for simulation-based 
+inference together. 
+
+The particle physics community has been coping with problems like this for decades. The strategy is to use histograms 
+or kernel density estimation to approximate the intractable integral from samples of synthetic data generated with 
+MC. Since it is not practical to histogram the high dimensional data $\vec{x}_\mathrm{reco}$, 
+%we invest time 
+we identify observables (summary statistics) that carry as much information about the parameters $\vec\theta$ as possible.  
+This is the well known template likelihood fit strategy, discussed in Section~\ref{sect:template}.
+Alternatively, the matrix element method, discussed in Section~\ref{sect:mem}, seeks to approximate 
+${\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta})$ through numerical integration, but must rely on a simplification of the 
+transfer function $p(\vec{x}_\mathrm{reco}|\vec{x}_\mathrm{truth})$ that does not involve the details of the parton 
+shower and detector interaction. However, machine learning opens up new ways to approximate the likelihood function 
+that does not require sacraficiing power with the introduction of summary statistics nor does it require a simplification 
+of the transfer functions that one would obtain with the full parton shower and detector simulation and reconstruction. 
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\textwidth]{plots_area3/schematic-text.pdf}
+    \caption{Illustration of simulation-based inference techniques that  train a neural network surrogate for the likelihood 
+or likelihood ratio function. Figure taken from Ref.~\cite{Brehmer:2018kdj}. Here $x$ corresponds to~$\vec{x}_\mathrm{reco}$.
+and $z$ denotes the full MC truth record.
+}
+    \label{fig:rascal_explainer}
+\end{figure}
+
+A schematic of this approach is shown in Fig.~\ref{fig:rascal_explainer}. A parametrized neural 
+network~\cite{Cranmer:2015bka,Baldi:2016fzo} is used to learn the likelihood ratio 
+$r(\vec{x}_\mathrm{reco} | \theta) = {\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta})/{\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta}_0)$, 
+% where ${\cal P}_\text{ref}(\vec{x}_\mathrm{reco})$ is some reference distribution such as the SM or 
+where ${\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta}_0)$ is some reference distribution such as the SM or 
+a potentially unphysical mixture of different EFT points. The choice of this reference distribution simply leads to 
+an offset in the log-likelihood and does not affect the maximum likelihood estimate or the resulting contours. 
+The reason that the reference distribution is used is that it allows us to reframe the task of approximating the 
+likelihood from one of density estimation to classification. We can train a parametrized neural network on the 
+supervised learning task of binary classification between data generated from ${\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta}_0)$ 
+and data generated from ${\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta})$. Instead of using a different neural network for 
+each EFT parameter point, a single parametrized network learns to interpolate. 
+
+The most basic version of this approach was first laid out in Ref.~\cite{Cranmer:2015bka}, but generating 
+MC training samples that cover the full EFT space is prohibitive. Furthermore, in the region of the 
+EFT space we are most interested in, the deviation from the SM prediction is small. 
+This means that in the two samples the classifier is trying to distinguish two distributions that are nearly 
+the same, which leads to a poor approximation of the likelihood ratio. Both of these challenges can be 
+overcome~\cite{Brehmer:2018kdj,Brehmer:2018eca}. The first point is that the analytical morphing allows 
+us not only to morph template histograms but also to continuously reweight individual events~\cite{ATLAS:morphing}. 
+Together with a resampling procedure, we can produce training data that uniformly covers the EFT parameter 
+space from a finite number of basis samples. 
+References~\cite{Brehmer:2018kdj,Brehmer:2018eca,Chen:2020mev} 
+also describe how the analytical morphing can be used to encode the $\vec{\theta}$ dependence directly 
+into morphing-aware neural network architectures. 
+However, these tricks do not address the problem that the deviation from the SM is small. 
+This is addressed by a trick known as \textit{mining gold}~\cite{Brehmer:2018hga,Stoye:2018ovl}. 
+The insight here is that while ${\cal P}(\vec{x}_\mathrm{reco}|\vec{\theta})$ involves an intractable integral, 
+the \textit{joint likelihood ratio} 
+$r(\vec{x}_\mathrm{reco}, z|\vec{\theta}) = 
+p(\vec{x}_\mathrm{reco}, z|\vec{\theta})/p(\vec{x}_\mathrm{reco}, z|\vec{\theta}_0)$ 
+and the \textit{joint score} 
+$t(\vec{x}_\mathrm{reco}, z|\vec{\theta}) = 
+\nabla_{\vec{\theta}} \log p(\vec{x}_\mathrm{reco}, z)$ 
+are tractable because the terms that depend on the transfer functions drop out when the 
+$\vec{\theta}$-dependence is isolated to the hard scattering. Moreover, both of these quantities can be 
+computed directly from the analytic morphing equations. These can then be used to augment the training 
+data and lead to dramatically more efficient training. The joint score in particular is of interest because it is 
+a local quantity and directly characterizes how much more or less likely it would be for a region of phase 
+space to be populated if the EFT parameters were modified from their SM values. 
+By regressing on these quantities it is possible to recover the likelihood ratio or the score (having marginalized 
+out the latent variables associated to MC truth). It turns out that the score function provides locally 
+sufficient statistics, coincides with the concept of optimal observables when detector effects are negligible, 
+as introduced in Section~\ref{sect:obs-me}, and generalizes them to settings where detector effects must 
+be taken into account, as shown in Section~\ref{sect:obs-ml}.
+The software package \texttt{MadMiner} \cite{Brehmer:2019xox,brehmer_johann_2021_5654822} 
+provides a reference implementation of these techniques.

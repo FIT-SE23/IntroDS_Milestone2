@@ -1,0 +1,217 @@
+In the below discussions, we use the Partial Markov Decision Process (POMDP) formation  since this setting fits in most real-world reinforcement learning tasks where the full state is not obtainable and the agent is only given observations from its onboard sensors \citep{Igl2018DeepVR}. A POMDP is defined as: $\mathcal{M}=(\mathcal{X}, \mathcal{A}, \mathcal{T}, r, \gamma)$, where  $\mathcal{X}$ denotes the observation space, $\mathcal{A}$ is the action space, $\mathcal{T}$ is the environment transition dynamics, $r$ is the reward function and $\gamma$ denotes the discount factor.
+
+\subsection{Reusable agent-environment interaction models}
+% \begin{wrapfigure}{r}{0.2\textwidth}
+%     \centering
+%     \includegraphics[width=0.2\textwidth]{figs/609px-Plato's_allegory_of_the_cave.jpg}\\
+%     {\footnotesize Plato's allegory of the cave~\citep{Plato}. \normalsize}
+%     %\label{fig:decentcem-a-architecture}
+%     \vspace{-3mm}
+% \end{wrapfigure}
+
+\paragraph{(1) Embedded agency: small agent, big world}
+% In 1969, Herbert Simon brought us the ``Simon's ant'' parable in his book ``{The Science of the Artificial}''\citep{simon1969science} (chapter 3) explaining that the complex agent behaviour we observed may not attribute to how complex the agent is, instead it may result from the interactions between the agent and the complex world, even the agent itself like an ant, is quite simple. It reminds us of a common setting in intelligent organisms: big world, small agent.
+
+Unlike the \textit{Bayesian world model} approach \citep{ha2018world} that aims to construct a big model for the agent as a base knowledge about the world, the \textit{Embedded agency}\citep{orseau2012space} approach takes the perspective on how the small agent perceives, controls and gradually grows based on its own experience. Unlike a \textit{Bayesian world model} where states and models are objective, an \textit{embedded agency} approach is subjective\citep{agent} that agent's past experience will shape its behaviors in new tasks. This idea of intelligence closely relates to Descarte's theory of representationalism and mind-body dualism, and to the modern theory of embodied embedded cognition\citep{haugeland} in the philosophy of mind research. The \textit{embedded agency} approach is appealing in that it promises a scalable learning architecture to build a world model based on the agent's experience in a self-improvement manner, however, it is also ambitious. 
+This paper investigates the core idea of \textit{embedded agency} about how an agent's past experience can shape its new task learning in a pre-training and reusing paradigm.  
+
+\paragraph{(2) On agent-environment boundary}
+Conceptually, from the \textit{embedded agency} perspective, a generally reusable model in heterogeneous environments and tasks should be the agent itself, since the agent is the only shared component across domains. Practically, using the agent's past experience to extract the agent model is difficult since the agent-environment boundary is not the same as we think in a physical system, like a robot. \citep{Jiang2019OnVF} provide a detailed analysis of this problem. \citep{sutton2018reinforcement} in chapter 3.1 explains that the agent-environment boundary is often task-specific in different abstraction levels and the boundary could change across tasks and environments, which makes exacting a general agent model from its various task data difficult. 
+
+Instead of extracting an agent model, we propose to extract a general agent-environment interaction model that is commonly shared across tasks and environments, and thus can be viewed as an embodiment of the agent. This proposal is explained below.
+
+\paragraph{(3) Generally reusable agent-environment interaction model}
+In pre-training, suppose the agent's past experiences $\mathcal{D}$ are generated from M different environments and collected using unlimited behaviour policies induced by unlimited reward functions. This will compose a set of different POMDPs: $\{\mathcal{M}_{i}\}_{i=1}^{M}$, where $\mathcal{M}_{i}=(\mathcal{X}_{i}, \mathcal{A}, \mathcal{T}_{i}, \gamma)$ is a reward-free POMDP that drops the task reward for simplicity. $\mathcal{A}$ without a subscript $i$ means the agent's action space is unchanged across environments since the embedded agency considers the same agent across environments and tasks. Let's assign a one-hot vector encoding $Y_{i}$ as the label for each environment domain $\mathcal{M}_{i}$, then we have a set of domain labels $\mathcal{Y}=\{Y_{i}\}_{i=1}^{M}$, the collected dataset for pre-training can be denoted as $\mathcal{D}=\{D_{Y_{i}}\}_{i=1}^{M}$, where $D_{Y_{i}}$ is the dataset collection in environment domain $Y_{i}$.
+
+We use successor features (SF)\citep{barreto2017successor} to capture the agent-environment interaction model since SFs summarize the dynamics induced by the environment when following a behaviour policy. The first step of building a generally reusable agent-environment interaction model is to learn cross-domain transferable successor features in order to extract a general agent-environment interaction model. For simplicity, we consider a random uniform behaviour policy $\pi_{0}$ for all environment domains. Recall that, SF is defined as the expected cumulative features of $\phi$ by following $\pi_{0}$ starting at a specific state. The SF of $(x^{i}, a)$ in environment domain $Y_{i}$ is defined as:
+\begin{equation}
+\begin{split}
+    \psi^{\pi_{0},i}(x^{{i}}, a)  ={ \mathbb{E}}^{\pi_{0}}_{(x, a, x') \sim \mathcal{T}_{i}} [\sum_{t'=t}^{\infty} \gamma^{t'-t} \phi_{x_{t+1}} |X_{t}=x^{{i}}, A_{t}=a].
+\end{split}
+\end{equation}
+, which satisfies the Bellman Equation as below:
+\begin{equation}
+\begin{split}
+     \psi^{\pi_{0},i}(x^{{i}}, a)  & = \phi_{x^{i}} + \gamma {\mathbb{E}}^{\pi_{0}}_{(x, a, x') \sim \mathcal{T}_{i}} [\psi^{\pi_{0},i}(x^{{i}}_{t+1}, a_{t+1})|X_{t}=x^{{i}}, A_{t}=a]
+\end{split}
+\label{eq:SF_domain}
+\end{equation}
+, and it can be learned by minimizing the temporal difference (TD) error:
+% Therefore, the successor features in environment domain $Y_{i}$ following a behaviour policy $\pi_{0}$ can be learned by minimizing the temporal difference (TD) error:
+\begin{equation}
+\begin{split}
+     \delta_{sf, Y_{i}}^{2} = \norm {\phi_{x^{i}_{t}} + \gamma \psi^{\pi_{0},i}(x^{{i}}_{t+1}, a_{t+1}) - \psi^{\pi_{0},i}(x^{{i}}_{t}, a_{t})}
+\end{split}
+\label{eq:sf_loss}
+\end{equation}
+Next, let's consider a set of domains $\mathcal{Y}=\{Y_{i}\}_{i=0}^{M}$. The goal is to learn a successor feature approximation function $f(.;\theta_{sf}): \mathcal{X}_{i} \times \mathcal{A} \rightarrow 
+ \boldsymbol {\psi}$ with parameters $\theta_{sf}$ that is transferable across all the domains $\mathcal{Y}$. Inspired by~\citep{feng2019self}, we add two constraints to Eq. \ref{eq:sf_loss} in order to make the learned SF cross-domain transferable, using the mutual information definition $I(.)$:
+ \begin{equation}
+\begin{split}
+   {min} &  \hspace{0.3cm} \mathcal{L}_{sf}  =\frac{1}{M} \sum_{i=1}^{M}\mathbb{E}_{(x, a, x') \sim \mathcal{D}_{Y_{i}}}[\delta_{sf, Y_{i}}^{2}]\\
+   s.t. & \hspace{0.3cm}  I(\mathbf{\psi}^{\pi_{0}}, Y) < \epsilon_{u}; \hspace{0.3cm} I(\mathbf{\psi}^{\pi_{0},i}, {x^{i}}) > \epsilon_{l}, \hspace{0.3cm} \forall i \in \{1, ..., M\}
+ \end{split}
+ \label{eq:total_loss}
+\end{equation}
+In the first constraint, $\psi^{\pi_{0}}$ is the SF for an arbitrary environment domain, and Y is the corresponding domain label. It limits the mutual information between an SF and its domain label to a threshold $\epsilon_{u}$ in order to make the learned successor feature domain-invariant. The domain index $Y_{i}$ is dropped since it generally applies to all domains. The second constraint term maintains the mutual information between an SF and its input domain-specific observations\footnote{We use the domain index $Y_{i}$ since it requires to estimating a specific domain's marginal distribution $p^{i}(x)$ that $x^{i} \sim p^{i}(x)$ during training, as detailed in Appendix. \ref{sec:app_cross_domain}.} above a threshold $\epsilon_{l}$, in order to prevent the optimization from collapsing to a trivial solution, for example, a random feature space is also domain-invariant but does not include any useful information for task learning. Technical details about optimizing Eq. \ref{eq:total_loss} are shown in Sec. 3.2.
+
+Note that, learning a cross-domain transferable successor feature representation \textit{will not solve} the out-of-distribution (O.O.D.) problem when reusing it in downstream tasks with unseen changes, so that directly plugin the pre-trained successor features, as a common approach in (\citep{barreto2017successor,barreto2020fast}), \textbf{will not make our pre-trained model generally reusable}. We propose two techniques to tackle this problem, \textit{(1) embodied set construction} that discretizes the successor features into prototype sets (Sec. 3.2);  \textit{(2) feature projection} and \textit{projected Bellman updates} to enable learning stability-plasticity (Sec. 3.3). Combined together, we make the pre-trained agent-environment interaction model generally reusable.
+
+% $\mathcal{Y}=\{Y_{1}, ..., Y_{i}, ...\}$ are the domain labels encoded in a one-hot embedding vector.
+
+\subsection{Pre-training: embodied set construction}
+The pre-training process is proposed as an embodied set construction method that has two steps: 
+\begin{wrapfigure}[16]{R}{0.43\textwidth} %<-- Wrapfigure covers 6 lines
+   \begingroup
+\removelatexerror% Nullify \@latex@error
+\begin{algorithm}[H]
+% \setlength{\belowcaptionskip}{-10pt}
+	\SetAlgoLined
+	\small
+	\KwIn{Offline dataset $\mathcal{D}=\{D_{Y_{i}}\}_{i=1}^{M}$, $\psi^{\pi_{0}}(x, a;\theta_{sf})$, embodied set size $N$}
+	\KwResult{Embodied set structure $\Omega^{e}$}
+	%\textcolor[rgb]{0.14,0.36,0.73}{\textbf{Initialization}}\\
+	Initialize an empty embodied set $\Omega^{e}=\{\}$\\
+	Initialize an empty successor feature vector list $\mathbf{L}_{sf}=\{\}$\\
+	$\mathcal{D} \leftarrow $ Shuffle $(\mathcal{D})$\\
+	\For{each $(x, a, x') \in \mathcal{D}$}{
+	    \tcp{Compute cross-domain transferable successor features}
+	    $\mathbf{L}_{sf} \leftarrow $ Append $\psi^{\pi_{0}}(x, a;\theta_{sf})$  \\
+	}
+	\tcp{Constructing embodied agent state set}
+	K-means clustering ($\mathbf{L}_{sf}, N$)\\
+	$\Omega^{e}=\{\mathbf{e}_{i}\}_{i=1}^{N}$ =  cluster-centers as behavior prototypes  \\
+	\caption{Embodied Set Construction}
+\end{algorithm}
+\endgroup
+  \end{wrapfigure}
+
+
+% The inputs are the agent's past experience in multiple environment domains. The output is a constructed embodied set, which will be reused to support downstream task learning. The pre-training has three steps as below.
+\paragraph{(1) Learn cross-domain transferable successor features}
+Let a neural network parameterized with $\theta_{sf}$ to approximate the SF representation: $\psi^{\pi_{0}}(x, a;\theta_{sf})$, where $(x, a)$ comes from an arbitrary environment domain. Our aim is to use loss Eq. \ref{eq:total_loss} to find the optimal $\theta_{sf}$. By adding the Lagrangian multipliers $\lambda_{u}$ and $\lambda_{l}$, the Lagrangian dual of Eq. \ref{eq:total_loss} is:
+\begin{equation}
+\begin{split}
+  \underset{\theta_{sf}}{min}  &  \hspace{0.3cm} \mathcal{L}_{sf} + \lambda_{u} I(\mathbf{\psi}^{\pi_{0}}, {Y}) - \lambda_{l} \sum_{i=1}^{M} I(\mathbf{\psi}^{\pi_{0},i}, {x^{i}}) \\
+ \end{split}
+ \label{eq:total_loss2}
+\end{equation}
+Directly optimizing the mutual information (MI) terms of Eq. \ref{eq:total_loss2} in high-dimensional space is challenging, we provide tractable solutions by approximating the upper bound and lower bound, as detailed in Appendix. \ref{sec:app_cross_domain}. Optimizing Eq. \ref{eq:total_loss2} will result in  transferable $\psi^{\pi_{0}}(x, a;\theta_{sf})$.
+
+
+\paragraph{(2) Discretize to behavior prototypes: construct an embodied set structure}
+To facilitate downstream task learning with our proposed \textit{embodied feature projection} and \textit{projected Bellman updates} (Sec. 3.3), we discretize the learned cross-domain successor features in three steps: (i) Compute all the successor features using the learned $\psi^{\pi_{0}}(x, a;\theta_{sf})$ from $\mathcal{D}$ containing all the environment domain samples. (ii) Cluster all the successor features using mini-batch K means. (iii) Collect the center of each cluster to construct a set structure $\Omega^{e}$. This is summarized in Algorithm 1. 
+
+We call $\Omega^{e}$ as \textit{embodied set} since it is the component shared across environments and tasks that can be viewed as the embodiment of the agent. And each $\mathbf{e}_{i} \in \Omega^{e}$ is called a prototype since it is the center of a cluster that represents a prototype agent-environment interaction behaviour. 
+
+  
+
+% \begingroup
+% \removelatexerror% Nullify \@latex@error
+% \begin{algorithm}[]
+% % \setlength{\belowcaptionskip}{-10pt}
+% 	\SetAlgoLined
+% 	\small
+% 	\KwIn{Offline dataset $\mathcal{D}=\{D_{Y_{i}}\}_{i=1}^{M}$, $\psi^{\pi_{0}}(x, a;\theta_{sf})$, designed embodied set size $K$}
+% 	\KwResult{Embodied set structure $\Omega^{e}$}
+% 	%\textcolor[rgb]{0.14,0.36,0.73}{\textbf{Initialization}}\\
+% 	Initialize an empty embodied set $\Omega^{e}=\{\}$\\
+% 	Initialize an empty successor feature vector list $\mathbf{L}_{sf}=\{\}$\\
+% 	$\mathcal{D} \leftarrow $ Shuffle $(\mathcal{D})$\\
+% 	\For{each $(x, a, x') \in \mathcal{D}$}{
+% 	    \tcp{Compute cross-domain transferable successor features}
+% 	    $\mathbf{L}_{sf} \leftarrow $ Append $\psi^{\pi_{0}}(x, a;\theta_{sf})$  \\
+% 	}
+% 	\tcp{Constructing embodied agent state set}
+% 	k-means $\leftarrow$ Mini-batch K-means clustering ($\mathbf{L}_{sf}, K$)\\
+       
+% 	$\Omega^{e}=\{\mathbf{e}_{i}\}_{i=1}^{k}$ =  k-means.cluster-centers as prototypes  \\
+% 	\caption{Embodied Set Construction}
+% \end{algorithm}
+% \endgroup
+
+\subsection{Re-use: a backbone for general downstream task learning}
+
+Let a downstream task denoted as $\mathcal{M}_{u}=(\mathcal{X}^{u}, \mathcal{A}, \mathcal{T}^{u}, r^{u}, \gamma)$, where the observation space $\mathcal{X}^{u}$, dynamics $\mathcal{T}^{u}$, and task objectives $r^{u}$ can be unseen in pre-training. The action space $\mathcal{A}$ remains the same since we assume the same agent learning a new task based on its past experience. 
+
+Reusing the pre-trained model under the above heterogeneous settings is difficult due to out-of-distribution concerns. Traditional methods will not work. For example, in methods reusing the pre-trained representation \citep{shah2021rrl,kingma2013auto}, changes in the environment will cause non-stationarity in the observation space that directly plugs in the learned representation will make the learning even worse than learning from scratch. For another example, in methods reusing the pre-trained successor features to fast compute the value functions \citep{barreto2020fast}, changes in task objective or the environment will break the linear reward feature assumption.
+
+We propose to avoid directly plugging in the pre-trained model, but to use the pre-trained model---embodied set $\Omega^{e}$ as a base structure for projection-based techniques to accelerate the downstream task learning by tackling learning stability and plasticity explicitly.
+
+\paragraph{(1) Stability: Retain previous knowledge by embodied feature projection} 
+We define a feature projection operator $\Pi_{\Omega^{e}}(x, a)$, which takes the input of $(x, a)$, localizes its projection on the constructed embodied set $\Omega^{e}$, and returns the localized feature vector $\mathbf{e}$:
+\begin{equation}
+    \Pi_{\Omega^{e}}(x, a)=\mathbf{e}, \hspace{0.2cm} \forall \mathbf{e}\in \Omega^{e}, \text{   find the smallest } \xi(x, a, \mathbf{e})
+\end{equation}
+, where $\xi(x, a, \mathbf{e}) = \norm{\psi^{\pi_{0}}(x,a;\theta_{sf}) - \mathbf{e}}$, or it can be any other distance metric functions. The feature projection operator $\Pi_{\Omega^{e}}(x, a)$ retains previous knowledge by always matching the new task experience with the closest prototype $\mathbf{e}$ in the embodied set.
+
+Note that $\Pi_{\Omega^{e}}(x, a)$ also works for changed sensor modalities. For example, assuming a task requires the agent to understand textual commands, then adding an extra-textual observation $z$ will augment the observation to $[x, z]$. The feature projection operator $\Pi_{\Omega^{e}}(x, a)$ still applies here by using the unchanged sensory modality part $x$. We will show that in Sec. 5.1 (3).
+
+\paragraph{(2) Plasticity: Adapt to changes by projected Bellman Updates}
+We use the below projected Bellman updates to accelerate learning the unknown downstream task $\mathcal{M}_{u}=(\mathcal{X}^{u}, \mathcal{A}, \mathcal{T}^{u}, r^{u}, \gamma)$:
+\begin{equation}
+    Q^{ \pi}(x,a) = \mathbb{E}_{(x, a, x') \sim \mathcal{T}^{u}}[r^{u} + \gamma V^{ \pi}_{proj}(\Pi_{\Omega^{e}}(x',\underset{a'}{\argmax}Q^{ \pi}(x',a'))]
+    \label{eq:bellman1}
+\end{equation}
+\begin{equation}
+   V^{ \pi}_{proj}(\Pi_{\Omega^{e}}(x, a))=\mathbb{E}_{(x, a, x') \sim \mathcal{T}^{u}}[r^{u} + \gamma \underset{a'}{max} Q^{ \pi}(x', a')
+   \label{eq:bellman2}
+\end{equation}
+We maintain two value functions---the task $Q^{ \pi}$ and a projected version $V^{ \pi}_{proj}$, to support each other's learning in a bidirectional improvement manner. The motivation is that the projected function $V^{ \pi}_{proj}$ can learn faster than $Q^{ \pi}$  since it is defined on the pre-trained set $\Omega^{e}$ that retains past experience, but is not accurate since $\Omega^{e}$ does not adapt to the new task setting. Meanwhile, the task Q-value function $Q^{ \pi}$ should be more accurate but will take a longer time if learned from scratch. Learning that alternates Bellman updates Eq. \ref{eq:bellman1} and \ref{eq:bellman2} will play a trade-off between retaining the previous knowledge or adapting to the new tasks.
+
+\paragraph{(3) Reuse example: DQN-embodied}
+While the above two techniques \textit{embodied feature projection} and \textit{projected Bellman updates} can generally apply to any RL methods in learning a new task, we use DQN as an example to show how to use them to accelerate downstream task learning. Assume we use a neural network parameterized with $\theta_{u}$ to approximate $Q^{ \pi}$, and another neural network parameterized with $\mathbf{w}_{u}$ to approximate $V^{ \pi}_{proj}$. According to Eq. \ref{eq:bellman1} and \ref{eq:bellman2}, we compute the target value for $Q^{ \pi}$ and $V^{ \pi}_{proj}$ at training iteration i as:
+\begin{equation}
+\begin{split}
+   y_{i} = \mathbb{E}_{(x, a, x') \sim \mathcal{T}^{u}}[r^{u}+\gamma V^{ \pi}_{proj}(\Pi_{\Omega^{e}}(x',\underset{a'}{\argmax}Q(x',a';\theta_{u,i-1}));\mathbf{w}_{u, i-1})]
+ \end{split}
+ \label{eq:dqn1}
+\end{equation}
+\begin{equation}
+     y_{proj, i} = \mathbb{E}_{(x, a, x') \sim \mathcal{T}^{u}}[r^{u} + \gamma \underset{a'}{max} Q^{ \pi}(x', a';\theta_{u, i-1})]
+     \label{eq:dqn2}
+\end{equation}
+Then, the learning objectives formulated as an LMSE loss can be written as:
+\begin{equation}
+\begin{split}
+  \mathcal{L}_{i}(\theta_{u,i}) = \mathbb{E}_{(x, a, x') \sim \mathcal{T}^{u}}[(y_{i} - Q^{\pi}(x, a;\theta_{u, i}))^{2}] 
+ \end{split}
+ \label{eq:dqn3}
+\end{equation}
+\begin{equation}
+    \mathcal{L}_{i}(\mathbf{w}_{u,i}) = \mathbb{E}_{(x, a, x') \sim \mathcal{T}^{u}}[( y_{proj, i} - V^{ \pi}_{proj}(\Pi_{\Omega^{e}}(x, a));\mathbf{w}_{u,i})^{2}]
+    \label{eq:dqn4}
+\end{equation}
+During training, we alternate learning $Q^{ \pi}$ and $V^{ \pi}_{proj}$. A full description of the proposed DQN-embodied algorithm is summarized in Appendix \ref{sec:dqn_embodied}.
+
+% \begin{wrapfigure}[20]{R}{0.6\textwidth} %<-- Wrapfigure covers 6 lines
+%    \begingroup
+% \removelatexerror% Nullify \@latex@error
+% \begin{algorithm}[H]
+%  \setlength{\belowcaptionskip}{-10pt}
+% 	\SetAlgoLined
+% 	\small
+% 	\KwIn{Pre-trained embodied set $\Omega^{e}$, feature projection operator $\Pi_{\Omega^{e}}(x,a)$}
+% 	%\textcolor[rgb]{0.14,0.36,0.73}{\textbf{Initialization}}\\
+% 	Initialize $Q^{ \pi}(.;\theta_{u})$, $V^{ \pi}_{proj}(.;\mathbf{w}_{u})$,  and replay buffer $\mathcal{D}$\\
+	
+% 	\For{i=1:N}{
+% 	    \tcp{Replay buffer}
+% 	    \For{t=0:T}{
+% 	        $\epsilon$ greedy select action $a_{t}$ based on ${max}_{a} Q^{ \pi}(x_{t},a_{t};\theta_{u,i})$\\
+% 	        Execute action $a_{t}$ in environment, observe $x_{t+1}, r_{t}$\\
+% 	        Append transition sample $(x_{t}, a_{t}, r_{t}, x_{t+1})$ in $\mathcal{D}$\\
+% 	        Randomly sample batch transitions $\mathcal{B}=\{(x, a, r, x')\}$ from $\mathcal{D}$\\
+% 	        \tcp{Learn $Q^{ \pi}$}
+% 	        Set $y_{i} = \mathbb{E}_{(x, a, x') \sim \mathcal{T}^{u}}[r^{u}+\gamma V^{ \pi}_{proj}(\Pi_{\Omega^{e}}(x',\underset{a'}{max}Q(x',a';\theta_{u,i-1}));\mathbf{w}_{u, i-1})]$\\
+% 	        Perform gradient descent step on $\mathcal{L}_{i}(\theta_{u,i})=(y_{i} - Q^{ \pi}(x, a;\theta_{u, i}))^{2}$\\
+% 	        \tcp{Learn $V^{ \pi}_{proj}$ }
+% 	        Set $ y_{proj, i} = \mathbb{E}_{(x, a, x') \sim \mathcal{T}^{u}}[r^{u} + \gamma \underset{a'}{max} Q^{ \pi}(x', a';\theta_{u, i-1})]$\\
+% 	        Perform gradient descent step on $\mathcal{L}_{i}(\mathbf{w}_{u,i})=( y_{proj, i} - V^{ \pi}_{proj}(\Pi_{\Omega^{e}}(x, a));\mathbf{w}_{u,i})^{2}$
+% 	    }
+% 	}
+% 	\caption{DQN-embodied}
+% \end{algorithm}
+% \endgroup
+%   \end{wrapfigure}
+

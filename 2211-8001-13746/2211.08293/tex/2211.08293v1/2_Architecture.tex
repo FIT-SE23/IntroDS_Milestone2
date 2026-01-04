@@ -1,0 +1,59 @@
+\section{Requirements and Global Architecture}
+\label{sec:2}
+
+\subsection{Use cases and functional requirements}
+\label{sec:21}
+
+The main use case, and in fact the \textit{raison d'\^etre} of the EventIndex, is the so-called ``event picking''. Often in the course of a physics analysis it is necessary to retrieve full information about one or a few events, either to generate event displays for publications (see examples in \cite{EventDisplay}), or to inspect its properties and verify the correctness of its reconstruction procedure.
+A person who needs to search, select and/or retrieve one or more events out of the many billions of ATLAS events needs a complete catalogue of all events, in all processing versions, including the pointers to the event locations. This catalogue, similarly to the catalogues of (paper) book libraries, needs to contain enough information ("metadata") about each event to be useful for the search, and at the same time it needs to provide reasonably fast queries, at least for the most common cases. 
+
+Several other use cases can be served by a complete event catalogue. A second group of use cases are related to data quality assurance. Production consistency and completeness checks can be run, for example counting the number of events in the input and output datasets for any processing task and making sure that all events have been processed, and there is no data duplication in the output datasets. 
+Running indexing jobs on all produced data provides in addition a check that all output files are stored correctly on disk and are available for further analysis.
+
+Further use cases are related to the calculations of overlaps among trigger chains within a given dataset, and and among derived datasets. With the complete trigger information for each event stored in the catalogue, it is possible to count the number of events that satisfied each trigger chain and also measure the overlaps among trigger chains. 
+Similarly it is possible to select particular events on the basis of combinations of their properties, such as the trigger or the instantaneous luminosity (interaction rate), and then count their occurrences or retrieve them directly for full analysis.
+
+Not all event processing tasks output the same number of events they had in input. The derivation procedures take all fully reconstructed events as input and output only the selected events that are useful for one or a few particular analyses. As there are almost 100 derivations that run on ATLAS events, it is useful to have the possibility to check the amount of overlaps between derivation streams, in order to reduce if/when possible their number and hence the used disk space. Differently from the trigger stream overlap checks that are done within a specific dataset, the derivation overlap check involves a number of different but related datasets; related in the sense that all these derived datasets must have been produced from the same parent one.
+
+\subsection{EventIndex Record Contents}
+\label{sec:22}
+
+%The physics parameters of each event stored in the Tag DB constituted the majority of the data volume, but they could never be used in practice as some of them change with each processing version of the same event, and the Tag DB contained only the first processed version. 
+The EventIndex stores only "immutable" event parameters, \textit{i.e.} those that don't depend on the processing version, excluding all physics parameters of the simulated or reconstructed events. 
+
+In order to satisfy the use cases, each event record needs to contain three blocks of information:
+
+\begin{enumerate}
+    \item \textit{Event identification}: each instance of a given event can be uniquely identified by the combination of run number, event number, trigger stream, data format and processing version, therefore this information has to be included in each event record. In addition, the data type (real or simulated data), time stamp, LHC conditions, and (for simulated events only) event weight and simulation process identifier are included as they can be useful to trace possible processing problems and for future reference.
+    \item \textit{Trigger information}: trigger masks for the L1, L2 (only for LHC Run 1) and HLT triggers, the trigger key (SMK, used to decode the trigger masks) and the prescale key (with information on the trigger prescale settings). The SMK can be used together with the trigger database \cite{Trig} to decode the trigger records of each event and show which trigger chains led to the event being recorded.
+    \item \textit{Location information}: the GUID of the file that contains this event and the internal pointers within that file, for the file that is currently indexed and also for the upstream files in the processing chain (provenance). The GUID can be passed to Rucio to identify, locate and retrieve the file containing a given event in order to extract it or analyse it directly. The provenance record is useful to reduce the number of datasets that have to be indexed; for example, the pointers to the RAW datasets can be obtained by indexing the corresponding AOD datasets.
+\end{enumerate}
+
+\begin{figure*}
+\centering
+  \includegraphics[width=0.99\textwidth]{EI_schema-Run2.png}
+\caption{Global architecture of the EventIndex system, as implemented at the end of LHC Run 2. The blue ovals indicate temporary or permanent data blocks or files; the green hexagons correspond to different storage technologies. The pink rectangles contain continuously running processes. The black arrows show the flow of EventIndex data; the blue arrows show the flow of information related to data processing. Further details are explained in section \ref{sec:23}.}
+\label{fig:schema}   
+\end{figure*}
+
+\subsection{Performance requirements}
+\label{sec:21a}
+
+The catalogue must sustain a record ingestion rate that is at least as large as the real data production rate (1 kHz during LHC Run 2), plus the simulated data processing rate (about the same when averaged over a year). Given the foreseen increase of trigger rates by the end of LHC Run 3 to over 3 kHz and the corresponding increase in simulation production computing power, the catalogue for LHC Run 3 needs to withstand an ingestion rate of 10 kHz at least, allowing for some contingency in case of operation backlogs. The query rate is very small compared to the ingestion rate, but all data are equally important and all queries are different, so it is necessary to have a flat internal structure and caching does not help much. User queries for small data samples are done through client code with a command-line interface, or through web services, requiring that the response times for simple queries be compatible with human response expectations (below 1 second); queries for large amount of data or computations of global counts, trigger overlaps or derived dataset overlaps can be executed as batch processes but need to return their results within (roughly) an hour, and never fail, in order to be useful.
+
+
+\subsection{System Architecture}
+\label{sec:23}
+
+The information flow through the EventIndex system is linear, so it was natural to match  the system architecture to the data flow \cite{EICHEP2013}. One needs first to extract the relevant metadata from the event data files and store them in a central store, which client programs can query to perform their tasks. The EventIndex system is therefore partitioned into a number of components:
+
+\begin{itemize}
+    \item \textit{Data Production}: this component takes care of extracting the metadata from each data file as soon as it is produced at CERN or on any of the ATLAS Grid sites, format them for transfer to the central store and send this information to CERN.
+    \item \textit{Data Collection}: this component deals with the data transfer infrastructure, the metadata completeness checks for each dataset, assembling the information produced by all files in a given dataset and formatting it for storage, including decoding the trigger information and presenting it in an optimised format for fast searches.
+    \item \textit{Data Storage}: this is the core system. It includes the setup of the EventIndex data storage cluster in Hadoop, the code to import the data and internally index them, and the web service providing the command line and graphical interfaces for the clients. As a subset of the EventIndex data is also replicated to an Oracle database for access performance reasons, this component includes also the support for the Oracle store, the data import code and the graphical interface for the users.
+    \item \textit{Monitoring}: all servers and all processes have to be constantly and automatically monitored. This component collects, stores and displays the relevant information, and sends automatic alerts in case of service interruptions or malfunctioning. Regular functional tests are also submitted in order to monitor the performance for the most common use cases.
+\end{itemize}
+
+Figure \ref{fig:schema} shows a schema of this global architecture. Thanks to the partitioning and to the clear interfaces between components, it is possible to implement, evolve and upgrade each component independently of the other ones. The Data Production and Data Collection components already went through a couple of upgrades; the Data Storage component is now upgraded to a newer base technology in advance of the start of LHC Run 3 in 2022 (see section \ref{sec:7}).
+
+This architecture allows the development of additional services that satisfy more complex needs, such as the Event Picking Server \cite{EPS} that will automate most of the actions needed for event picking (see section \ref{sec:7}).

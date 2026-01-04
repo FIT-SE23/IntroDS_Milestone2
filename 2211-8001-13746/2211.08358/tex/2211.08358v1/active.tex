@@ -1,0 +1,141 @@
+\section{Active Learning}
+\label{sec:active_learning}
+
+\begin{algorithm*}
+	\caption{Inter-prompt uncertainty sampling with diversity}\label{alg:algorithm}
+	\begin{algorithmic}[1]
+		\Require Pretrained Language Model $M$, Unlabeled Pool
+		$\mathcal{U}$, Size of Training Set $\mathcal{N}$, Pattern Set $\mathcal{P}$
+		\State Compute logits representation for each sample in the unlabeled pool, $L(u)$ by concatenating each pattern's logits: $M(X=x_p)$ for $x\in \mathcal{U}$ and $p\in \mathcal{P}$  
+		\State Train k-means from logits representation with 8 clusters
+		\For{\texttt{$iter=1,2,...,1000$}}
+		\State Select $\mathcal{N}$ samples, uniformly distributed in $8$ clusters with random seed $iter$, called $X_{iter}$
+		\State $\texttt{Scores}_{iter} = \sum\limits_{x_i\in X_{iter}}\sum\limits_{(p,q)\in \mathcal{P} \times \mathcal{P}}\mbox{KL}(P(y|x_{i,p}, M)||P(y|x_{i,q},M))$
+		\EndFor
+		\State $\texttt{MostUncertainIteration} = \underset{iter=1,2,...,1000}{\mathrm{\textbf{argmax}}} \texttt{Scores}_{iter} $
+		\State \textbf{return} $X_{\texttt{MostUncertainIteration}}$
+	\end{algorithmic}
+\end{algorithm*}
+
+Another important source of variance for few-shot
+classification is the selection of training examples. Figure
+\ref{fig:instability} shows the effect of the selected examples: the validation accuracy significantly varies in all tasks. For example, the difference is up to 13.7 points for RTE and 6.7 points for MRPC.
+
+We adapt active learning algorithms for few-shot
+prompt-based finetuning; we select all training examples at
+once.
+In the first step, we use a PLM without finetuning
+to get contextual embeddings, logits, and probabilities for
+each sample in \emph{a zero-shot setting}.
+(We exploit here that, due to the cloze-style format, PLMs can make predictions
+before any finetuning step.)
+In the second step, we apply modified active learning
+algorithms for prompts. We select all examples at once to simplify the selection process. For each task, we select $16*L$ training samples where $L$ is the number of labels.
+
+\subsection{Active Learning Algorithms}
+\textbf{Random} selection draws random samples from an unlabeled pool. We report random selection results with five different seeds.
+
+\noindent\textbf{Entropy} \cite{entropy} finds the probability entropy of each sample by summing the entropy of each prompt. We then select samples with highest entropy scores.
+\begin{equation*}
+	\resizebox{\hsize}{!}
+	{
+		$\mbox{s}(x_i) = \sum \limits_{j=1}^{j=L}\sum\limits_{p\in \mathcal{P}}-P(y=l_j|x_{i,p})\ln P(y=l_j|x_{i,p})$
+	}
+\end{equation*}
+where $L$ is the number of labels, $\mathcal{P}$ is the set of prompts, and $x_{i,p}$ is the input $x_{i}$ with pattern $p$.
+
+\noindent\textbf{Breaking Ties (BT)} \cite{breaking_ties} selects samples with minimum difference between the highest two probability classes.
+\[
+\mbox{bt}(x_i) = 
+\sum\limits_{p\in \mathcal{P}}P(y=l_{1}|x_{i,p})-P(y=l_{2}|x_{i,p})
+\]
+where $l_{1}$ and $l_{2}$ are the labels with highest
+and second highest probability for $x_{i,p}$.
+
+\noindent\textbf{Lowest Confidence
+  (LC)} \cite{lowest_confidence} calculates
+\mbox{lc} as
+the sum of probability scores for the predicted
+class for each prompt. Then, it selects samples with lowest
+\mbox{lc} scores.
+Lowest confidence algorithm produces the same order as breaking ties algorithm when the number of labels is two.
+\[\mbox{lc}(x_i) = \sum\limits_{p\in \mathcal{P}}\max\{P(y=l_j|x_{i,p}):j=1..L\}\]
+
+Specifically for prompt-based learning, we propose the
+\textbf{KL Divergence} selection
+algorithm. For each sample, we calculate
+$\mbox{kl}(x_i)$
+as the sum
+of KL divergence scores of probabilities from prompt pairs
+and then select samples with the highest
+$\mbox{kl}(x_i)$.
+This gives a high score to a sample
+for which there is a high
+variance in the model's predictions across the different
+prompts.
+By including such a high-scoring sample, we want
+the model to learn more information from different prompts
+for a given sample.
+\[
+\mbox{kl}(x_i)
+= \sum\limits_{(p, q) \in \mathcal{P} \times \mathcal{P}}\mbox{KL}(P(y|x_{i,p})||P(y|x_{i,q}))
+\]
+\noindent\textbf{Contrastive Active Learning (CAL)}
+\cite{cal} selects samples with the highest KL divergence
+between the sample and its $M$ nearest
+neighbors in the PLM contextual embedding space.
+\[
+\mbox{cal}(x_i) = \sum\limits_{m=1}^{m=M}\sum\limits_{p\in\mathcal{P}}\mbox{KL}(P(y|x_{m,p})||P(y|x_{i,p}))
+\]
+
+\noindent\textbf{Batch Active learning by Diverse Gradient
+  Embeddings (BADGE)} \cite{badge} represents samples with
+the gradient of the cross entropy loss, conditioned on the one-hot
+encoding of the predicted label, with respect to the parameters of
+the final (output) layer. For prompt-based finetuning, we
+concatenate the gradient vectors of each prompt for a given
+sample by using the decoder of the masked language model head as
+the final layer. Then we find as many cluster centers
+as the number of training samples via kmeans++ algorithm with gradient vectors.
+Then corresponding sample for each cluster is selected as a training example.
+As k-means++  depends on its random initialization,
+we report BADGE results with
+five different random seeds.
+
+\noindent\textbf{Inter-prompt uncertainty sampling with
+  diversity (IPUSD)} is our active learning
+algorithm that combines uncertainty and diversity sampling
+for prompt-based finetuning and focuses on the prediction variance of PLMs when
+different prompts are used. As described in Algorithm
+\ref{alg:algorithm}, it first
+represents each sample $x$ as a vector of dimensionality
+$|\mathcal{P}|\cdot|L|$, the concatenation
+of the $L$ logits for $x$ for each of the patterns in
+$\mathcal{P}$ -- where
+L1 = line 1. We
+utilize logits as representations because they can represent
+the model's probability distribution, certainty, and
+divergence across different prompts. Based on these
+representations, we run k-means clustering with 8
+clusters (L2). In the following iteration,
+we sample a  training set,
+uniformly distributed from the 8 clusters (L4). The KL
+divergence of a sample is calculated by summation of the KL
+divergence score of each prompt pair (L5); this indicates
+the divergence of probability distributions across
+prompts.
+We repeat
+the iteration loop 1000 times 
+and then select 
+the most uncertain training
+set based on
+inter-prompt uncertainty sampling with
+  diversity.
+We select based on 1000 iterations (as opposed to finding the most uncertain
+samples from each cluster) to ensure a balance between randomization
+and uncertainty. Otherwise, our initial experiments suggest that this
+strategy would only focus on outlier samples with suboptimal performance.
+As  k-means  and sampling depend on the
+random seed, we repeat this algorithm five times during
+experimentation (as for random and BADGE).
+

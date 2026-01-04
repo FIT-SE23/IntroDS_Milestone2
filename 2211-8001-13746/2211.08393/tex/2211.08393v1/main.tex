@@ -1,0 +1,658 @@
+\documentclass{article}
+
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2022
+
+
+% ready for submission
+% \usepackage{neurips_2022}
+
+
+% to compile a preprint version, e.g., for submission to arXiv, add add the
+% [preprint] option:
+    % \usepackage[preprint]{neurips_2022}
+
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+\usepackage[final]{neurips_2022}
+
+
+% to avoid loading the natbib package, add option nonatbib:
+%    \usepackage[nonatbib]{neurips_2022}
+
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{amsmath}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{amsthm}
+
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\kl}{\text{KL}}
+\newcommand{\loss}{\mathcal{L}}
+\newcommand{\elbo}{\text{ELBO}}
+\newcommand{\dlm}{\text{DLM}}
+\newcommand{\rclm}{\text{RCLM}}
+\newcommand{\erm}{\text{ERM}}
+\newcommand{\set}[1]{\mathcal{#1}}
+\newcommand{\bigO}{\mathcal{O}}
+\newcommand{\myappendix}{Appendix}
+
+\newcommand{\RK}[1]{\textcolor{red}{[Roni: {#1}]}}
+\newcommand{\YW}[1]{\textcolor{blue}{[Yadi: {#1}]}}
+
+%\newtheorem{proposition}{Proposition}
+\newtheorem{example}{Example}
+\newtheorem{theorem}{Theorem}%[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{observation}{Observation}
+\newtheorem{corollary}[theorem]{Corollary}
+
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+\usepackage{natbib}
+\PassOptionsToPackage{options}{natbib}
+
+%\title{The Failure of Direct Loss Minimization}
+\title{On the Performance of Direct Loss Minimization for Bayesian Neural Networks}
+
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+
+\author{ 
+{\bf Yadi Wei} \\ Indiana University \\ Bloomington, IN \\ \texttt{weiyadi@iu.edu}
+\And
+{\bf Roni Khardon} \\ Indiana University \\ Bloomington, IN \\ \texttt{rkhardon@iu.edu}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  Direct Loss Minimization (DLM) has been proposed as a pseudo-Bayesian method motivated as regularized loss minimization. Compared to variational inference, it replaces the loss term in the evidence lower bound (ELBO) with the predictive log loss, which is the same loss function used in evaluation. 
+  %And this idea can also be generalized to other loss functions. 
+  A number of theoretical and empirical results in prior work suggest that DLM can significantly improve over ELBO optimization for some models. However, 
+  as we point out in this paper, this is not the case for 
+  % \RK{remove? are we only doing classification in this paper?
+  % regression or classification with 
+  % }
+  Bayesian neural networks (BNNs).
+  The paper explores the practical performance of DLM for BNN, 
+  the reasons for its failure and its relationship to optimizing the ELBO,
+  uncovering some interesting facts about both algorithms.
+  %A variety of theoretical results guarantee performance of DLM. Despite the past success on sparse Gaussian processes, DLM is experiencing failure in applications of Bayesian neural networks (BNNs). We explore the failure reason for DLM on BNNs.
+\end{abstract}
+
+\section{Introduction}
+One of the main goals of probabilistic machine learning is to develop algorithms that can make well calibrated probabilistic predictions. 
+%In probabilistic machine learning tasks, we need to train our model to fit the distribution of data. 
+From the frequentist view, we need to find a \emph{single} set of parameters that best fits the data; while from a Bayesian view, we specify a prior distribution on the parameters, calculate the posterior, and then use the posterior to predict on new data. Let $D=\{(x^{(i)}, y^{(i)})\}_{i=1}^N$ be the dataset sampled i.i.d. from distribution $\set D$. From now on, we use superscript with parentheses to denote the $i$-th instance. Let $\theta$ denote the parameters. The frequentist method chooses one best set of parameters $\theta^*$ and makes predictions on new data $x^*$ such that $p(y^*|x^*)=p(y^*|\theta^*, x^*)$.  
+Bayesian methods specify a prior $p(\theta)$, calculate the posterior
+\begin{align*}
+    p(\theta|D) \propto p(\theta) p(D|\theta),
+\end{align*}
+and make predictions on new data $x^*$ as
+\begin{align*}
+    p(y^*|x^*)=\E_{p(\theta|D)} [p(y^*|\theta, x^*)].
+\end{align*}
+For simple models, the posterior can be computed analytically. But for complicated models, the posterior becomes intractable. One solution is to get samples from true posterior and calculate the objective, for example using MCMC. Another line of work aims to find a distribution $q$ from an analytical distribution family $\set Q$ that is closest to the posterior. When making prediction on new data $x^*$, we marginalize over $q$, that is, $p(y^*|x^*)=\E_{q(\theta)}[p(y^*|\theta, x^*)]$.
+A typical example is variational inference, which tries to minimize the KL divergence between the variational distribution and the true posterior:
+\begin{align}
+\label{eq:elbo}
+    q^*(\theta) &= \argmin_{q\in \set Q}\kl(q(\theta) || p(\theta | D)) \nonumber \\ 
+    &= \argmin_{q\in \set Q} \E_{q(\theta)}[\log q(\theta) - \log p(\theta, D)] + \log p(D) \nonumber \\
+    &=\argmin_{q\in \set Q} \sum_i
+    %{(x^{(i)},y^{(i)})\in D}
+    \E_{q(\theta)}[-\log p(y^{(i)}|\theta, x^{(i)})] + \kl(q(\theta) || p(\theta)).
+\end{align}
+The last line is the negation of the 
+%referred to as the 
+Evidence Lower Bound (ELBO).
+The most common measure to evaluate the quality of predictions is negative log-loss (NLL):
+\begin{align}
+\label{eq:log-loss}
+    l(q, (x^*, y^*)) = -\log \E_{q(\theta)}[p(y^*|\theta, x^*)].
+\end{align}
+We use $l_{\text{test}}(q)$ to denote the averaged NLL on test set.
+We optimize eq \eqref{eq:elbo} but hope to get lower NLL, i.e. eq \eqref{eq:log-loss}. 
+This suggests a discrepancy.
+%Then we can see conflicts. 
+If we care about the NLL, why not directly optimize NLL (\ref{eq:log-loss})? From this perspective the KL term in eq \eqref{eq:elbo} is seen as a regularizer to prevent overfitting. This motivates the idea of Direct Loss Minimization (DLM) which has been studied by multiple authors:
+\begin{align}
+\label{eq:dlm}
+    q_{\dlm}^{(\eta)}(\theta) = \argmin_{q\in \set Q} \sum_i 
+    %{(x, y)\in D}
+    -\log \E_{q(\theta)}[p(y^{(i)}|\theta, x^{(i)})] + \eta\kl(q(\theta)||p(\theta)).
+\end{align}
+Notice that by Jensen's inequality,
+\begin{align*}
+    l_{\text{dlm}}(q, (x, y)) = -\log \E_{q(\theta)}[p(y|\theta, x)] \leq l_{\text{elbo}}(q, (x, y)) = -\E_{q(\theta)} [\log p(y|\theta, x)]
+\end{align*}
+so that $l_{\text{elbo}}$ can be seen as a surrogate loss for the log loss which is used during training. But DLM optimizes the desired objective and 
+%Besides, 
+the idea of DLM can be applied on various loss functions. We can replace the first term in eq \eqref{eq:dlm} with any loss functions we are interested in. 
+%But some non-differentiable loss functions may be hard to optimize. 
+Similarly, the regularizer can be chosen among several options. However, in this paper we focus on the choice given above.
+
+%In practice, it is common to use a hyperparameter $\eta$ to tune the KL regularizer, and eq(\ref{eq:elbo}) and eq(\ref{eq:dlm}) become:
+%\begin{align}
+%    \label{eq:eta-elbo}
+%    q_{\elbo}^{(\eta)}(\theta) &= \argmin_{q\in \set Q} \sum_{(x,y)\in D}\E_{q(\theta)}[-\log p(y|\theta, x)] + \eta \kl(q(\theta) || p(\theta)); \\
+%    \label{eq:eta-dlm}
+%    q_{\dlm}^{(\eta)}(\theta) &= \argmin_{q\in \set Q} \sum_{(x, y)\in D} -\log \E_{q(\theta)}[p(y|\theta, x)] + \eta \kl(q(\theta)||p(\theta)).
+%\end{align}
+%When it is hard to compute the expectation analytically, we can use Monte Carlo samples to approximate eq \eqref{eq:eta-elbo} and \eqref{eq:eta-dlm}:
+
+In practice, it is common to use a hyperparameter $\eta$ to tune the KL regularizer, as in eq \eqref{eq:dlm}.
+In addition, when it is hard to compute the expectations analytically we can use Monte Carlo samples to approximate them.
+With these modifications
+the objectives in eq \eqref{eq:elbo} and eq \eqref{eq:dlm}) become:
+\begin{align}
+    \label{eq:eta-elbo-mc}
+    \bar{q}_{\elbo}^{(\eta, M)}(\theta) &= \argmin_{q\in \set Q} \sum_i
+    %{(x,y)\in D} 
+    \frac{1}{M} \sum_{m=1}^M [-\log p(y^{(i)}|\theta^{(m)}, x^{(i)})] + \eta \kl(q(\theta) || p(\theta)), &\theta^{(m)}\sim q(\theta); \\
+    \label{eq:eta-dlm-mc}
+    \bar{q}_{\dlm}^{(\eta, M)}(\theta) &= \argmin_{q\in \set Q} \sum_i 
+    %{(x, y)\in D} 
+    -\log \frac{1}{M} \sum_{m=1}^M p(y^{(i)}|\theta^{(m)}, x^{(i)}) + \eta \kl(q(\theta)||p(\theta)), &\theta^{(m)}\sim q(\theta).
+\end{align}
+%Notice that eq \eqref{eq:eta-elbo-mc} is an unbiased estimate of eq \eqref{eq:eta-elbo} while eq \eqref{eq:eta-dlm-mc} is a \textbf{biased} estimate of eq \eqref{eq:eta-dlm}.
+Notice that eq \eqref{eq:eta-elbo-mc} is an unbiased estimate of eq \eqref{eq:elbo} while eq \eqref{eq:eta-dlm-mc} is a \emph{biased} estimate of eq \eqref{eq:dlm}.
+
+\section{Theoretical Motivation of DLM}
+%\section{Theoretical Justification of DLM}
+\label{sec:theory}
+% One line of work follows the theory of \cite{sheth2017excess} on Regularized Cumulative Loss Minimization(RCLM). Given a hypothesis space $H$, we have loss function $l(h, (x,y))$ for every $h\in H$ and the risk is defined as $r(h)=\E_{(x,y)\sim \set D}[l(h, (x, y))]$. Let $\eta$ control how strong the regularizer is, and RCLM gives solutions:
+% \begin{align}
+%     \rclm(H, l, R, \eta, S) = \argmin_{h \in H} \left(\frac{1}{\eta} R(h) + \sum_i l(h, (x_i, y_i)) \right).
+% \end{align}
+% Then Theorem 1 in \cite{sheth2017excess} gives a bound on the expectation of the risk, which states that if the regularizer $R(h)$ is $\sigma$-strong-convex in $h$, and $l$ is $\rho$-Lipschitz and convex in $h$, then the RCLM solution $h^*(S)$ satisfies for all $h\in H$,
+% \begin{align}
+%     \E_{S}[r(h^*(S))] \leq r(h) + \frac{1}{\eta N} R(h) + \frac{4 \rho^2 \eta}{\sigma}.
+% \end{align}
+% We can apply this theorem by letting $H$ be the parameter space of the distribution family $Q$. The convexity and $\rho$-Lipschitz conditions are not guaranteed for KL regularizer. 
+
+Prior work motivates the use of DLM from a theoretical perspective. In this section we review some of these results.  
+% Roni: first added this then dropped - it is not used so a distraction?
+%\cite{sheth2017excess} analyse both variational and DLM algorithms, but their analysis for DLM only applies under convexity and Lipschitz conditions which do not hold in practice.
+Specifically, 
+\cite{Sheth2019pseudo} provide risk bounds for several variants of DLM. Here we focus on one result
+(see their appendix B) that uses a bounded optimization view. Suppose we restrict our distribution family $\set Q$ to $\set Q_A=\{q\in \set Q \text{ s.t. } \kl(q, p)\leq A\}$, where $p$ is the prior distribution over $\theta$, and we perform empirical risk minimization (ERM) on $\set Q_A$:
+\begin{align}
+    \label{eq:erm}
+    q_{\erm}^{(A)}(\theta) = \argmin_{q\in \set Q_A} 
+    \sum_i
+    %{(x,y)\in D} 
+    -\log \E_{q(\theta)}[p(y^{(i)}|\theta, x^{(i)})].
+\end{align}
+Then
+with probability $1-\delta$ over the choice of the dataset $D$, for all $q\in \set Q_A$, 
+{\small
+\begin{align}
+\label{ineq:erm}
+    \E_{(x,y)\sim \set D}\left[-\log \left(\E_{q_\erm^{(A)}(\theta)} p(y|\theta, x) \right) \right] \leq \E_{(x,y)\sim \set D} \left[-\log (\E_{q(\theta)}(p(y|\theta, x))) \right] + \bigO\left(\sqrt{\frac{A}{N}} + \sqrt{\frac{\log \frac{1}{\delta}}{N} }\right).
+\end{align}
+}
+This result holds when the log-loss is bounded, which
+%In order to make above inequality hold, we need to make sure that 
+can be achieved by replacing the log loss with 
+\begin{align}
+\label{eq:smooth}
+    \log^{(a)} p = \log((1-a)p + a)    
+\end{align}
+or by further bounding the parameter space of distribution family $\set Q$.
+The following proposition (proof in \myappendix) observes
+%We next observe 
+that while the above holds for eq \eqref{eq:erm} we can obtain similar risk bounds for eq \eqref{eq:dlm}.
+%Notice that we can convert eq(\ref{eq:dlm}) to eq(\ref{eq:erm}).
+%That is, let $A_\eta=\kl(q_{\dlm}^{(\eta)} || p)$
+%then $q_{\dlm}^{(\eta)}$ is also the solution of eq(\ref{eq:erm}) with $A=A_\eta$. 
+One can further extend eq \eqref{ineq:erm} into a data dependent bound as in Theorem 10 in \citep{Meir-Zhang}.
+Therefore DLM as motivated above enjoys some theoretical support.
+\begin{proposition}
+%Notice that we can convert eq(\ref{eq:dlm}) to eq(\ref{eq:erm}).
+Let $A_\eta=\kl(q_{\dlm}^{(\eta)} || p)$.
+Then the solution of eq \eqref{eq:dlm}, i.e., $q_{\dlm}^{(\eta)}$, is also the solution of eq \eqref{eq:erm} with $A=A_\eta$. 
+% and it enjoys the same risk bounds.
+\end{proposition}
+%The proof of Proposition 1 follows the Lagrange multiplier and the full proof is in \myappendix. 
+%One can further extend eq \eqref{ineq:erm} into a data dependent bound as in Theorem 10 in \citep{Meir-Zhang}. Therefore DLM as motivated above enjoys some theoretical support.  
+%However, in practice, we do not know how to compute the corresponding $\eta$ when knowing $A_\eta$. So it is hard to use eq (\ref{ineq:erm}) to bound the performance of $q_{\dlm}^{(\eta)}$.
+
+A second theoretical perspective is given by the 
+%The most 
+recent work of \cite{pac-m}.
+This work presents a PAC-Bayes bound 
+%for $\bar{q}_{\dlm}^{(\eta)}$ 
+called $\text{PAC}^m$ bound. With probability $1-\delta$, for any $q\in \set Q$,
+\begin{align}
+\label{ineq:pac-m}
+    & \E_{(x, y) \sim \set D} [-\log \E_{q(\theta)}[p(y|\theta, x)]] \nonumber \\
+    \leq& -\frac{1}{N}\sum_i \E_{q(\theta^M)} \left[\log \left(\frac{1}{M}\sum_m p\left(y^{(i)}|x^{(i)}, \theta^{(m)}\right)\right) \right] + \frac{1}{\eta N} \kl(q||p) \nonumber \\
+    &+\psi(\set D, \eta, M, N, p, \delta) + \frac{1}{\eta M N} \log \frac{1}{\delta},
+\end{align}
+where 
+{\small
+\begin{align*}
+    &\psi(\set D, \eta, M, N, p, \delta) = \frac{1}{\eta M N} \log \E_{D \sim \set D^N} \E_{p(\theta^{(1:m)})}\left [\exp\left(\eta N M \cdot \Delta\left(D, \theta^{(1:M)}\right)\right)\right], \\
+    &\Delta(D, \theta^{(1:M)}) = \frac{1}{N} \sum_i \log \left(\frac{1}{M} \sum_m p(y^{(i)}|x^{(i)}, \theta^{(m)}) \right) - \E_{(x, y) \sim \set D} \left[\log \left( \frac{1}{M} 
+    %\sum_m p(y^{(i)}|x^{(i)}, 
+    \sum_m p(y|x, 
+    \theta^{(m)}) \right) \right].
+\end{align*}
+}
+The $\text{PAC}^m$ algorithm minimizes the right-hand-side of \eqref{ineq:pac-m} to calculate its solution which we denote as $\bar{q}_{\dlm}^{(\eta)}$.
+%The right-hand-side is minimized at $\bar{q}_{\dlm}^{(\eta)}$. 
+For the corresponding algorithm note that the terms on the last line of \eqref{ineq:pac-m} do not depend on $\bar{q}_{\dlm}^{(\eta)}$ and can be omitted in the optimization.
+This is different from previous analysis \citep{sheth2017excess, Sheth2019pseudo}, that uses the predictive loss
+\begin{align}
+\label{eq:predictive-loss}
+    -\log \E_{q(\theta)} [p(y|x, \theta)]&=-\log \E_{q(\theta^{(1:M)})}\left[\frac{1}{M} \sum_m p(y|x, \theta^{(m)})\right] \nonumber \\
+    &\leq -\E_{q(\theta^{(1:M)})} \left[\log \left(\frac{1}{M} \sum_m p\left(y|x, \theta^{(m)}\right) \right) \right]
+\end{align}
+for the data-dependent upper bound. 
+When the outside expectation in \eqref{ineq:pac-m} is implemented with a single multi-sample from $q()$,
+which is the case in \citep{pac-m},
+%both bounds (eq \eqref{ineq:erm}, eq \eqref{ineq:pac-m}) lead to the same implementation. 
+eq \eqref{ineq:pac-m} leads to the same implementation as eq \eqref{eq:eta-dlm-mc} and \eqref{ineq:erm}. 
+Theoretically, loss term in bound \eqref{ineq:erm} is lower but it requires $\bar{q}_{\dlm}^{(\eta)}$ to converge to $q_{\dlm}^{(\eta)}$ to guarantee the performance (see related analysis by \citet{dlm-sgp}), while the bound \eqref{ineq:pac-m} directly guarantees the performance of $\bar{q}_{\dlm}^{(\eta)}$ with a higher loss as shown in eq \eqref{eq:predictive-loss}.
+
+\cite{pac-m} also establishes the relationship between ELBO and DLM. Notice that with $M=1$, the right hand sides of eq \eqref{eq:eta-elbo-mc} and eq \eqref{eq:eta-dlm-mc} are the same. They also show that as $M$ becomes larger, the data dependent bound when $M>1$ (i.e., the right hand side of eq \eqref{ineq:pac-m}) is tighter than that when $M=1$, corresponding to the data dependent bound for ELBO. 
+% \RK{
+% In addition to the theoretical support DLM has been applied and shown to yield good results in practice. 
+% \cite{sheth2017excess} has deomstrated this fact for the correlated topic model.
+% \cite{dlm-sgp} showed that with appropriate setting of $\eta$ through cross validation, DLM significantly outperforms ELBO for sparse Gaussian Processes.
+% \cite{pac-m} have shown success for DLM in \ldots
+% }
+
+\section{Applications of DLM}
+
+% In sparse Gaussian processes(sGP), we have $\theta=(u, f)$, where $u$ is pseudo values induced by pseudo inputs $x_u$ and $f$ is the latent variables. 
+% Let $K_{uu}$ denote the kernel matrix of $x_u$, and $K_{iu}$ denote the kernel values between single input $x_i$ and pseudo inputs $x_u$. 
+% \begin{align*}
+%     \begin{pmatrix} u\\ f_i \end{pmatrix} & \sim \mathcal{N}\left(0, \begin{pmatrix} K_{uu} & K_{ui} \\ K_{iu} & K_{ii} \end{pmatrix} \right). 
+% \end{align*}
+% The likelihood varies depend on the type of the task. For regression $y_i | f_i \sim \mathcal{N}(f_i, \sigma^2)$; For binary classification, $y_i | f_i \sim \text{Bernoulli}(\sigma(f_i))$; For count regression, $y_i | f_i \sim \text{Poisson}(\exp(f_i))$. 
+%The variational distribution $q(u, f)=q(u)\prod_{i} p(f|u)$. We can plug this into eq \eqref{eq:eta-elbo} and eq \eqref{eq:eta-dlm} to get the ELBO and DLM solutions for sGP. 
+% The variational distribution $q(u, f)=q(u)\prod_{i} p(f|u)$. We can plug this into eq \eqref{eq:eta-elbo-mc} and eq \eqref{eq:eta-dlm-mc} to get the ELBO and DLM solutions for sGP. 
+% thus $q(f_i)=\mathcal{N}(\mu_i, \sigma_i^2)$, where $\mu_i=K_{iu} K_{uu}^{-1} m$ and $\sigma_i = K_{ii} - K_{iu} K_{uu}^{-1} (V-K_{uu}) K_{uu}^{-1} K_{ui}$. Then we can plug in our standard eq \eqref{eq:elbo} and eq \eqref{eq:dlm}:
+% \begin{align}
+%     q_{\elbo}^{(\eta)} &= \argmin_{q\in \set Q} \sum_{(x_i, y_i) \in D} \E_{q(u)p(f_i|u)} [-\log p(y_i|f_i)] + \eta \kl(q||p); \\
+%     q_{\dlm}^{(\eta)} &= \argmin_{q\in \set Q} \sum_{(x_i, y_i) \in D} -\log \E_{q(u) p(f_i|u)} p(y_i|f_i) + \eta \kl(q||p).
+% \end{align}
+% Since sGP is a two-level model, we can also apply a fully independent training conditional(FITC) solution:
+% \begin{align}
+%     q_{\text{FITC}}^{(\eta)} &= \argmin_{q\in \set Q} \sum_{(x_i, y_i) \in D} \E_{q(u)}[-\log \E_{p(f_i|u)}[p(y_i|f_i)]] + \eta KL(q||p).
+% \end{align}
+DLM has already been applied in practice and is shown to yield good results. \cite{sheth2017excess} apply DLM to the correlated topic model and it achieves lower predictive loss than ELBO. \cite{Jankowiak2020ParametricGP} explores the application of DLM in conjugate sparse Gaussian processes and \cite{dlm-sgp} extends this to non-conjugate sparse Gaussian processes. In those experiments, $\eta$ is chosen appropriately through cross validation. 
+For conjugate cases, where both the ELBO objective \eqref{eq:elbo} and the DLM objective \eqref{eq:dlm} can be computed exactly without approximation, DLM significantly outperforms ELBO; while for non-conjugate cases, Monte Carlo sampling is needed and DLM is better than or comparable to ELBO.
+
+DLM has also been applied to BNNs. \cite{bnn-rank1} apply both ELBO and DLM on a rank-1 parametrization of BNNs that they introduce. Their experiments show that DLM has higher NLL than ELBO, which means that DLM performs worse than ELBO. \cite{pac-m} also compare ELBO and DLM on BNNs and conclude that DLM performs better than ELBO when data is misspecified, i.e. the data generating distribution is not inside the model space. To see this, they apply ELBO and DLM to independently predict pixels of the bottom half of an image given the top half, which encounters data misspecification as the pixels are not independent. When there is no evident data misspecification they show that, under the same KL value, DLM performs slightly better than ELBO. However, the converged ELBO solution may not have the same KL value as the converged DLM solution. So the experiment is not sufficient to show that the converged DLM solution performs better than the converged ELBO solution.
+
+\section{DLM in Bayesian Neural Networks}
+\label{dlm-bnn}
+In contrast with the positive evidence, our work found that DLM does not perform as well for Bayesian neural networks (BNNs).
+In BNN,
+%In the application of Bayesian neural networks(BNNs), 
+$\theta$ represents the weights of the neural network and we use eq \eqref{eq:eta-elbo-mc} and eq \eqref{eq:eta-dlm-mc} with a mean-field diagonal Gaussian variational distribution $q(\theta_j)=\mathcal{N}(\mu_j, \sigma_j^2)$ and $\mu$ and $\sigma^2$ are vectors of the same dimension as the parameter space. BNNs normally have millions of parameters, so the KL-divergence term can be very high and using a high value of $\eta=1$ leads to poor performance,
+hence we fix $\eta=0.1$. Following \cite{competition-approximate-inference}, we set the prior variance to 0.05. 
+We experimented with two neural network structures, AlexNet \citep{alexnet} and PreResNet \citep{preresnet} with depth 20 on four datasets, CIFAR10, CIFAR100, STL10, SVHN. %\RK{need to cite datasets?}
+For all experiments, we set the batch size to 512, use the Adam optimizer with learning rate 0.001 and train for 500 epochs. We set $M=5$ in eq \eqref{eq:eta-elbo-mc} and eq \eqref{eq:eta-dlm-mc} for training and $M=10$ for evaluation.
+Most combinations of datasets and structures have similar results (see Figure \ref{fig:all-result}) and behave similarly during our exploration, so we only show the detailed exploration of using AlexNet on CIFAR10 in the main body of the paper and discuss exceptions in the \myappendix.
+%DLM is approximately the same as ELBO in the remaining experiments. We do not observe that DLM is better than ELBO in all experiments. We mainly list the results of using AlexNet on CIFAR10 and these results can be generalized to other datasets and the other network unless we denote.
+%We explore the reason of the failure in this section. 
+To simplify the presentation, we use upper case ``ELBO'' and ``DLM'' to indicate the solution trained with ELBO and DLM loss respectively, and use lower case ``elbo'' and ``dlm'' to denote the corresponding loss functions. 
+
+% \RK{I tried to read through the results and figure out a narrative. Would this ordering work?}
+% \begin{itemize}
+% \item
+% ELBO performs better than DLM (fig 1a)
+% \item
+% One might suspect that the reason for failure is that the DLM objective is harder to optimize due to local optimize. 
+% (Is it also related to biased gradients?)
+% To test this question we ran Re-Init experiment. The result in Fig 1a shows that starting DLM at a good point still does not help its performance \ldots
+% \item
+% To investigate further we explore the loss terms and KL terms separately. Our most interesting finding from this exploration is that {\em ELBO appears to optimize the dlm objective better than the DLM algorithm}. Fig1b shows \ldots and comment on the Re-Init case.
+% \item
+% Given this point it is interesting to compare the loss functions relative to the solutions found by ELBO and DLM. 
+% We plot a path \ldots Fig2a shows that (note, just on this path) all loss functions share the same minima, {\em and all loss functions, including dlm, prefer the ELBO min point!} However, we know from Fig1a that the ELBO min point is not a minimal point for DLM. 
+% \item
+% To investigate what happens we plot a second path - which is the actual optimization path of DLM Re-Init \ldots Fig2b shows that (note, just on this path) dlm goes down but error and ELBO go up!
+% So {\em in this case the dlm objective is not aligned with test loss} (this is not always the case).
+% \item 
+% We also observe from Fig2b that the DLM objective goes down but its loss term goes up, implying that the reduction in objective is due to the KL term. The same 
+% sensitivity regarding the {\em tradeoff between the loss term and regularizer appears in other cases as well}. This suggested that a more careful control of regularization (perhaps as aistats), or smoothing the loss, might be able mitigate the failures. We have therefore explored bounded optimization, $\beta$ decay, and smoothed loss. Results are shown in \ldots. They do not support these hypotheses. {\em DLM is still dominated even with alternative regularization and smoothing.} \ldots discuss
+% \item
+% might want to or need to discuss anomaly in Fig A1 b,d
+% \end{itemize}
+
+\begin{observation}
+\label{obs:elbo-better}
+    ELBO performs better than DLM.
+\end{observation}
+DLM is worse than ELBO in most experiments.
+A summary over all experiments is shown in Figure \ref{fig:all-result} and a concrete learning curve is shown in Figure \ref{fig:elbo_init}.
+In a few cases DLM has similar performance but it does not outperform ELBO in any of the experiments. 
+%as in Figure \ref{fig:elbo_init}. In a few cases, DLM has similar performance but as shown in Figure \ref{fig:all-result}, it does not outperform ELBO in any of the experiments. 
+The range of test losses in the experiments is up to 2, so the differences shown are significant.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{all_ELBO_vs_DLM.pdf}
+    \caption{Comparison of ELBO and DLM in all experiments, ``-A'' means on AlexNet and ``-P'' means on PreResNet20. $y$-axis is $l_{\text{test}}(q_\dlm) - l_{\text{test}}(q_\elbo)$, and
+    a positive value indicates that DLM performs worse than ELBO. Each point represents an independent run with random initialization.}
+    \label{fig:all-result}
+\end{figure}
+
+To better understand the behavior of ELBO and DLM, we also compute some quantities during the training, including elbo objective, dlm objective and KL divergence, and see how they change. We repeat with different seeds and the quantities behave similarly regardless of the random seed we choose.
+To our surprise, we observe:
+\begin{observation}
+\label{obs:elbo-opt-dlm-better}
+    ELBO appears to optimize the dlm objective better than the DLM algorithm.
+\end{observation}
+As shown in Figure \ref{fig:training-dlm-loss}, which depicts how the dlm loss changes during training, ELBO (blue solid line) is below DLM (orange dashdot line). At the same time, ELBO optimizes its own objective, elbo objective, better than DLM, as shown in Figure \ref{fig:training-elbo-loss}. One might suspect that the reason for this is that the dlm objective is likely to get stuck in local optima. Thus if we initialize DLM with a good starting point, then DLM may be improved.
+To test this, we initialize DLM with ELBO solution and continue to train with dlm objective and we denote this solution as DLM-init\_ELBO. For comparison we also have ELBO-init\_ELBO which is initialized with ELBO and then continue to train with elbo objective. 
+However, DLM is not improved with ELBO initialization and it even makes ELBO worse, as shown in Figure \ref{fig:elbo_init}. The increase of test loss for DLM shows that DLM is not stuck in local optima by accident, but is inherently worse than ELBO.
+\begin{observation}
+    The failure of DLM is not due to local optima.
+\end{observation}
+
+The good news is that with ELBO initialization, DLM optimizes the dlm objective slightly better than ELBO, as shown in Figure \ref{fig:training-dlm-loss}. We note that this does not happen for every experiment. In Figure \ref{fig:dlm-CIFAR100} in the \myappendix, DLM still optimizes dlm loss worse than ELBO even with ELBO initialization.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[t]{0.32\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/elbo_init-CIFAR10-AlexNet-seed1-test_loss.pdf}
+         \caption{test loss($\downarrow$)}
+         \label{fig:elbo_init}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.32\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/elbo_init-CIFAR10-AlexNet-seed1-dlm_obj.pdf}
+         \caption{Trajectory of dlm loss}
+         \label{fig:training-dlm-loss}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.32\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/elbo_init-CIFAR10-AlexNet-seed1-elbo_obj.pdf}
+         \caption{Trajectory of elbo loss}
+         \label{fig:training-elbo-loss}
+    \end{subfigure}
+    \caption{Comparison of ELBO and DLM with/without initialization}
+\end{figure}
+
+All these abnormalities lead us to further explore the structure of elbo and dlm losses. Motivated by \cite{loss-surface}, we create a path from ELBO to DLM, i.e. $\mu=(1-\alpha) \mu_{\elbo} + \alpha \mu_{\dlm}, \sigma^2 = (1-\alpha) \sigma^2_\elbo + \alpha \sigma^2_\dlm$, and then evaluate the elbo objective (with/without KL), dlm objective (with/without KL) and test loss on $(\mu, \sigma^2)$. It is clear that ELBO corresponds to $\alpha=0$ and DLM corresponds to $\alpha=1$. From the loss surface plotted in Figure \ref{fig:no-init-surface}, we confirm Observation \ref{obs:elbo-better} and \ref{obs:elbo-opt-dlm-better} (note that the dlm objective is lower at $\alpha=0$). Figure \ref{fig:mix-surface} plots the path from ELBO to DLM-init\_ELBO, and we can see how optimizing with dlm loss will change these loss functions. 
+\begin{observation}
+\label{obs:consistent}
+    The elbo objective with $\eta=0.1$ is better aligned with test loss than the dlm objective, which indicates that the elbo objective generalizes better.
+\end{observation}
+Figure \ref{fig:mix-surface} shows that as $\alpha$ increases, the dlm objective decreases, but both the elbo objective and the test loss increase. 
+%In our experiments, 
+Figure \ref{fig:mix-surface-cifar100} in the {\myappendix} shows a different situation (on CIFAR100 with AlexNet) where the dlm objective also increases, i.e., it is also aligned. But in our experiments the elbo objective and the test loss are always aligned in our experiments. Observation \ref{obs:consistent} also explains the abnormality in Figure \ref{fig:dlm-CIFAR100}, in which DLM-init\_ELBO significantly increases the dlm objective in first few epochs. This is because we optimize the dlm objective within a batch but plot the average dlm objective value among all batches. The poor generalization of the dlm objective may cause the value evaluated on other batches to increase and the overall value increases.
+
+We also observe from Figure \ref{fig:mix-surface} that the dlm objective goes down but its loss term goes up, implying that the reduction in objective is due to the KL term. The same sensitivity regarding the {\em tradeoff between the loss term and regularizer} appears in other cases as well. To explore this we reduce $\eta$ to 0 after initializing with ELBO. Figure \ref{fig:test-zero} shows that reducing $\eta$ to 0 makes both ELBO and DLM perform worse than their original version but the relationship of ELBO-init-no\_kl and DLM-init-no\_kl still follows Observation \ref{obs:elbo-better}. Figure \ref{fig:surface-zero} again shows Observation \ref{obs:elbo-opt-dlm-better}, i.e., that the dlm objective ($\eta=0$) achieves lower value at ELBO-init-no\_kl than at DLM-init-no\_kl. 
+
+In contrast with Figure \ref{fig:surface-zero}, Figure \ref{fig:surface-zero-mix} depicts the path between DLM-init-no\_kl and the original ELBO solution (which is the best), instead of ELBO-init-no\_kl. Then we can see that neither  the elbo loss nor the dlm loss without KL is aligned with the test loss, indicating overfitting. From another view, the three plots in Figure \ref{fig:all-surface} depict the change of loss functions along three directions from ELBO. The elbo objective with $\eta=0.1$ is aligned with the test loss in all three cases. But we cannot find such proper $\eta$ for dlm. In (a) and (c), the dlm objective with $\eta=0.1$ is aligned with the test loss, but in (b) the dlm objective with $\eta=0$ is aligned with the test loss. All these results support Observation \ref{obs:consistent}. 
+
+In addition to the work mentioned above, we have explored bounded optimization, smoothed loss, collapsed variational inference \citep{collapsed-elbo} and empirical Bayes \citep{dvi}. The first two measures aim to close the gap between theoretical analysis and real applications so that we can utilize the upper bounds to guarantee the performance of DLM. The latter two define a hierarchical model and perform inference on the prior parameters, which results in a different regularizer to replace the original KL divergence. 
+Although these measures can sometimes improve the performance of DLM, they do not help DLM outperform ELBO. 
+%We leave the details in \myappendix.
+Details are provided in the \myappendix.
+% This suggested that a more careful control of regularization (perhaps as aistats), or smoothing the loss, might be able mitigate the failures. 
+% We have therefore explored bounded optimization, $\beta$ decay, and smoothed loss. Results are shown in \ldots. They do not support these hypotheses. {\em DLM is still dominated even with alternative regularization and smoothing.}
+
+Overall, we found that at least one of Observation \ref{obs:elbo-opt-dlm-better} and \ref{obs:consistent} appears in all experiments. In cases where ELBO does not optimize the dlm objective better than DLM, Observation \ref{obs:consistent} kicks in and shows that optimizing the dlm objective cannot make the performance better; In cases where the dlm objective is aligned with the test loss, we find that ELBO optimizes the dlm objective better. Thus, none of the variants of DLM mentioned in this paper outperforms ELBO.  
+
+\begin{figure}
+    \centering
+    \begin{subfigure}[t]{0.32\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{loss_surface/no_init-CIFAR10-AlexNet-prior0.05-seed1.pdf}
+         \caption{ELBO and DLM}
+         \label{fig:no-init-surface}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.32\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{loss_surface/mix-CIFAR10-AlexNet-prior0.05-seed1.pdf}
+         \caption{ELBO and DLM-init\_ELBO}
+         \label{fig:mix-surface}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.32\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{loss_surface/init_beta0.0-CIFAR10-AlexNet-prior0.05-seed1.pdf}
+         \caption{ELBO and DLM-init-no\_kl}
+         \label{fig:surface-zero-mix}
+    \end{subfigure}
+    \caption{Loss Surface}
+    \label{fig:all-surface}
+\end{figure}
+
+\begin{figure}
+\vspace{-0.3cm}
+    \centering
+    \begin{subfigure}[t]{0.45\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/init_beta0.0-CIFAR10-AlexNet-seed1-test_loss.pdf}
+         \caption{test loss}
+         \label{fig:test-zero}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{loss_surface/init_beta0.0_both-CIFAR10-AlexNet-prior0.05-seed1.pdf}
+         \caption{ELBO-init-no\_kl and DLM-init-no\_kl}
+         \label{fig:surface-zero}
+    \end{subfigure}
+    \caption{Test Performance and Loss Surface for $\eta=0$}
+\end{figure}
+
+% We also tried other tricks, such as adding a smoothing factor as indicated in eq \eqref{eq:smooth}. But it does not work. See \myappendix \ref{smooth}. The authors of \cite{pac-m} also compare ELBO and DLM in deep neural networks and conclude that DLM performs better than ELBO when the data is misspecified, i.e. the true distribution that generates the data is not within the model class. However, it is often non-trivial to see whether the data is misspecified given a neural network structure. 
+
+\section{Conclusion and Future Work}
+Direct loss minimization has a strong motivation that we should use the same loss function in both training and testing. During training, we add a regularizer to prevent overfitting. Many theoretical results guarantee the performance of DLM optimizers. Despite its empirical success in sparse Gaussian processes, we observe that such success does not appear for Bayesian neural networks. In empirical exploration, we found that the goal of DLM is also severely challenged as ELBO optimizes dlm objective better than DLM itself. The most likely reason for this is that the dlm objective is hard to optimize for Bayeisan neural networks. 
+Besides, DLM generalizes worse than ELBO, because elbo loss is more consistent with test loss, pointing out overfitting of the dlm objective. This relates to data misspecification as suggested in \citep{pac-m} but how to test the notion of misspecification in image classification remains unclear as the neural networks are expressive. 
+It would be interesting to explore what distinguishes cases where DLM succeeds, such as sparse Gaussian processes, from the behavior shown in this paper.
+%In the cases where DLM succeeds, such as sparse Gaussian processes, whether these observations also happen remains unclear and we left it as an interesting future work.
+As mentioned above, we can view the elbo loss as a (potentially better behaved) surrogate loss of the true loss given by dlm. It would be interesting to explore theoretical analysis that explains differences in behavior from this perspective. 
+
+%The failure of DLM in BNNs may be related to the notion of surrogate loss. With Jensen's inequality we can see that the elbo loss is an upper bound of the dlm loss, and thus the elbo loss can be considered as the surrogate loss of dlm. Thus, using a surrogate loss may not only make the computation easy (original losses are often non-differentiable), but also make the performance better. 
+
+%\subsection*{Acknowledgements}
+\begin{ack}
+This work was partly supported by NSF under grant IIS-1906694. Some of the experiments in this paper were run on the Big Red computing system at Indiana University, supported in part by Lilly Endowment, Inc., through its support for the Indiana University Pervasive Technology Institute.
+\end{ack}
+
+\bibliography{local}
+\bibliographystyle{plainnat}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+\appendix
+
+\counterwithin{figure}{section}
+
+\section{Proof of Proposition 1}
+\begin{proof}
+We prove the claim by contradiction. If there exists $q' \in \set Q_{A_\eta}$ such that $\sum_{(x,y)\in D}-\log \E_{q'(\theta)}[p(y|\theta, x)]< \sum_{(x,y)\in D}-\log \E_{q_{\dlm}^{(\eta)} (\theta)}[p(y|\theta, x)]$. Then
+\begin{align*}
+    \sum_{(x, y)\in D}-\log \E_{q'(\theta)}[p(y|\theta, x)] + \eta \kl(q'||p) &\leq \sum_{(x, y)\in D} -\log \E_{q'(\theta)} [p(y|\theta, x)] + \eta A_\eta \\
+    &< \sum_{(x,y)\in D}-\log \E_{q_{\dlm}^{(\eta)} (\theta)}[p(y|\theta, x)] + \eta \kl(q_{\dlm}^{(\eta)} || p).
+\end{align*}
+This contradicts the fact that $q_{\dlm}^{(\eta)}$ minimizes the log-loss plus regularizer. 
+Thus, 
+%there does not exist such $q'$ and 
+$q_{\dlm}^{(\eta)}=q_{\erm}^{(A_\eta)}$. 
+\end{proof}
+
+\section{Discussion}
+\subsection{Bias in DLM}
+One may suspect that the bias in estimating the loss term causes DLM to perform worse than ELBO. 
+We believe that this is not the case. First, the same issue with biased gradient estimates exists in sparse Gaussian processes where both theoretical analysis and empirical results show that DLM is successful \citep{dlm-sgp}. 
+Second. 
+notice that in Bayesian neural networks, it is impossible to compute the log-loss exactly in evaluation. So the test loss is also biased and DLM is targeted for optimizing this biased loss. See related discussion by \citet{Jankowiak2020ParametricGP}.
+%Nonexistence of bias should help predict unbiased test loss but not biased test loss, so it cannot explain why ELBO performs better.
+% Thus, the fact that ELBO does not have bias cannot explain why it performs better.
+
+\subsection{Choice of the Regularization Parameter}
+Our comparisons in the main paper focus on fixing the regularization parameter $\eta$ to be 0.1. Notice that the elbo loss is an upper bound for the dlm loss. Thus, using the same $\eta$ means a stronger regularization in DLM.
+This can potentially cause the regularization for DLM to be too strong, which might be another potential explanation for the bad performance of DLM. However, from Figure \ref{fig:vibo}, in which we perform bounded optimization with different bounds on the norm of the parameters, we observe that whichever bound we choose, DLM performs worse than ELBO. Recall that $\eta$ and the bound $A$ are related as specified in Proposition 1. If it is hard to find a bound that makes DLM perform better than ELBO, then it would be hard to find such $\eta$ that makes DLM perform better than ELBO. So the bad performance of DLM is not due to the choice of the regularization parameter $\eta$.
+
+\section{Additional Results}
+\subsection{ELBO initialization on CIFAR100 using AlexNet}
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[t]{0.32\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/elbo_init-CIFAR100-AlexNet-seed1-test_loss.pdf}
+         \caption{test loss($\downarrow$)}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.32\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/elbo_init-CIFAR100-AlexNet-seed1-dlm_obj.pdf}
+         \caption{Trajectory of dlm loss}
+         \label{fig:dlm-CIFAR100}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.32\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/elbo_init-CIFAR100-AlexNet-seed1-elbo_obj.pdf}
+         \caption{Trajectory of elbo loss}
+         \label{fig:dlm-CIFAR100}
+    \end{subfigure}
+    \caption{Comparison of ELBO and DLM with/without initialization, on CIFAR100 with AlexNet}
+    \label{fig:elbo-init-cifar100}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[t]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{loss_surface/no_init-CIFAR100-AlexNet-prior0.05-seed1.pdf}
+         \caption{ELBO and DLM}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{loss_surface/mix-CIFAR100-AlexNet-prior0.05-seed1.pdf}
+         \caption{ELBO and DLM-init\_ELBO}
+         \label{fig:mix-surface-cifar100}
+    \end{subfigure}
+    \caption{Loss Surface, on CIFAR100 with AlexNet}
+    \label{fig:loss-surface-cifar100}
+\end{figure}
+Results for AlexNet on CIFAR100 are shown in Figure \ref{fig:elbo-init-cifar100} and \ref{fig:loss-surface-cifar100}. 
+The behavior of ELBO and DLM on CIFAR100 is similar to that on CIFAR10, except in Figure \ref{fig:mix-surface-cifar100}, where the dlm loss is also consistent with test loss. Experiments on CIFAR100 do not break the two major observations we make in Section \ref{dlm-bnn}. 
+
+\subsection{Smoothed Loss}
+\label{smooth}
+We use the smoothing factor $a=0.001$ in $\log^{(a)} p = \log((1-a)p + a)$. We use the smoothed loss only in elbo loss and dlm loss in training not in testing. Figure \ref{fig:smooth} shows that adding a smoothing factor does improve the performance of DLM, as in (a) and (c) DLM-smooth achieves lower test loss than DLM. However, DLM-smooth is still worse than ELBO. In Figure \ref{fig:smooth-dlm-cifar10} and \ref{fig:smooth-dlm-cifar100} we plot the dlm objectives during training. 
+% Notice that ELBO-smooth and DLM-smooth corresponds to a smoothed-dlm objective which is different from the dlm objective for ELBO and DLM.
+We observe that in Figure \ref{fig:smooth-dlm-cifar10}, ELBO does not optimize dlm loss better than DLM. However, since elbo loss generalizes better, DLM still perform worse than ELBO. This may indicate that the generalizability plays a more important role in explaining the failure of DLM. 
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[t]{0.23\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/smooth-CIFAR10-AlexNet-seed2-test_loss.pdf}
+         \caption{test loss, CIFAR10}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.23\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/smooth-CIFAR10-AlexNet-seed2-dlm_obj.pdf}
+         \caption{dlm loss, CIFAR10}
+         \label{fig:smooth-dlm-cifar10}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.23\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/smooth-CIFAR100-AlexNet-seed2-test_loss.pdf}
+         \caption{test loss, CIFAR100}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.23\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/smooth-CIFAR100-AlexNet-seed2-dlm_obj.pdf}
+         \caption{dlm loss, CIFAR100}
+         \label{fig:smooth-dlm-cifar100}
+    \end{subfigure}
+    \caption{Comparison on losses($\downarrow$) of ELBO and DLM with/without smoothing}
+    \label{fig:smooth}
+\end{figure}
+
+\subsection{Bounded Optimization}
+It is hard to directly bound the KL divergence, so we instead bound the parameters as $\lVert \mu \rVert_2 \leq b_m$ and $\lVert \sigma^2 \rVert_{\infty} \leq b_v$. By analyzing the original solution of ELBO and DLM, we found $\lVert \mu_{\elbo} \rVert_2 $ and $\lVert \mu_{\dlm} \rVert_2$ are around 80 to 90 and $\lVert \sigma^2 \rVert_\infty$ is around 0.25. So we fix $b_v = 0.25$ and choose $b_m \in \{30, 50, 90, 120\}$. 
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[t]{0.45\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/vibo-CIFAR10-AlexNet-seed1-test_loss.pdf}
+         \caption{CIFAR10, test loss($\downarrow$)}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.45\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/vibo-CIFAR100-AlexNet-seed1-test_loss.pdf}
+         \caption{CIFAR100, test loss($\downarrow$)}
+    \end{subfigure}
+    \caption{Bounded Optimization}
+    \label{fig:vibo}
+\end{figure}
+From Figure \ref{fig:vibo} we can see that the original ELBO still outperforms all other methods, including the original DLM and the solutions with bounded optimization. One observation is that with bounded optimization, DLM is closer to ELBO. 
+
+\subsection{Collapsed Varitional Inference}
+\cite{collapsed-elbo} proposed a hierarchical model and performed variational inference on the prior parameters as well. The variational distribution of the prior parameters can be optimized and by marginalizing over prior parameters, a new evidence lower bound is derived. Let $D$ be the total dimension of the weights. The new evidence lower bound replaces the original regularizer, the KL divergence, with a new one:
+\begin{align}
+    \frac{1}{2 \gamma} [1^\top \sigma^2 + \alpha_{reg} \mu^\top \mu] - \frac{1}{2} 1^\top \log \sigma^2 - \frac{D}{2} \log \alpha_{reg},
+    \label{eq:cvi-mean}
+\end{align}
+if we fix prior variance but learn prior mean (we call this ``mean''), or
+\begin{align*}
+    (\alpha+\frac{1}{2}) 1^\top \log \left[\beta 1 + \frac{\delta}{2} \mu^2 + \frac{1}{2} \sigma^2 \right] - \frac{1}{2} 1^\top \log \sigma^2,
+    \label{eq:cvi-mv}
+\end{align*}
+if we learn both mean and variance (we call this ``mv'').
+We choose $\gamma=0.3, \alpha_{reg}=0.05$ in eq \eqref{eq:cvi-mean}, $\alpha=0.5, \beta=0.01, \delta=0.1$, following the standard settings in \citep{collapsed-elbo}. 
+
+Empirical Bayes \citep{dvi} can be viewed as a special case of collapsed variational inference by restricting the variational distribution of $\sigma^2$ to be a delta distribution and the new regularizer it derives is (we call this ``eb''):
+\begin{align}
+    \frac{1}{2} \left[D\log \frac{\mu^\top \mu + 1^\top\sigma^2 + 2\beta}{D + 2\alpha + 2} - 1^\top \log |\sigma^2| - D \right] + \frac{1}{2} \frac{D+2\alpha+2}{\mu^\top \mu + 1^\top\sigma^2 + 2\beta} (\mu^\top \mu + 1^\top\sigma^2),
+\end{align}
+where we set $\alpha=4.4798$ and $\beta=10$ following \cite{dvi}. 
+
+Figure \ref{fig:cvi} shows the result of applying the new regularizers to DLM. Unlike ELBO, the new regularizers ``mean'' and ``mv'' do not improve the performance of DLM and even make it worse. In contrast, ``eb'' does improve the performance of DLM but this variant of DLM is still worse than ELBO.
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[t]{0.45\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/collapsed-CIFAR10-AlexNet-seed1-test_loss.pdf}
+         \caption{CIFAR10, test loss($\downarrow$)}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.45\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{learning_curve/collapsed-CIFAR100-AlexNet-seed1-test_loss.pdf}
+         \caption{CIFAR100, test loss($\downarrow$)}
+    \end{subfigure}
+    \caption{Collapsed Variational Inference}
+    \label{fig:cvi}
+\end{figure}
+
+\end{document}

@@ -1,0 +1,152 @@
+
+
+\section{Multi-View Aware Deep Material Estimation}
+\label{sec:network}
+
+
+Our problem is estimating \emph{scene-scale} material properties from a \emph{multi-view dataset} under \emph{unknown lighting}, as opposed to the several successful deep learning methods for estimating SVBRDF maps: These start from one or a few images~\cite{li2017modeling,li18mfm,deschaintre2018,guo2021,zhou2021,deschaintre2019,asselin2020}, typically for small planar patches of materials lit by a flash. 
+We tackle the scene-scale material estimation problem by first processing each view with a CNN similar to the one used by Deschaintre et al.~\cite{deschaintre2018, deschaintre2019}; We explain how we adapted this architecture to our use-case in Sec.~\ref{sec:architecture}.
+
+%, trained on a synthetic dataset of realistic images paired with ground-truth diffuse albedo, specular albedo and specular roughness maps. 
+The much harder scene-scale problem precludes the use of co-located flash lighting;
+Since we cannot benefit from the rich visual cues given by this mode of capture, our originality is to instead leverage visual cues provided by multi-view observations. 
+Figure~\ref{fig:architecture} illustrates the main components of our architecture and its training procedure.
+%The basic building block of our approach is inspired from Deschaintre et al. \cite{deschaintre2018}, which uses a U-net architecture augmented with a global track, allowing inference of albedo, roughness, specular and normal maps from an image, trained on a synthetic dataset. 
+
+\begin{figure}[t!]
+\centering
+\includegraphics[width=\linewidth]{images/architecture.png}
+\caption{
+    \label{fig:architecture}
+    Overview of our deep learning architecture and training procedure.
+    We split the material estimation task into two tracks, one for the diffuse albedo and the other one for specular albedo and roughness (a, b). In addition, we filter the specular albedo and roughness with a bilateral solver (c). Finally, we compare the predicted maps with ground truth maps using a $\mathcal{L}_{1}$ loss as well as with a rendering loss that assesses the appearance of the materials under several lighting and viewing conditions (d). 
+}
+\end{figure}
+
+
+\subsection{Network Inputs}
+While we run our CNN on each input view separately, we feed it with multi-view information obtained by re-projecting a set of neighboring views to the current view.
+For each pixel, we select at most 12 views where the corresponding point is visible, and for which the view direction is most closely aligned to the surface normal, as those views are less prone to grazing angle observations. We also add a distance term to favor cameras nearer to the surface. 
+
+We rank and pick the top-12 views by minimizing the cost composed of a view term and a distance term as shown in Fig.~\ref{fig:cost}, specifically for an observation at $p$:
+\begin{equation}
+\mathrm{cost}_i ~=~ cos~ \alpha_i + \frac{d_{ip}}{max(d_{jp})} \quad \quad \forall j \in \{1, N\}
+\end{equation}
+\noindent
+where $d_{ip}$ is the distance of point $p$ to camera $i$, $N$ is the total number of cameras, and $\alpha_i$ is the angle between the normal at surface point $p$ and view direction of camera $i$.
+
+
+
+\begin{figure}[!t]
+\center
+\includegraphics[width=0.8\linewidth]{images/cost_figure.pdf}
+\caption{
+Camera selection for each surface point $p$. A cost function is used to select the 12 best views that consists of a visibility term and a distance term which favors normal-aligned views and cameras close to the surface. }
+\label{fig:cost}
+%\Description{Few examples of renderings obtained with our synthetic dataset showing realistic geometry, materials and lighting conditions along with the variations.}
+\end{figure}
+
+
+Since each pixel might receive a different number of observations as not all surface may be visible in 12 or more views (this is frequently observed in the case of background pixels), we summarize this multi-view information as a fixed set of images corresponding to simple color statistics, i.e. median, maximum and minimum. 
+%\SP{Reviewers mentioned to formally define the statistics, which can be done here if required. I'm not convinced we need it though.}
+
+
+The maps that form a material map atlas have different characteristics, and can be inferred from different visual cues. On the one hand, the diffuse albedo map needs to maintain sharp texture features while being free of view-dependent highlights, shadows and indirect light. On the other hand, the specular albedo and roughness values are often nearly constant over parts of objects made of the same material, and are conveyed by highlight information from different views. These observations motivate us to predict the diffuse and specular parameters via two different tracks, and to feed each track with different visual information.
+
+For the diffuse albedo, we complement the input image with the median image, as the median rejects highlights that only appear in a few images. We also include the maximum image to help the network locate shiny areas where highlights might need to be suppressed even if present in many images. 
+
+In addition to the images used by the diffuse track, we feed the specular track with the minimum image as it further helps locate parts where the color changes significantly across views. We also provide the specular track with normal and depth maps, which delineate different objects that often have different specular values. Our experiments revealed that providing all these extra images to the diffuse track degrades its prediction, as the network struggles to select the relevant image structures among too many visual channels. In addition, reprojection errors due to the approximations in retopologized geometry can be problematic (see Sec.~\ref{sec:results}).
+
+Finally, we favor smooth specular maps by post-processing their predictions with a differentiable bilateral solver \cite{barron2016BS, li2020invrender} guided by the predicted diffuse albedo. 
+This edge-aware smoothing attenuates discontinuities due to reprojection misalignments.
+Unlike Li et al.~\cite{li2020invrender} we do not run our diffuse albedo maps through the solver as we observed this leads to over-smoothing of diffuse albedo maps resulting in loss of texture details.
+
+
+\subsection{Network Architecture}
+\label{sec:architecture}
+Our network architecture is based on the ones by Deschaintre et al.~\cite{deschaintre2018, deschaintre2019} which were also designed for material estimation but works on a single flat patch of size 256x256x3. Their architectures follow the widely popular U-Net encoder-decoder~\cite{ronneberger2015unet}, to which a fully-connected track responsible for processing and transmitting global information was added. 
+We maintain the same U-Net architecture augmented with the global track but we half the number of feature layers from 8 to 4 to make the networks lighter with the feature counts in the encoder downscaling layers of 64, 128, 256, and 512. We did not observe any significant degradation in the maps due to this reduction in network capacity.
+We follow the same downsampling and upsampling process as described in~\cite{deschaintre2018} with the feature counts used in reverse order for the decoder. 
+Instance normalization is used for stability and we also regularize by applying dropout at 50\% probability on the last three layers of the decoder.
+
+The main difference lies in the input/output; Specifically 
+our network architecture differs in two ways. 
+First, we separate out the network into two tracks one each for diffuse and specular maps. 
+The two tracks serve different purposes with the diffuse track predicting only diffuse albedo maps, while the specular track outputs the specular albedo and roughness maps. 
+The two tracks are two separate networks. 
+While training, we can either train one of the networks without sharing any information between them or both networks by jointly computing the loss on output of both networks.
+We use individual training to train the networks and joint training to fine-tune the networks post-training. 
+Please see Sec.~\ref{sec:implementation} for training details. 
+Second, since we feed the network with multi-view information in the form of image statistics, we have more input channels compared to $3$ channels for the previous networks. Concretely, since we feed the median, maximum and input image to the diffuse track which thus has $9$ input channels, while for the specular track, we also provide the minimum image, depth and normal buffers resulting in $18$ input channels.
+%\TODO{UNCLEAR: THERE WE SAY "AS A FIXED SET OF IMAGES", WHICH CONTRADICTS THIS; CLARIFY ?}
+%Deschaintre at al.~\cite{deschaintre2019} also provided pixel coordinates as extra channels which is not required by our method, since we have geometry}\TODO{VERIFY}.
+
+For the network used to predict confidence channels to guide the bilateral solver, we follow the same CNN architecture and hyper-parameters for the solver as used in previous works~\cite{li2020invrender, barron2016BS}.
+We include detailed breakdown of the network architecture and the parameters used in the supplemental PDF.
+
+\subsection{Loss Function}
+
+
+Many inverse rendering methods supervise their predictions of geometry, material and lighting by comparing re-rendered images to input images using a differentiable \emph{rendering loss} \cite{li2018learning,boss2020}. At scene-scale, such a rendering loss needs to model global illumination effects present in the input \cite{li2020invrender}. We depart from this family of methods by focusing on a scenario where geometry is given, such that our task boils down to predicting material maps only. In this context, we can supervise our method by comparing our prediction to ground truth SVBRDF maps rather than by attempting to reproduce the input. A local lighting model is sufficient for this purpose, as was originally proposed by Deschaintre et al. \cite{deschaintre2018} in the context of planar surface patches. While Deschaintre et al. use point and directional lights, we improve on their approach by incorporating distant area lights modeled as spherical Gaussians.
+%, which provide a broader spectrum of highlight positions and shapes, which in turns yield more accurate predictions of specular parameters (see Sec.~\ref{sec:evaluation}).
+
+
+Concretely, we use a simple differentiable renderer that takes as input the material maps along with the normals of the geometry. Our goal is to compare the local appearance of our predicted material maps to the local appearance of the ground truth SVBRDFs. 
+%\SP{Can we use material parameters/maps instead of SVBRDFs? It's confusing since researchers expect SVBRDFs to include normal maps as well. Nimier-David et al.\cite{merlin2021} avoids using SVBRDF maps completely too and uses material parameters wherever required which I feel goes a long way in expectation management.} 
+To do so, we render the prediction and the ground truth under several viewing and ligthing conditions and compare the resulting images under the $\mathcal{L}_{1}$ norm and E-LPIPS perceptual metric $\mathcal{L}_{E}$~\cite{kettunen2019lpips} after applying a log transform ($I' = log(0.1 + I)$) to compress the dynamic range of the renderings. 
+Following Deschaintre et al., we generate random viewing conditions by sampling view vectors over the hemisphere centered around the original view direction from which the input image was rendered. We then generate lighting conditions likely to produce highlights by positioning a point light in the mirror direction of the view vector. Finally, we also create extended light sources by generating a mixture of $5$ Gaussian lights with random width, color and direction distributed over the hemisphere.
+
+%\NEW{The differentiable renderer is not meant to compare the prediction to the input images – which would require knowledge of the input lighting and simulation of GI effects. The renderer is used to evaluate whether our predicted maps produce the same appearance as the ground truth maps when observed under a variety of lighting conditions, in line with our goal of creating relightable assets. To the best of our knowledge area lighting has never been used in a rendering loss during training before.}\AB{I would drop this paragraph as it is repeating what is said in the previous paragraphs. And the last sentence stresses the area lights but I thought that we didn't want to do so since we didn't observe a major improvement using SG?}
+ 
+%In many previous single-image methods, a flash colocated with the camera is used during capture. Instead, we use the reprojected hints from other views to extract similar information. We train the network with synthetic data, with ground truth maps available; we describe the dataset generation in Sec.~\ref{sec:dataset}. We use a \emph{rendering loss}, similar to previous work (\cite{deschaintre2018}). However, our problem is more involved than the single-image, flash-lit SVBRDF problem. To provide successful estimation, we add Spherical Gaussian lights in addition to point-lights used previously, that provide a broader spectrum of highlight positions and shapes.
+
+%Concretely, we use the predicted maps to render an image using our in-network renderer. We compare the rendering obtained from predicted maps and the rendering obtained from ground truth maps to compute the loss. For individual track training, for example when training only the diffuse track, we use predicted albedo along with ground truth specular and roughness maps to render the predicted image while we use all three ground truth maps for ground truth rendering. We use Spherical Gaussian lighting that results in improved results (see Sec.~\ref{sec:evaluation}). We generate 5 Spherical Gaussian Lights (SGL) for each rendering, each with random roughness, color, and direction on the upper hemisphere.  We compute three renderings with our SGLs and three with point lights in mirrored direction configuration as previously used in Deschaintre~\shortcite{deschaintre2018}.
+We implement the shading of a point under distant area light sources by using the spherical warp introduced by Wang et al.~\cite{wang09}. The light, as well as the BRDF, are approximated as two Spherical Gaussians, for which a fast closed-form convolution exists. Using this approximation allows us to include extended light sources in the rendering loss without losing computational efficiency for training.
+Our final rendering loss averages the image differences obtained with three point-wise lighting conditions and with three extended lighting conditions. 
+
+In addition to the rendering loss, we also use $\mathcal{L}_{1}$ and $\mathcal{L}_{E}$ to compare the individual predicted maps to their respective ground-truth. Denoting $I$ a rendered image, $D$ the diffuse albedo, $R$ the roughness, and $S$ the specular albedo, 
+%terms on both the rendering $\mathcal{R}$ and the roughness $\mathcal{M_R}$, specular $\mathcal{M_S}$ and albedo $\mathcal{M_A}$ maps. Diffuse and specular maps undergo a log transform ($log(\epsilon=0.1 + I)$) before computing the loss. 
+the total loss we use is thus:
+\begin{align}
+\mathcal{L} & = [\mathcal{L}_{E}(I)+ \mathcal{L}_{1}(I)] \nonumber\\ 
+& + \mathcal{L}_{E}(D)  + \mathcal{L}_{E}(R) + \mathcal{L}_{E}(S)  \nonumber\\
+& + \lambda (\mathcal{L}_{1}(D) + \mathcal{L}_{1}(R) + \mathcal{L}_{1}(S)) 
+\end{align}
+where $\lambda$ is $0.1$.
+
+
+\subsection{Merged Renderable Scene Assets}
+\label{sec:texture-space}
+The second step of our method merges the material maps predicted over each input view to form a single, object-space material map texture atlas suitable for rendering.
+We leverage the retopologized 3D mesh to identify which texel corresponds to each pixel in all input views. We select the final value of each texel as the median value of all its predictions. 
+This median filter is especially effective at removing erroneous predictions that are not consistent across views (see Sec.~\ref{sec:analysis})
+%(Figure~\ref{fig:map-viz}),  
+including the ones due to re-projection artifacts caused by approximate geometry and camera calibration in real-world scenes.
+
+
+\section{Synthetic Training Dataset}
+\label{sec:dataset}
+
+
+% Dataset
+We trained our method by generating a dataset of synthetic renderings with corresponding ground truth material maps. 
+%Instead of using CAD models for geometry, as done by previous datasets~\cite{openrooms2021}, 
+We use professional artist-modeled assets in Autodesk 3DS Max with high quality V-Ray materials, that help bridge the gap between training data and real re-topologized scenes.
+%\AB{I don't fully buy this argument. What is the distinction between a ``CAD model'' and a ``professional artist-modeled asset''? Also, prior work used Substance or similar materials, which I guess is equivalent to V-Ray materials.}. 
+We purchased a set of scenes \footnote{From \url{https://evermotion.org/shop/cat/355/all_scenes/0/0}, Volume 1, 8 and 30.} and extracted basic environments and several different objects that we recombined to create new scene configurations, on which we place objects with different materials. 
+%\footnote{\GD{DO THIS The list of scenes and the objectsextracted are provided in supplemental.}}. Each scene has a central surface (typically a table)
+
+We augment the initial artist-generated materials with materials from Deschaintre et al.~\cite{deschaintre2018}, hand-picked to correspond well with the underlying geometry and to cover a wide range of everyday indoor materials such as wood, metal, plastic, rubber, leather, etc.
+Each choice of materials and objects provides a scene configuration, for a total of $160$ scene configurations, created from $5$ ``base scenes'' with a set of random object placements. We place area and point lights in the scene, as well as environment maps that typically illuminate the scenes through a window. 
+%See the supplementary material for additional details on how we generate material and lighting variations~\GD{VERIF WE DO THIS}. 
+
+\input{figures/synthetic}
+
+We rendered each image using a Cook-Torrance BRDF model with a Beckmann normal distribution, which we have implemented in the Mitsuba physically-based path tracer for full global illumination~\cite{jakob2010mitsuba}.  
+We subsequently denoised each rendering using the Optix denoiser~\cite{parker2010optix}. For each image, we also generate the ground truth SVBRDF maps, i.e., diffuse albedo, roughness and specular albedo rendered as images. 
+Finally, we pre-compute the per-pixel re-projected color statistics (minimum, median and maximum) for each image in our dataset.
+%\GD{VERIFY}
+
+We render each scene configuration under $40$ different viewpoints, yielding a total of $6400$ images at resolution $640 \times 384$ pixels (see Fig.~\ref{fig:dataset} for a small selection).
+At training time, we extract random crops of $256 \times 256$ pixels from each image to be fed to the network, which effectively augments the size of the dataset, to around 45,000 individual crops.
+

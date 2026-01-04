@@ -1,0 +1,84 @@
+In this section, we will first revisit the fundamentals of diffusion models~\cite{dm_early0,ddpm}, including the forward-backward processes and training objectives. We will then highlight the multi-flow multimodal framework of Versatile Diffusion (VD), which is a key contribution that makes VD a unified model of multiple tasks. Finally, we will reveal all details of VD, including the choice of VAEs, context encoders, loss functions, \etc.
+
+\subsection{Diffusion basics}
+
+The forward diffusion process $p(x_T|x_0)$ is a Markov Chain~\cite{ddpm} with $T$ steps that gradually degrade $x_0$ to $x_T$ with random Gaussian noises (Equation~\ref{eq:forward_diffusion}).
+
+\vspace{-0.3cm}
+\begin{equation}\begin{gathered}
+    q(x_T|x_0) = \prod_{t=1}^T q(x_{t}|x_{t-1}) = \prod_{t=1}^T \mathcal{N}(\sqrt{1-\beta_t}x_{t-1}; \beta_t\mathbf{I})\\
+    = \mathcal{N}(\sqrt{\bar{\alpha}_t}x_0; (1-\bar{\alpha}_t\mathbf{I}));\\
+    \bar{\alpha}_t =\prod_{t=1}^T\alpha_t; 
+    \quad
+    \alpha_t = 1-\beta_t
+\label{eq:forward_diffusion}
+\end{gathered}\end{equation}
+
+Given the forward diffusion process as prior, diffusion models are trained to reverse the process and recover signal $x_0$ back from $x_T$ by removing the added Gaussian noises. This is known as the backward diffusion process, and each step $p_{\theta}(x_{t-1}|x_t)$ is sampled from the Gaussian distribution with network predicted mean $\mu_{\theta}(x_t, t)$ and variance $\Sigma_{\theta}(x_t, t)$, shown as Equation~\ref{eq:backward_diffusion}.
+
+\vspace{-0.1cm}
+\begin{equation}\begin{gathered}
+    p_{\theta}(x_{t-1}|x_t) = \mathcal{N}(
+        \mu_{\theta}(x_t, t),
+        \Sigma_{\theta}(x_t, t)
+    )
+\label{eq:backward_diffusion}
+\end{gathered}\end{equation}
+
+The objective function to train a diffusion model is to minimize the variational bound for negative log-likelihood~\cite{ddpm} shown in Equation~\ref{eq:objective}. In practice, many works assume deterministic $\alpha_t$ and $\beta_t$ for step $t$ in Equation~\ref{eq:forward_diffusion}. Given that both forward and backward processes are Gaussian processes, the objective can then be simplified as the variational weighted $l_2$ loss between the ground truth and predicted mean. 
+
+\vspace{-0.3cm}
+\begin{equation}\begin{gathered}
+    L = \mathbb{E}[-\log p_{\theta}(x_0)] 
+    \le \mathbb{E}\left[
+        -\log\frac{p_{\theta}(x_{0:T})}{q(x_{1:T}|x_0)}
+    \right]
+\label{eq:objective}
+\end{gathered}\end{equation}
+
+\vspace{-0.1cm}
+\subsection{Multi-flow multimodal diffusion framework}\label{sec:framework}
+
+\input{main_figure/figure_framework}
+
+The core part of Versatile Diffusion (VD) is the multi-flow multimodal diffusion framework capable of generating various forms of outputs (\eg image, text, 3D, \etc) conditioned on various crossmodal contexts (\eg image, text, audio \etc). A formal definition of a single flow in VD is to synthesize features of modality $n$ using contexts of modality $m$. One may notice that the well-explored text-to-image task~\cite{mask-a-scene, dalle2, imagen, ldm}, \ie synthesizing images based on text prompts, matches the definition of a single flow in VD. But the scope of VD goes beyond one single task; particularly in this work, VD is set up to fulfill numerous tasks: text-to-image, image-to-text, and variations, and may further extend to cover more modalities such as 3D, audio, music, \etc.
+
+Speaking with details, VD handles groups of crossmodal tasks due to its multi-flow framework, in which layers can be activated or muted based on the modalities of the input contexts and output results. As shown in Figure~\ref{fig:framework}, we categorize all diffuser layers into three groups: global layers, data layers, and context layers. The global layers are flow-independent layers that will always be activated. Data layers are output-dependent layers that will be activated when the network generates the corresponding output type. Lastly, context layers are context-dependent layers that will be activated when the corresponding context type is input. Using SD~\cite{ldm} as a reference, the global layers are time-embedding layers; the data layers are residual blocks; and the context layers are cross-attentions. One flow of VD routes the feed-forward pass through the shared global layers and the chosen data and context layers, while other irrelevant layers will stay silent (see Figure~\ref{fig:framework}). Use text-to-image as an example. The $t$-step intermediate result $x_t$ will be fed to image data blocks and text context blocks to generate the next step result $x_{t-1}$. Similarly, if our goal is to perform image-variation, we need to use image data blocks and image context blocks. 
+
+One may notice that such a multi-flow multimodal framework highly promotes parameter sharing. In this work, our default VD setting is a four-flow model. In order to replicate such four-flow VD, one would require a total of four diffusion models (\ie four times the size of an SD~\cite{ldm}), while VD reduces the number of parameters by half via its shared layers in the framework. A more generalized version of VD handles $N\times M$ crossmodal tasks with $N$ types of output and $M$ types of context. The size of the model would then become $\mathcal{O}\left(\text{max}(N, M)\right)$, which is significantly smaller than a vanilla model ensembling that requires an accumulated size of $\mathcal{O}(N\times M)$.
+
+\input{main_figure/figure_vd}
+
+\vspace{0.1cm}
+
+\subsection{Versatile Diffusion}
+
+\textbf{Tasks}: As mentioned earlier, Versatile Diffusion (VD) is a unified diffusion model for text-to-image, image-to-text, and variations. Text-to-image and image-to-text are two well-known tasks in which the former generates images from text prompts, and the latter generates image captioning. Image-variation (IV) is a fairly new task in which users generate new images that are semantically similar to the reference images. IV differs from SD's image-to-image (I2I)~\cite{ldm} by two points a) IV diffuses from pure noise while I2I diffuses from images half-mixed with noise; b) IV maintains high-level semantics but relaxes the low-level structures, while I2I only replicates low-level structures and has no guarantee on high-level semantics. Lastly, VD can also generate variations in text due to its multi-flow nature, whose goal is to generate similar expressions from reference text.
+
+\vspace{0.1cm}
+
+\textbf{Network}: The full model of VD includes three components: a) A diffuser that follows our multi-flow multimodal framework described in Sec~\ref{sec:framework}; b) VAEs that convert data samples to latent representations; c) Context encoders that encode contexts into embeddings. The overall network diagram is also shown in Figure~\ref{fig:vd}.
+\textbf{Diffuser}: We use the well-adopted UNet~\cite{unet} with cross attentions~\cite{attn} as the main structure of our diffuser network. Part of the UNet follows SD~\cite{ldm}, where we adopt residual blocks~\cite{resnet} as image data layers and cross-attention as text and image context layers. For text data layers, we propose the fully connected residual blocks (FCResBlock) that expand 768-dimensional text latent vectors into a 320-by-4 hidden feature and follow a similar residual block paradigm with GroupNorms~\cite{groupnorm}, SiLU~\cite{silu}, and skip connections (see Figure~\ref{fig:fcresblock}). 
+\textbf{VAE}: We adopt the same Autoencoder-KL~\cite{ldm} like SD as our image VAE. Parallelly, we adopt Optimus~\cite{optimus} as our text VAE. Optimus consists of a Bert~\cite{bert} text encoder and a GPT2~\cite{gpt2} text decoder, by which it can bidirectionally transform sentences into 768-dimensional normally-distributed latent vectors. 
+\textbf{Context encoder}: We use both CLIP~\cite{clip} text and image encoders as VD's context encoders. Unlike SD, which uses raw text embeddings as context inputs, we use normalized and projected embeddings that minimize the CLIP text-image contrastive loss. In our experiments, we noticed that closer embedding spaces between contexts (\ie image and text) help converge fast and perform better. 
+
+\begin{algorithm}
+\caption{Backpropagation of VD}
+    $X=\{x^{(1)} \ldots x^{(N)}\}$; \tcp{N types data}
+    $C=\{c^{(1)} \ldots c^{(M)}\}$; \tcp{M types context}
+    $L_{\theta}(x^{(\cdot)},c^{(\cdot)})$; \tcp{Loss with params $\theta$}
+    $\delta_\theta = 0$; \tcp{Param gradients}
+    \For{$x^{(i)} \in X$}{
+        \For{$c^{(j)} \in C$}{
+            $\delta'_\theta = \nabla_{\theta}L_\theta(x^{(i)}, c^{(j)})$; \tcp{One flow}
+            $\delta_\theta = \delta_\theta + \delta'_\theta$\;
+        }
+    }
+    Update network with $\delta_\theta$\;
+\label{alg:loss}
+\end{algorithm}
+\setlength{\textfloatsep}{0.4cm}
+
+\textbf{Loss}: Training VD is surprisingly simple. For each of the flows, we compute the variational weighted $l_2$ losses described in Equation~\ref{eq:objective} and do regular backpropagation (see Algorithm~\ref{alg:loss}). Model weights will be updated when the gradients in all flows are accumulated. Besides, when updating the weights, we manually set gradient scales for parameters in data and context layers to better adapt our multi-flow model settings. More information can be found in the Experiments session.
+
+\input{main_figure/figure_fcresblock}

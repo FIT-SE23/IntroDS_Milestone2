@@ -1,0 +1,40 @@
+
+\section{PROPOSED METHOD}
+\label{METHODOLOGY}
+
+
+\subsection{Input Pipeline}
+
+To illustrate the temporal modeling capacity of our \methodname, we use the most commonly-used Mel-Frequency Cepstral Coefficients (MFCCs) features~\cite{IEMOCAP_CNN1} as the inputs to \methodname. We first set the sampling rate to the 22.050 kHz of each corpus and apply framing operation and Hamming window to each speech signal with 50-ms frame length and 12.5-ms shift. Then, the speech signal undergoes a mel-scale triangular filter bank analysis after performing a 2,048-point fast Fourier transform to each frame. Finally, each frame of the MFCCs is processed by the discrete cosine transformation, where the first 39 coefficients are extracted to obtain the low-frequency envelope and high-frequency details.
+
+\input{Table/SOTA}
+\subsection {Temporal-aware Bi-direction Multi-scale Network}
+
+We propose a novel temporal emotional modeling approach called \methodname, which learns long-range emotional dependencies from the forward and backward directions and captures multi-scale features at frame-level. Fig.~\ref{fig:architecture} presents the detailed network architecture of \methodname. For learning multi-scale representations with long-range dependencies, the \methodname consists of $n$ Temporal-Aware Blocks (TABs) in both forward and backward directions with different temporal receptive fields. Next, we detail each component.
+
+\noindent\textbf{Temporal-aware block.}\quad We design the TAB to capture dependencies between different frames and automatically select the affective frames, severing as a core unit of \methodname. As shown in Fig.~\ref{fig:architecture}, $\mathcal{T}$ denotes a TAB, each of which consists of two sub-blocks and a sigmoid function $\sigma(\cdot)$ to learn temporal attention maps $\mathcal{A}$, so as to produce the temporal-aware feature $\mat{F}$ by element-wise production of the input and $\mathcal{A}$. For the two identical sub-blocks of the $j$-th TAB $\mathcal{T}_j$, each sub-block starts by adding a DC Conv with the exponentially increasing dilated rate $2^{j-1}$ and causal constraint. 
+The dilated convolution enlarges and refines the receptive field and the causal constraint ensures that the future information is not leaked to the past. 
+The DC Conv is then followed by a batch normalization, a ReLU function, and a spatial dropout.
+
+\noindent\textbf{Bi-direction temporal modeling.}\quad To integrate complementary information from the past and the future for the judgement of emotion polarity and modeling long-range temporal dependencies, we devise a novel bi-direction architecture based on the multi-scale features as shown in Fig.~\ref{fig:architecture}.
+Formally, for the $\vec{\mathcal{T}}_{j+1}$ in the forward direction with the input $\vec{\mat{F}}_{j}$ from previous TAB, the output $\vec{\mat{F}}_{j+1}$ is given by Eq.~\eqref{eq:forward}:
+\begin{align}
+    \vec{\mat{F}}_{j+1}= \mathcal{A}(\vec{\mat{F}}_{j})\odot \vec{\mat{F}}_{j},\label{eq:forward}\\
+    \cev{\mat{F}}_{j+1}= \mathcal{A}(\cev{\mat{F}}_{j})\odot \cev{\mat{F}}_{j},\label{eq:back}
+\end{align}
+where $\vec{\mat{F}}_{0}$ comes from the output of the first $1\times 1$ Conv layer and the backward direction can be defined similarly in Eq.~\eqref{eq:back}.
+
+We then combine bidirectional semantic dependencies and compact global contextual representation at utterance level to perceive context as follows:
+\begin{align}
+    \vct{g}_j&=\mathcal{G}(\vec{\mat{F}}_{j}+\cev{\mat{F}}_{j}) \label{equ:GAP_feat},
+\end{align}
+where the global temporal pooling operation $\mathcal{G}$ takes an average over temporal dimension, yielding a representation vector for one specific receptive field from the $j$-th TAB.%~\cite{global_temporal_pooling}
+
+
+\noindent\textbf{Multi-scale dynamic fusion.}\quad Furthermore, since the pronunciation habits (\eg speed or pause time) vary from speaker to speaker, the utterances have the characteristics of temporal scale variation. SER benefits from taking dynamic temporal receptive fields into consideration. We design the dynamic fusion module to adaptively process speech input at different scales, aiming to determine suitable temporal scale for the current input during the training phase. We adopt a weighted summation operation to fuse the features with Dynamic Receptive Fields (DRF) fusion weights $\mat{w}_\text{drf}$ from different TABs. The DRF fusion is defined as follows: 
+\begin{align}
+    \vct{g}_\text{drf}=\sum\nolimits_{j=1}^{n}w_j\vct{g}_j,  \label{equ:dynamic_rf}
+\end{align}
+where $\mat{w}_\text{drf} = [w_1,w_2,\ldots,w_{n}]\T$ are trainable parameters. 
+
+Once the emotional representation $\mat{w}_\text{drf}$ is generated with great discriminability, we can simply use one fully-connected layer with the softmax function for emotion classification.

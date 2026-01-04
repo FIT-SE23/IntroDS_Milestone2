@@ -1,0 +1,34 @@
+\section{System Evolution}
+\label{sec:7}
+
+The current storage implementation reflects the state of the art for BigData storage tools in 2012-2013 when the project started, but many different options appeared since, even within the Hadoop ecosystem. With the increase of data-taking and simulation production rates foreseen for LHC Run 3 (2022-2025) and even more for LHC Run 4 (High-Luminosity LHC, from 2028 onwards), a re-design of the core systems is needed. In order to be safe, a new system should be able to absorb a factor 10 more event rate than the current one, i.e. 100 billion real events and 300 billion simulated events each year.
+
+Investigations on several structured storage formats for the main EventIndex data to replace the Hadoop MapFiles started a few years ago \cite{EIopt}. Initially it looked like Apache Kudu \cite{Kudu} would be a good solution, as it joins BigData storage performance with SQL query capabilities \cite{EIKudu}. Unfortunately Kudu did not get a sufficiently large support in the open-source community and CERN decided not to invest hardware and human resources in this technology. 
+
+HBase had been evaluated as the main data store at the beginning of the project, but was discarded at that time because of performance restrictions. Nowadays instead, it is able to hold the large amounts of data to be recorded, with a much-improved data ingestion and query performance thanks to the increased parallelisation of all operations. Additional tools like Apache Phoenix \cite{Phoenix} can provide SQL access to HBase tables, if the tables are designed appropriately upfront, which can be done in our case.
+
+HBase works best for random access, which is perfect for the event picking use case where we want low latency access to a particular event to get its location information. Use cases where we need information retrieval (trigger info, provenance) for particular events are served by fast HBase gets, with good performance.
+In addition, analytic use cases where we need to access a range of event information for one or several datasets (derivation or trigger overlaps calculation), can be solved with scans on these data. They can be optimized with a careful table and key design in order to maintain related data close within the storage, reducing access time. 
+
+HBase is a column-family grouped key:value store, so we can benefit from dividing the event information in different families according to the data accessed in separated use cases; for example we can maintain event location, provenance, and trigger information in different families.
+Further analytic use cases on larger amounts of data are not foreseen, but still can be achieved running Map/Reduce or Spark jobs on the HBase files, as they are stored in the Hadoop file system.
+
+Apache Phoenix is a layer over HBase that enables SQL access and provides an easy entry point for users and other applications. Although HBase is a schema-less storage, Apache Phoenix requires a schema and data typing to provide its SQL functionalities; nevertheless schema versioning and dynamic late binding for the same tables are supported as well.
+
+EventIndex data rarely need schema changes, so we can benefit from Phoenix access, designing the required schema and tables accordingly. The table schemas and their relations \cite{EIHB} closely resemble those implemented for the Oracle version of the data store (section \ref{sec:6}).
+
+While updating the core storage system, other components can be revised and if necessary updated or replaced:
+\begin{itemize}
+   \item The Producer implementation is currently done in python with a single thread. It will be upgraded to work with the latest data analysis software and external libraries like stomp.py \cite{stomp}, boto \cite{boto} and Protocol Buffers \cite{ProtocolBuffers}.
+   \item The Data Collection system will use modern data processing technologies like Spark \cite{Spark}. It will also allow to simplify all procedures, reducing data duplication and using common job management tools over the stored data.
+   \item The Supervisor will be expanded to cover the entire workflow, from the selection of datasets to be indexed to the storage of data in HBase.
+   \item The detection of duplicated events and the calculation of statistics for each dataset will be done "on the fly" during the import process.
+   \item A new implementation of the Trigger Counter will make direct use of the Hbase/Phoenix infrastructure, which provides fields and families to store the six trigger masks of the event.
+   \item A graph database layer working on top of any SQL database has been implemented to deliver a graphical and highly interactive view of the EventIndex data stored in the Phoenix SQL database. Thanks to its SQL genericity, this layer can work with all ATLAS data stored in SQL databases, thus providing a global navigable overview of all ATLAS data. All data are accessed directly via the standard {\em Gremlin} API \cite{Gremlin} and the interactive graphical Web Service.
+\end{itemize}
+
+A prototype of the new storage and associated systems showed timing performances for data ingestion and for lookup well within our specifications.
+
+A new tool was developed in 2021: the Event Picking Service \cite{EPS}. It consists in a web service that can receive a list of events to be retrieved, with some optional specifications like the trigger stream and the data type to search for, and it will take care of all operations that were previously done by hand: query the EventIndex store to find the GUIDs of the files containing these events, submit the PanDA jobs to retrieve the events, retry the jobs if necessary, store the outputs in a central and safe location, inform the requester of the status of operations. It is useful to submit "massive" event picking requests, with numbers of requested events in excess of 10 thousand, for particular physics analyses that require dedicated reconstruction processes to be run on relatively small samples of pre-selected events.
+
+

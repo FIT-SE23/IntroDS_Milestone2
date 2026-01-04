@@ -1,0 +1,317 @@
+
+% \chapter{A Long-form Question Answering System with Fluency}
+\chapter{Generating Query-relevant, Long-form Answers}
+
+In this chapter, we first propose a coarse-to-fine method to extract the document-level and sentence-level query-relevant information, to help a traditional Seq2Seq model to  handle long and multiple documents as input, and considering query-relevance. We further introduce QFS-BART, a model that incorporates the explicit answer relevance attention of the source documents into the generation model's encoder-decoder attention module, to further enhance the query-relevance.
+
+% how we can build an effective long-form question answering system. Specifically, we present CAiRE-COVID, a real-time long-form question answering system for COVID-19. 
+
+% Then, we introduce QFS-BART, a model that incorporates the explicit answer relevance of the source documents given a query into the generation model, to generate more query-relevant answers.
+
+
+
+% The CORD-19 dataset represents the most extensive machine-readable coronavirus literature collection available for data mining to date. 
+
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[trim=0cm 1.1cm 0cm 0cm, clip=true, scale = 0.32]{figures/demo-2.png}
+    \caption{The user interface of our CAiRE-COVID website.}
+    \label{fig:website}
+\end{figure*}
+
+
+\section{CAiRE-COVID: A Long-form Question Answering System}
+\subsection{Backgroud}
+Since the COVID-19 outbreak, there are emerging requests from both the medical research community and wider society for efficient management of the information about COVID-19. Many high priority questions need to be answered, e.g., \textit{What do we know about COVID-19 risk factors?} and \textit{What do we know about virus genetics, origin, and evolution?}. At the same time, a huge number of scientific articles have been published and made publicly available to the medical community everyday (such as \href{https://www.biorxiv.org/}{bioRxiv}, \href{https://www.medrxiv.org/}{medRxiv}, \href{https://www.who.int/}{WHO}, \href{https://www.ncbi.nlm.nih.gov/pmc/}{pubMed}). 
+
+% While the current search engines can only return some unreliable web pages whose content can not be verified, an effective COVID-19 information management system, especially built over the scholarly documents, is in high demand.  
+
+The release of the COVID-19 Open Research Dataset (CORD-19)\textsuperscript{\ref{foot:kaggle}} ~\cite{wang2020cord}, which consists of over 158,000 scholarly articles about COVID-19 and related coronaviruses, creates an opportunity for the natural language processing (NLP) community to address these requests. However, it also poses a new challenge since it is not easy to extract precise information regarding given scientific questions and topics from such a large set of unlabeled resources.
+
+Almost all the systems built by the community fall in the search engine paradigm. CORD-19 Search\footnote{\tt \small https://cord19.aws/} is a search engine that utilizes the CORD-19 dataset processed using Amazon Comprehend Medical. Google released the \href{https://ai.googleblog.com/2020/05/an-nlu-powered-tool-to-explore-covid-19.html}{COVID19 Research Explorer} a semantic search interface on top of the CORD-19 dataset. Meanwhile, Covidex\footnote{\tt \small https://covidex.ai/} applies multi-stage search architectures, which can extract different features from data. An NLP medical relationship engine named the WellAI COVID-19 Research Tool\footnote{\tt \small https://wellai.health/} is able to create a structured list of medical concepts with ranked probabilities related to COVID-19, and the tmCOVID\footnote{\tt \small http://tmcovid.com/} is a bioconcept extraction and summarization tool for COVID-19 literature.
+
+Therefore, we propose CAiRE-COVID\footnote{\tt \small https://caire.ust.hk/covid}, a real-time long form question answering system for COVID-19, to tackle the timely challenges of mining the numerous scientific articles being published on COVID-19 by \textit{answering} high priority questions from the community and \textit{summarizing} salient question-related information. The system won one of the 10 tasks in the Kaggle COVID-19 Open Research Dataset Challenge\footnote{\label{foot:kaggle}\tt \small  https://www.kaggle.com/allen-institute-for-ai/CORD-19-research-challenge}, judged by medical experts. 
+
+\subsection{CAiRE-COVID Framework}
+
+Figure~\ref{fig:system} illustrates the architecture of the CAiRE-COVID system, which consists of three major modules: 1) Document Retriever, 2) Relevant Snippet Selector, and 3) Query-focused Multi-Document Summarizer.
+
+Given a user query, the system first \textit{selects} the most relevant documents from the CORD-19 dataset\textsuperscript{\ref{foot:kaggle}} with high coverage via a Document Retriever module. It then \textit{highlights} the answers or evidence (text spans) for the query, given the relevant paragraphs, by a Snippet Selector module via question answering (QA) models. Furthermore, to efficiently \textit{present} COVID-19 question-related information to the user, we propose a query-focused Multi-Document Summarizer to generate abstractive and extractive answers related to the question, from multiple retrieved answer-related paragraph snippets. We leverage the power of the generalization ability of pre-trained language models \cite{lewis2019bart, yang2019xlnet, lee2020biobert, su2019generalizing} by fine-tuning them for QA and summarization, and propose our own adaptation methods for the COVID-19 task.
+
+\subsubsection{Document Retrieval}
+To \textit{select} the most relevant document, i.e. article or paragraph, given a user query, we first apply the Document Retriever with the following two sub-modules. 
+
+% \subsubsection{Search Engine}
+We use Anserini~\cite{yang2018anserini} to create the search engine for retrieving a preliminary candidate set of documents. Anserini is an information retrieval module wrapped around the open source search engine Lucene\footnote{\tt \small https://lucene.apache.org/} which is widely used to build industry standard search engine applications. Anserini uses the Lucene indexing to create an easy-to-understand information retrieval module. Standard ranking algorithms (e.g, bag of words and BM25) have been implemented in the module. We use paragraph indexing for our purpose, where each paragraph of the full text of each article in the CORD-19 dataset is separately indexed, together with the title and abstract. For each query, the module can return $n$ top paragraphs matching the query.
+
+
+
+\begin{figure*}[t!]
+    \centering
+    \includegraphics[width=0.7\linewidth]{figures/chapter3/CAiRE-COVID-framework.png}
+    \caption{System architecture overview}
+    \label{fig:system}
+\end{figure*}
+
+
+\subsubsection{Relevant Snippet Selector}
+The Relevant Snippet Selector outputs a list of the most relevant answer snippets from the retrieved documents while highlighting the relevant keywords. To effectively find the snippets of the paragraphs  relevant to a query, we build a neural QA system as an evidence selector given the queries. It aims at predicting answers or evidences (text spans) given relevant paragraphs and queries. The paragraphs are further re-ranked based on a well-designed score, and the answers are highlighted in the paragraphs.
+
+\textbf{Extractive-based QA as Evidence Selector}
+
+\begin{itemize}
+    \item \textbf{Evidence Selection} To enhance both generalization and domain-expertise capability, we leverage an ensemble of two QA models: the HLTC-MRQA model~\cite{su2019generalizing} and the BioBERT~\cite{lee2020biobert} model. The HLTC-MRQA model is an XLNet-based~\cite{yang2019xlnet} QA model which is trained on six different QA datasets via multi-task learning. This helps reduce over-fitting to the training data and enable generalization to out-of-domain data and achieve promising results. To adopt the HLTC-MRQA model as evidence selector into our system, instead of fine-tuning the QA model on COVID-19-related datasets, we focus more on maintaining the generalization ability of our system and conducting zero-shot QA.
+
+    To obtain a better performance, we also combine the HLTC-MRQA model with a \textit{domain-expert}: the BioBERT QA model, which is fine-tuned on the SQuAD dataset. 
+    \item \textbf{Answer Fusion} To increase the readability of the answers, instead of only providing small spans of answers, we provide the sentences that contain the predicted answers as the outputs. When the two QA models find different evidence from the same paragraph, both pieces of evidence are kept. When the predictions from the two models are identical or there is an inclusion relationship between the two, the predictions will be merged together.
+    \item \textbf{Answer Re-ranking and Highlight Generation}
+    \label{sec:rerank}
+    The retrieved paragraphs are further re-ranked based on the answer relevance to the query.
+    
+    \textbf{Answer Confidence Score} We leverage the prediction probability from the QA models as the answer's confidence score. The confidence score of an ensemble of two QA models is computed as in Equation \ref{eq:qa_score}.
+\begin{equation}
+\label{eq:qa_score}
+\setlength\abovedisplayskip{3pt}%shrink space
+\setlength\belowdisplayskip{3pt}
+s_{conf}\!=\!\left\{
+    \begin{array}{ll}
+    \begin{aligned}
+    0.5min\{|s_{m}|,|s_{b}|\}\\ -\!max\{|s_{m}|,|s_{b}|\} \end{aligned}
+    & 
+    if s_{m},s_{b}\!<\!0 \\
+    s_{m}+s_{b}     & {otherwise,}\\
+    \end{array} 
+\right. 
+\end{equation}
+where the confidence score from each model is annotated as $s_{m}$ and $s_{b}$.
+
+    \textbf{Keyword-based Score} We calculate the matching score between a query and the retrieved paragraphs based on word matching. To obtain this score, we first select important keywords from the query based on POS-tagging, only taking words with {NN (noun), VB (verb), JJ (adjective)} tags into consideration. By separately summing the term frequencies and the total number of important keywords that appear in the paragraph, we can get two matching scores, which are annotated as $s_{freq}$ and $s_{num}$, respectively. For the term-frequency matching score, we normalize shorter paragraphs using a sigmoid value computed from the paragraph length, and reward paragraphs with more diverse keywords from the query. The final matching score is computed as in Equation \ref{eq:s_match}.
+\begin{equation} \label{eq:s_match}
+\setlength\abovedisplayskip{3pt}%shrink space
+\setlength\belowdisplayskip{3pt}
+s_{match}\!=\!\lambda_1 s_{freq}\!\cdot\! \sigma(l-l_c)\!+\!\lambda_2s_{num},
+\end{equation}
+where $l$ is the length of the paragraph and $l_c$ is a length constraint. Because of the effect of the sigmoid function, for data samples whose paragraph length is shorter or similar to $l_c$, the penalty will be applied to the final matching score.
+
+    \item \textbf{Re-rank and Highlight} The re-ranking score is calculated based on both the matching score and the confidence score, as shown in Equation \ref{eq:rerank}. The relevant snippets are then re-ranked together with the corresponding paragraphs and displayed via highlighting:
+\begin{equation}
+\label{eq:rerank}
+score_{re-rank} = s_{match}+\alpha s_{conf}.
+\end{equation}
+
+\end{itemize}
+
+\subsubsection{Answer Generation}
+To efficiently present pertinent COVID-19 information to the user, we propose to generate abstractive and extractive answers related to COVID-19 questions.  
+
+\textbf{Abstractive Answer Generation}
+\begin{itemize}
+    \item \textbf{BART Fine-tuning} Our abstractive answer generatino model is based on BART~\cite{lewis2019bart}, which obtained state-of-the-art results on the summarization tasks on the CNN/DailyMail datasets~\cite{hermann2015teaching} and XSUM~\cite{narayan2018don}. We use the BART model fine-tuned on the CNN/DailyMail dataset as the base model since we do not have other COVID-19 related data. 
+    \item \textbf{Incorporating Answer Relevance}
+In order to generate query-focused answers, we propose to incorporate answer relevance in the BART-based answer generation process in two aspects. First, instead of using the paragraphs list passed by the Document Retriever, we use the top $k$ paragraphs  $ \{para_1, para_2, .., para_k\}$ passed by the QA module as input to the Multi-document Summarizer, which are re-ranked according to their \textit{answer relevance} to the query, as shown in Equation \ref{eq:rerank}. Then, instead of using only the re-ranked answer-related paragraphs to generate an answer, we further incorporate \textit{answer relevance} by concatenating the predicted answer spans from the QA models with each corresponding paragraph. We also concatenate the query to the end of the input, since this has been proved to be effective for the QFS task \cite{savery2020question}. So input to the answer generation model is
+$C = \{\hat{para}_1, \hat{para}_2, .., \hat{para}_k\} $, where 
+\begin{equation}
+\setlength\abovedisplayskip{3pt}%shrink space
+\setlength\belowdisplayskip{3pt}
+ \hat{para}_{i} = [para_{i}; ans\_spans_{i}; query]   
+\end{equation}
+
+\item \textbf{Multi-document Answer Generation} Considering that each $\hat{para}_i$ in $C$ may come from different articles and focus on different aspects of the query, we generate the multi-document summary by directly concatenating the summary of each $\hat{para}$, to form our final answer. Some redundancy might be included, but we think this is fine at the current stage.
+
+\end{itemize}
+
+\textbf{Extractive Answer Generation}
+
+In order to generate a query-focused extractive answer, we first extract answer sentences which contain the answer spans generated from the QA module, from multiple paragraphs as candidates. Then we re-rank and choose the top-$k$ (k=3) according to their answer relevance score to form our final answer\footnote{The number of documents $k$ is constrained by the maximum input length of LMs, and is selected based on our empirical experience.}. The \textit{answer relevance} score is calculated in the following way:
+\begin{itemize}
+    \item \textbf{Sentence-level Representation}
+To generate a sentence-level representation we sum the contextualized embeddings encoded by ALBERT\cite{lan2019albert}, then divide by the sentence length. This representation can capture the semantic meaning of the sentence to a certain degree through a stack of self-attention layers and feed-forward networks. For a sentence with \(n\) tokens $X = [{w}_1, {w}_2, .., {w}_n] $, the representation \(h\) is calculated by Equation \ref{eq:sen_emb}.
+\begin{align}\label{eq:sen_emb}
+\setlength\abovedisplayskip{3pt}%shrink space
+\setlength\belowdisplayskip{3pt}
+\begin{split}
+    &e_{1:n} = ALBERT([{w}_1, {w}_2, .., {w}_n]) \\
+    &h =\frac{\sum_{i=1}^{n}e_i}{n}
+\end{split}
+\end{align}
+
+\item \textbf{Similarity Calculation}
+After sentence representation extraction, we have embeddings for the answer sentences and the query. In this work, the cosine similarity function is used for calculating the similarity score between them. For each query, only the top 3 answer sentences are kept.
+
+\end{itemize}
+
+
+\begin{table*}[t!]
+\centering
+\resizebox{0.68\textwidth}{!}{
+\begin{tabular}{lcccccc}
+\toprule
+\multirow{2}{*}{Model} & \multicolumn{3}{c}{NL Question} & \multicolumn{3}{c}{Keyword Question} \\ \cmidrule{2-7} 
+& P@1 & R@3 & MRR & P@1 & R@3 & MRR \\
+\midrule
+T5($+$ MS MARCO)$^{\dagger}$ & 0.282 & 0.404 & 0.415 & 0.210 & 0.376 & 0.360 \\
+\midrule
+BioBERT & 0.177 & 0.423 & 0.288 & 0.162 & 0.354 & 0.311 \\
+HLTC-MRQA &  0.169 & 0.415 & 0.291 & 0.185 & 0.431 & 0.274 \\
+Ensemble &  0.192 & \textbf{0.477} & 0.318 & \textbf{0.215} & \textbf{0.446} & 0.329 \\
+\bottomrule
+\end{tabular}
+}
+\caption{Results of the QA models on the CovidQA dataset. $^{\dagger}$The T5 model~\cite{2019t5} which is fine-tuned on the MS MARCO dataset~\cite{DBLP:conf/nips/NguyenRSGTMD16} is the strongest baseline from \citet{tang2020rapidly}. However, due to the difference in experiment settings, the MRR values from our models and those from baseline models are not comparable.}
+\label{tab:qa}
+\end{table*}
+
+\subsection{Experiments}
+In order to quantitatively evaluate the performance of each module and show the effectiveness of our system, we conduct a series of respective experiments.
+
+In Table ~\ref{tab:caire_covid_examples_1}, we show concrete examples of our system. 
+
+\subsubsection{Experiments: Machine Reading Comprehension}
+% \subsubsection{Quantity Evaluation}
+
+\textbf{Dataset} We evaluate our QA module performance on the CovidQA dataset, which was recently released by \citet{tang2020rapidly} to bootstrap research related to COVID-19. The CovidQA dataset consists of 124 question-article pairs related to COVID-19 for zero-shot evaluation on transfer ability of the QA model. 
+
+\textbf{Experiment Settings} The evaluation process on the CovidQA dataset is designed as a text ranking and QA task. 
+% Given one question and the corresponding articles, the QA models are supposed to rank all the sentences from the article, where the higher the rank, the more likely the sentence is to contain the golden answer. However, our QA module performs in paragraph level in our system, which makes the experiment settings a bit different. 
+For one article which contains $M$ sentences, we split it into $N (N<M)$ paragraphs. One sentence is selected as the evidence to the query from each of the paragraphs. The re-ranking scores for each sentences are meanwhile calculated. After evidence selection, we re-rank the $N$ sentences according to the re-ranking score (\S \ref{sec:rerank}). The QA results are evaluated with Mean Reciprocal Rank (MRR), precision at rank one (P@1) and recall at rank three (R@3). However, in our case, MRR is computed by:
+\begin{equation}
+\setlength\abovedisplayskip{3pt}%shrink space
+\setlength\belowdisplayskip{3pt}
+MRR=\frac{1}{|Q|}\sum_{i=1}^{|Q|}\{\frac{1}{rank_i},0\},
+\end{equation}
+where $rank_i$ is the rank position of the first sentence where the golden answer is located given one article (We assume it as the golden sentence). If there's no golden sentence selected in the $N$ candidates, we assign the score of the data sample as zero. 
+% However, in the original settings, even though the golden sentence is not ranked in the first $N$ places, the score of the data sample will be $0<\frac{1}{M}\leq\frac{1}{rank_i}<\frac{1}{N}$.
+% As a result, due to the different experiment settings, our MRR value tends to be lower than that with the original settings, while precision and recall fractions are not affected.
+For the QA module, we conduct all the experiments with hyper-parameter $\lambda_1$ as 0.2, $\lambda_2$ as 10, $l_c$ as 50 and $\alpha$ as 0.5.
+
+\textbf{Analysis} The results are shown in Table \ref{tab:qa}. We test our models on both natural language questions and keyword questions. Changes in the efficiency of different models indicate their preferences for different kinds of questions.
+The HLTC-MRQA model with keyword questions shows better performance on precision and recall fractions, while the model with natural language questions is more likely to have relevant answers with a higher rank. The BioBERT model, however, performs under a different scheme. After making an ensemble of two QA models, the performance in terms of  precision, recall and MRR fractions is improved. Moreover, our QA module even outperforms the T5~\cite{2019t5} baseline on the recall metric, while for keyword questions, our model also marginally outperforms T5 on the precision fraction.
+
+\begin{figure*}[t!]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/example.png}
+    \caption{An example of QA output of our system. The output of the QA module is highlighted in the paragraph in blue. We also use purple and blue underlining to distinguish the outputs of the HLTC-MRQA model and the BioBERT model.}
+    \label{fig:qa-case}
+\end{figure*}
+
+\textbf{Case Study}
+Despite the fact that two models select the same sentence as the final answer given a question in most of the times when there is a reasonable answer in the paragraph, we observe that two models show different \textit{taste} on language style. Figure~\ref{fig:qa-case} shows a representative example of QA module output. The prediction of the BioBERT model shows its preference for an experimental style of expression, while the prediction of the MRQA model is more neutral to language style.
+
+\subsubsection{Experiments: Query-relevant, long-form Answer Generation}
+
+% In order to generate query-focused answers for COVID-19 questions, we propose to incorporate answer relevance with the help of a QA model into the generation process. 
+To investigate the quality of the answer generator module, we leverage the query-focused summerization (QFS) task. Query focused summarization (QFS) aim to extract essential information from a source document(s) and organize it into a summary that can answer a query~\cite{dang2005overview}. 
+
+\textbf{Datasets}
+Since there are no existing QFS datasets for COVID-19, we choose the following two datasets to evaluate the performance of the answer generator. 
+\begin{itemize}
+    \item \textbf{DUC Datasets}
+DUC 2005~\cite{dang2005overview} first introduced the QFS task. This dataset provides 50 queries paired with multiple related document collections. Each pair, has 4-9 human written summaries. The excepted output is a summary within 250 words for each document collection that can answer the query. DUC 2006~\cite{hoa2006overview} and DUC 2007 have a similar structure. We split the documents into paragraphs within 400 words to fit the QA model input requirement.
+
+    \item \textbf{Debatepedia Dataset} This dataset is included in our experiments since it is very different from the DUC QFS datasets. Created by \cite{nema2017diversity}, it is the first large-scale QFS dataset, consisting  of 10,859 training examples, 1,357 testing and 1,357 validation samples. The data come from Debatepedia, an encyclopedia of pro and con arguments and quotes on critical debate topics, and the summaries are debate key points that are a single short sentence. The average number of words in summary, documents and query is 11.16, 66.4, and 10 respectively.
+\end{itemize}
+
+\textbf{Model Setting}
+\begin{itemize}
+    \item \textbf{Abstractive Answer Generation Model Setting}
+    
+We use BART ~\cite{lewis2019bart} fine-tuned on XSUM~\cite{narayan2018don} as the abstractive base model for the Debatepedia dataset, since XSUM is the most abstractive dataset containing the highest number of novel bi-grams. Meanwhile, we use BART fine-tuned on CNN/DM for the DUC dataset to generate longer summaries. Different input combination settings are tested. 
+\begin{itemize}
+    \item \textit{BART(C)}: We use the context only as the input to the BART model.
+
+    \item \textit{BART(C,Q)}: We use the concatenation of the context and query as input to the BART model.
+   \item \textit{BART(Q,C)}: We concatenate the query at the beginning of the context as the input to the BART model.
+
+    \item \textit{BART(A,Q)}: We concatenate the answer sentences (sentences from the context that contain the answer spans) with the query as input to the BART model.
+
+    \item \textit{BART(Q,A)}: We switch the position of query and answer sentences as input to the BART model.
+
+% \textit{BART(C,A,Q)}: We concatenate the context, answer spans, and query as input, which is the configuration we adopted in our system.
+    \item \textit{BART(C$_\textit{nr}$)}: We use the context only as the input to the BART model. However, we do not re-rank the paragraphs in the context.
+
+    \item \textbf{\textit{BART(C,A,Q)}}: We concatenate the context, answer spans, and query as input, which is the input configuration we adopt in our system. 
+
+\end{itemize}
+
+
+For the DUC datasets, which contain multiple documents as context, we iteratively summarize the paragraphs which are re-ranked by the QA confidence scores till the budget of 250 words is achieved. 
+
+\item \textbf{Extractive Model Setting}
+We conduct extractive summarization on the DUC datasets. LEAD is our baseline \cite{xu2020query}. For each document collection, LEAD returns all leading sentences of the most recent document up to 250 words. Our answer relavance driven extractive method has been introduced. 
+
+\end{itemize}
+
+\begin{table*}[!h]
+\centering
+\resizebox{0.95\textwidth}{!}{%
+\begin{tabular}{l|ccc|ccc|ccc}
+\hline
+\multicolumn{1}{c|}{\multirow{2}{*}{\textbf{Model Setting}}} & \multicolumn{3}{c|}{\textbf{ROUGE-1}} & \multicolumn{3}{c|}{\textbf{ROUGE-2}} & \multicolumn{3}{c}{\textbf{ROUGE-L}} \\ \cline{2-10} 
+\multicolumn{1}{c|}{} & \textbf{Recall} & \textbf{Precision} & \textbf{F1} & \textbf{Recall} & \textbf{Precision} & \textbf{F1} & \textbf{Recall} & \textbf{Precision} & \textbf{F1} \\ \hline
+BART(C) & 19.60 & 8.80 & 11.80 & 3.22 & 1.41 & 1.91 & 16.76 & 8.17 & 10.70 \\ \hline
+BART(C,Q) & 20.43 & 9.27 & 12.36 & 3.56 & 1.60 & 2.13 & 17.50 & 8.58 & 11.19 \\ \hline
+BART(Q,C) & 19.16 & 8.49 & 11.43 & 3.06 & 1.31 & 1.76 & 16.39 & 7.77 & 10.25 \\ \hline
+BART(A,Q) & 20.15 & 8.93 & 12.04 & 3.37 & 1.43 & 1.95 & 17.29 & 8.25 & 10.88 \\ \hline
+BART(Q,A) & 19.15 & 8.57 & 11.48 & 2.97 & 1.27 & 1.70 & 16.46 & 7.88 & 10.36 \\ \hline
+\multicolumn{1}{c|}{\textbf{BART(C,A,Q)}} & \textbf{21.92} & \textbf{10.05} & \textbf{13.32} & \textbf{4.21} & \textbf{1.85} & \textbf{2.47} & \textbf{19.09} & \textbf{9.36} & \textbf{12.18} \\ \hline
+\end{tabular}%
+}
+\caption{Results for Debatepedia QFS dataset}
+\label{results-debate}
+\end{table*}
+
+
+\begin{table*}[!h]
+\centering
+\resizebox{0.95\textwidth}{!}
+{
+\begin{tabular}{l|ccc|ccc|ccc}
+\hline
+\multicolumn{1}{l|}{\multirow{2}{*}{\textbf{Model Setting}}} & \multicolumn{3}{c|}{\textbf{DUC 2005}} & \multicolumn{3}{c|}{\textbf{DUC 2006}} & \multicolumn{3}{c}{\textbf{DUC 2007}} \\ \cline{2-10} 
+\multicolumn{1}{c|}{} & \textbf{1} & \textbf{2} & \textbf{SU4} & \textbf{1} & \textbf{2} & \textbf{SU4} & \textbf{1} & \textbf{2} & \textbf{SU4} \\ \hline
+LEAD                 & 33.35 & 5.66 & 10.88 & 32.10  & 5.30  & 10.40   & 33.40  & 6.50  & 11.30 \\ \hline
+Our Extractive Method & \textbf{35.19} & \textbf{6.28} & \textbf{11.61} & \textbf{34.46} & \textbf{6.51} & \textbf{11.23}  & \textbf{35.31} & \textbf{7.79} & \textbf{12.07} \\ \hline
+\hline
+BART($C_{\textit{nr}}$) & 32.41 & 4.62 & 9.86 & 35.78  & 6.25 & 11.37   & 37.87 & 8.11 & 12.96 \\ \hline
+BART(C) & 34.25 & 5.60 & 10.88 & 37.99  & 7.64 & 12.81   & 40.66 & 9.33 & 14.43 \\ \hline
+BART(C,Q) & 34.20 & \textbf{5.77} & 10.88 & 38.26  & 7.75 & \textbf{12.95}   & \textbf{40.74} & \textbf{9.60} & \textbf{14.63} \\ \hline
+BART(C,A) & 34.29 & 5.70 & 10.93 & 38.31  & 7.60 & 12.90   & 40.71 & 9.11 & 14.30 \\ \hline
+\textbf{BART(C,A,Q)} & \textbf{34.64} & 5.72 & 11.04 & \textbf{38.31} & \textbf{7.70} & 12.88 & 40.53 & 9.24 & 14.37 \\ \hline
+\end{tabular}
+}
+\caption{Results for DUC datasets}
+\label{results-DUC}
+\end{table*}
+
+
+\textbf{Results}
+
+We use ROUGE as the evaluation metric for the performance comparison. 
+Table \ref{results-debate} and Table \ref{results-DUC} show the results for the Debatepedia QFS dataset and DUC datasets respectively. As we can see from the two tables, by incorporating the answer relevance, consistent ROUGE score improvements of \textbf{BART(C,A,Q)} over all other settings are achieved on both datasets, which proves the effectiveness of our method. Furthermore, as shown in Table \ref{results-DUC}, consistent ROUGE score improvements are obtained by our extractive method over the LEAD baseline, and in the abstractive senario, BART(C) also outperforms BART(C$_\textit{nr}$) by a good margin, showing that re-ranking the paragraphs via their answer relevance can help improve multi-document QFS performance.
+
+\begin{table*}[ht]
+\centering
+\begin{adjustbox}{width={0.90\textwidth},totalheight={\textheight},keepaspectratio}
+\begin{tabular}{p{1\columnwidth}}
+% {\textwidth}
+\hline
+\textbf{Question}: What are the risk factors for COVID-19? (\textit{from Task-2}) \\
+\textbf{Abstractive Answer}: Reliably identifying patients at increased risk for COVID-19 complications could guide clinical decisions, public health policies, and preparedness efforts. The prevalence of diabetes patients hospitalized in intensive care units for COVID-19 is two- to threefold higher. An increased body mass index is a major risk factor for requiring respiratory assistance. The Center for Disease Control and Prevention (CDC) suggests that neurological comorbidities, including epilepsy, may be a risk factor for COVID-19. Presently, a medical history of epilepsy has not been reported. \\
+\textbf{Extractive Answer}: The Center for Disease Control and Prevention (CDC) suggests that neurological comorbidities, including epilepsy, may be a risk factor for COVID-19, despite the lack of evidence. As such, it is unclear to what extent the prevalence of comorbidities in the studied population differs from that of same age (and sex) SARS-CoV-2 positive patients; and, accordingly, whether these comorbidities are significant risk factors for severe COVID-19 or merely a reflection of comorbidity prevalence in the wider population. What are the factors, genetic or otherwise, that influence interindividual variability in susceptibility to COVID-19, its severity, or clinical outcomes? \\
+\hline
+\textbf{Query}: What has been published about information sharing and inter-sectoral collaboration? (\textit{from Task-10}) \\
+\textbf{Abstractive Answer}: Epidemiology and laboratory collaboration between the human health and animal health sectors is a fundamental requirement and basis for an effective One Health response. During the past decade, there has been significant investment in laboratory equipment and training. For example, a key determining factor relating to cross-border collaboration is whether or not the neighbour in question is a fellow member of the EU. Several system leaders called for further investment in knowledge sharing among a broad network of health system leaders.
+\\
+\textbf{Extractive Answer}: Criteria selected in order of importance were: 1)severity of disease in humans, 2)proportion of human disease attributed to animal exposure, 3)burden of animal disease, 4)availability of interventions, and 5)existing inter-sectoral collaboration. Various rules-in-use by actors for micro-processes (e.g. coordination, information sharing, and negotiation) within NPGH arenas establish ranks and relationships of power between different policy sectors interacting on behalf of the state in global health. For example, our findings suggest that a key determining factor relating to cross-border collaboration is whether or not the neighbour in question is a fellow member of the EU.\\
+\hline
+\end{tabular}
+\end{adjustbox}
+\caption{Example QA pairs and the abstractive and extractive answers given CORD-19 task questions from our system.}
+\label{tab:caire_covid_examples_1}
+\end{table*}
+
+
+
+% \subsection{Summary}
+% In this Chapter, we first propose a real-time LFQA system, CAiRE-COVID, with open-domain QA and query focused multi-document summarization techniques for efficiently mining scientific literature given a query. The system has shown its efficiency on the Kaggle CORD-19 Challenge, which was evaluated by medical researchers, and a series of experimental results also proved the effectiveness of our proposed methods and the competency of each module. The system is also easy to be generalized to general domain-agnostic literature information mining, especially for possible future pandemics. We have launched our website\textsuperscript{\ref{foot:website}} for real-time interactions and released our code\textsuperscript{\ref{foot:git}} for broader use. 

@@ -1,0 +1,749 @@
+\documentclass{article}
+
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading cml4impact_2022
+
+
+% ready for submission
+%\usepackage[preprint]{cml4impact_2022} % arxiv preprint
+\usepackage[final]{cml4impact_2022} % camera-ready
+%\usepackage{cml4impact_2022} % anonymous submission
+
+% to compile a preprint version, e.g., for submission to arXiv, add add the
+% [preprint] option:
+%     \usepackage[preprint]{cml4impact_2022}
+
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+%     \usepackage[final]{cml4impact_2022}
+
+
+% to avoid loading the natbib package, add option nonatbib:
+%    \usepackage[nonatbib]{cml4impact_2022}
+
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+%\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{graphicx}       % images
+\usepackage{wrapfig}        % wrap figures in text
+\usepackage{amsmath}        % multiline equations
+\usepackage{enumitem}       % itemize
+\PassOptionsToPackage{sort}{natbib}
+\bibliographystyle{plainnat}% bibliography
+
+
+\usepackage{color}
+\newcommand{\thms}[1]{\textcolor[rgb]{1,0.4,0.2}{#1}}
+\newcommand{\plm}[1]{\textcolor[rgb]{0,0,1}{#1}}
+\newcommand{\cdrc}[1]{\textcolor[rgb]{.8,0,.8}{#1}}
+
+\usepackage{todonotes}
+\newcommand{\note}[1]{\todo[inline, color=green!20!white]{#1}}
+
+\DeclareMathOperator{\defis}{\stackrel{\text{def}}{=}}
+
+\newcommand{\vin}{\ensuremath{v_{\text{in}}}}
+\newcommand{\vout}{\ensuremath{v_{\text{out}}}}
+
+\newcommand{\shrink}{\vspace{-2mm}}
+
+\setlength{\belowcaptionskip}{-10pt}
+
+
+%\title{Neural Distillation of Bayesian Networks:}
+\title{Neural Bayesian Network Understudy}
+%
+%
+%
+\shrink
+\author{
+  Paloma Rabaey, Cedric De Boom, Thomas Demeester \\
+  IDLab, Dept.~of Information Technology \\
+  Ghent University - imec \\
+  Ghent, Belgium \\
+  \texttt{first.last@ugent.be} \\
+  % examples of more authors
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+}
+
+
+\begin{document}
+
+
+\maketitle
+
+\shrink
+\begin{abstract}
+
+Bayesian Networks may be appealing for clinical decision-making due to their inclusion of causal knowledge, but their practical adoption remains limited as a result of their inability to deal with unstructured data. While neural networks do not have this limitation, they are not interpretable and are inherently unable to deal with causal structure in the input space. Our goal is to build neural networks that combine the advantages of both approaches. Motivated by the perspective to inject causal knowledge while training such neural networks, % on unstructured data,
+this work presents initial steps in that direction. %, limited to discrete variables. 
+We demonstrate how a neural network can be trained to output conditional probabilities, providing approximately the same functionality as a Bayesian Network. Additionally, we propose two training strategies that allow encoding the independence relations inferred from a given causal structure into the neural network. We present initial results in a proof-of-concept setting, showing that the neural model acts as an understudy to its Bayesian Network counterpart, approximating its probabilistic and causal properties.
+
+% [OLD]
+% This work considers the problem of learning a neural network model on observational sample data, 
+% \cdrc{Ik mis een motivatie en context. Waarom zou je dit willen doen? Staat best bovenaan de abstract.}
+% while also encoding known causal relationships between the data variables. Although motivated by the more ambitious perspective to inject causal knowledge while training neural models on unstructured data,
+% \cdrc{Zou niet met het negatieve beginnen (we wilden dit doen, maar bon, we zijn er niet geraakt, dus geven we jullie maar tot waar we geraakt zijn...)}
+% this work presents initial steps in that direction, limited to discrete variables. In particular, we demonstrate how a generic neural network can be trained as a generative model based on data observations
+% \cdrc{Dit is wel heel algemeen, niet? Misschien gewoon weglaten, en enkel schrijven dat je de knowledge uit een DAG encodeerd *door het trainen van een generatief neural network*?}
+% as well as the knowledge of a directed acyclic graph (DAG) representing the available causal knowledge. We propose two training strategies that allow encoding the independence relations inferred from the DAG into the neural network, and present initial results in a proof-of-concept setting, showing that the neural model acts as an understudy to its Bayesian Network counterpart, approximating its probabilistic and causal properties.
+\end{abstract}
+
+\section{Introduction}
+Bayesian Networks (BNs) have been the subject of a large body of research, and are considered an important technology for high-stakes decision making, in particular in the healthcare domain. \cite{Kyrimi2021review} provide a clear overview of the key properties that make BNs highly appealing in that context: (i) their ability to model complex problems involving causal dependencies as well as uncertainty, (ii) their ability to combine data and expert knowledge, (iii) their interpretable graphical structure, and (iv) their ability to model interventions and reason diagnostically as well as prognostically.  Despite efforts from the research community to support healthcare practitioners in using BNs \citep{AroraBoyne2019BNriskprediction, Kyrimi2020Medicalidioms}, their practical adoption remains very limited.  The analysis of \cite{Kyrimi2021BNadoption} indicates data inadequacies as one of several key limiting factors: BNs have a limited capacity to address continuous data, and cannot directly deal with unstructured data such as images or free text. According to \cite{unstructured_EHR}, the value of information entailed by unstructured text fields in electronic medical records for clinical decision support cannot be underestimated.
+
+%\cdrc{Is dat zo? Waarom zou een BN slechter om kunnen gaan met continue data? Als je de distributies kan modelleren, lukt dat toch?}. 
+%\thms{klopt dat je een distr moet modelleren, dus je moet al aannames maken.  Is letterlijke citatie uit die gerefereerde paper, maar 'k denk dat ze dit ermee bedoelen}
+%\cdrc{Dat argument kan je ook gebruiken voor discrete data? Of daar kan je tellen allicht.}\note{daarvoor moet je geen aannames maken qua distributie}
+%\cdrc{OK!}
+
+In contrast to Bayesian networks, neural networks are well-suited for dealing with unstructured data. However, they are inherently not interpretable, which stands in the way of clinical adoption \citep{AI_CDS_survey, Peiffer2020review}. Whereas \cite{Hinton2018JAMA} argues strongly in favour of the adoption of neural networks in healthcare, he also recognises interpretability as a property that is desired by practitioners. 
+
+Our envisioned research goal is to build models that combine the advantages of both approaches: a fully neural model that can be trained on observations including unstructured data, but that also adopts the desirable properties of BNs as listed above. Realistically speaking, we can at best expect only approximate probabilistic reasoning capabilities from a generic neural network, and it will lack the direct interpretability of a BN. However, if the model displays the causal properties of a BN, the ideas of counterfactual explanation \citep{wachter2017counterfactual} can be applied to explain its predictions. %, which is typically not possible standard, discriminatively trained neural networks.
+
+This paper forms the first step along that outlined research track. We focus on the problem of training a neural network on a given set of discrete data samples as well as knowledge of a Directed Acyclic Graph (DAG) \citep{AI_russell_norvig} reflecting causal relationships between the variables. We do not yet aim to augment such models with unstructured data, but for now require that it behaves as a BN with the given DAG, if we were to train it on the same samples. In this sense, our model can be considered a \emph{neural understudy} to the BN. We want to emphasise that our current preliminary work does not aim to build a neural network which outperforms its Bayesian network counterpart, but one that approximates its capabilities. After this necessary first step, we expect to reap the benefits of the neural network understudy by incorporating unstructured data. While the current work presents results only in a proof-of-concept setting, the possibility to reason under uncertainty, while combining causal structure and unstructured data, has great potential in real-world (clinical) applications.
+
+In short, this paper makes the following contributions: 
+(1) we propose a neural network model able to infer the probability of a set of target variables conditioned on observed evidence,
+(2) we introduce two approaches for injecting DAG knowledge while training the neural network, and
+(3) we present empirical results (including robustness analysis) in a small proof-of-concept setting. The necessary code to reproduce these results can be found in our Github repository.\footnote{\url{https://github.com/prabaey/NBN-understudy}}
+
+\shrink
+
+%\note{
+%In contrast, neural networks are well-suited for ... pattern recognition ... unstructured data ...\\
+%- neural networks: the fact that they are inherently not interpretable = problem for clinical adoption; [Peiffer-Smadje 2020, ]\\
+%- whereas Hinton argues strongly in favour the adoption of neural networks in healthcare ... [Hinton 2018], he also recognizes interpretability as a desired property by practitioners.  \\
+%- Hence: our envisioned goal: train generative neural networks (given their suitability for dealing with unstructured data), that additionally adopt the desirable properties of BNs as mentioned above.\\
+%- Concession: will be possible only in approximate way; also: not directly interpretable in terms of structure like a BN\\
+%- however: if it displays the causal properties of the BN, possible to apply the ideas of counterfactual XAI [+ref], to explain predictions by the inherently black-box NN\\
+%- Now: this paper = first steps along the outlined research track, answering broad RQ: how can a NNs be trained on a given set of data samples as well as a DAG ... , such that it behaves like a BN with the given DAG, trained on the same samples? + explain title. \\
+%- contributions: ... \\
+%- outline of the paper
+
+
+
+%\cdrc{- Moet er ook iets gezegd worden naar inferentie toe? M.n.~dat het infereren van modelijke waarden van nodes in klassieke BNs een computationeel zware effort kan zijn (door gebruik van iteratieve mechanismen)? T: zou 'k voorlopig niet aanhalen, want we hebben geen idee hoe training op grote aantallen variabelen schaalt.}
+%}
+
+
+%[hinton 2018] Deep learning - a technology with the potential to transform health care
+%}
+
+%Bayesian networks for clinical decision support in lung cancer care
+%Neural quasi-Bayesian networks: inducing causal constraints generative neural networks with causal constraints 
+%Neural Imitation of Bayesian Networks 
+%Neural Bayesian Network Understudy
+
+%\note{mention that we will release the code on github}
+
+%\plm{
+%Content
+%    \begin{itemize}
+        %\item short background of causal machine learning and the need for neural networks which incorporate a notion of causal structure for more reliable predictions (especially useful in situations where we cannot observe many data samples)
+        %\item also make the link with neuro-symbolic AI
+        %\item we propose a neural network architecture which has similar functionality to a Bayesian network
+        %\item here, we represent the causal structure as a list of independence relations between variables
+        %\item similarities to BN: incorporate causal structure to improve the predictions and data efficiency, follow a generative approach (take any number of variables as observed evidence and infer the probability of a set of targets, no fixed distinction between inputs and outputs $\rightarrow$ provide real-world example where this might be useful?)
+        %\item difference with BN: structure is not enforced as strongly (rather nudged in a certain direction), BN uses a predefined message-passing inference algorithm (our NN has more freedom in how it infers the targets), inference can be sped up (but maybe we can't make this claim without providing data on the speed of our NN vs. BN), depending on result of robustness experiments we might also have proof that NN is more flexible in dealing with incorrect assumptions on the causal structure
+        %\item in this paper we evaluate our method on artificial data, but we have practical application in mind: an expert can define a non-exhaustive list of relevant independence relations, which can be incorporated in our neural network using the methods we propose
+        %\item clearly list the contributions and emphasise that this is a work-in-progress
+%    \end{itemize}
+%}
+
+%\plm{Part was in methods first but should be moved to introduction}
+
+%The goal is to train a model \cdrc{neural network?} which can take any set of observed evidence \cdrc{(observed + evidence = pleonasme? Misschien eens goed denken over waar je welke terminologie introduceert) }values \cdrc{nodes?} as an input, and provide a probability distribution for the desired target variables \cdrc{nodes?} at the output. Note how this is different from a typical classification problem where the output is a probability distribution over the possible classes for one particular target $Y$, given the observed features $X$. In our case, any feature (variable) $X$ can serve as an input (evidence) or output (target), depending on the information we want to extract from the network.
+%\note{C: Misschien is bovenstaande uitleg niet nodig, omdat dit klassiek is voor BNs? Of ik zou het algemener formuleren (vooral omdat je met neurale netwerken veel meer kan doen dan enkel classificeren, incl.~het leren van een generatief model): note that this is different from a typical neural network that has a fixed set of input and output nodes.}
+%Bayesian networks can provide such functionality by design, while the \cdrc{a?} classical neural network architecture needs some tweaking in order to provide such flexibility.
+%We essentially want to obtain a generative neural network, which learns the joint probability distribution of all input variables.
+%\note{C: Is gevaarlijk om zo te zeggen (denk ik), want een klassiek generatief neuraal netwerk leert eveneens de joint probability distribution. Het verschil is dat het klassieke generatieve netwerk maar 1 factorisatie leert, zijnde $p(x,y)=p(x|y)p(y)$ (met $x$ en $y$ de set van input en output nodes), terwijl wij als doel hebben om eender welke factorisatie te leren / mogelijk te maken, inclusief deze die niet zijn aangeleerd of aangebracht tijdens training. Ben ik daar correct in?
+
+%Misschien ga je ook de vraag krijgen van reviewers waar je vergelijking is met Boltzmann machines, Markov Random Fields, Hopfield networks...}
+
+%Apart from its ability to answer queries which do not make a fixed distinction between evidence and target variables, another attractive core property of a Bayesian network is the inclusion of causal structure in its representation. By taking into account the (in)dependencies between the variables, the representation of the joint distribution is simplified and the number of parameters which need to be learned from the data decreases. Likewise, we want to leverage knowledge of the causal structure to improve the data efficiency (and therefore accuracy given limited training data) of our neural network.
+
+%\plm{include motivation for our distillation: what are the disadvantages/limitations of BNs (not able to include unstructured data as an input, difficulties with integration of continuous nodes, inference may be slow and algorithms are fixed, need a hard definition of causal structure}
+
+%\plm{
+%Loose ideas for works to reference in introduction, for references and summary of the papers see ``causality literature''.
+%\note{Goed kijken (denk ik) dat je intro strookt met wat je in related work aanreikt. Veruit het grootste stuk van de intro gaat over de flexibiliteit van het neurale netwerk om verbanden te leren tussen eender welke sets van evidence en output nodes, en hoe dat verschilt van klassieke netwerken. Het lijkt dus initieel alsof dit de grote meerwaarde/vernieuwing van de paper is. Pas in de laatste alinea gaat het kort over het incorporeren van de causale structuur van het BN, en dat met de zinsnede ``another attractive property of BNs...'', alsof het een bijzaak is. Maar de literatuur die hieronder staat, gaat wel allemaal over causal ML. Dus misschien een beetje opletten dat het geen schizofrene paper wordt? Ik zou het causale dan meer centraal zetten, of de intro vanuit dat perspectief herschrijven alleszins.}
+%\begin{itemize}
+%    \item \cite{meta_transfer_objective} A meta-transfer objective for learning to disentangle causal mechanisms: if neural network understands the causal structure oft he data, it will be able to quickly adapt to a transfer distribution in which the causal mechanisms differ slightly. motivation for why we need causal structure in NNs.
+%    \item \cite{counterfactual_normalization} Counterfactual normalization, proactively addressing dataset shift using causal mechanisms: similar to previous article, counteract the problem of dataset shift by undoing spurious associations between train and test data from a causal perspective
+%    \item \cite{towards_causal_repr} Towards causal representation learning (Schölkopf): review article, motivations for various subdomains of causal ML 
+%    \item \cite{nature_causal_inference} Causal inference and counterfactual prediction in machine learning for actionable healthcare: motivation for ML models which have a notion of causal structure
+%    \item \cite{time_to_reality_check} Time to reality-check the promises of machine learning-powered precision medicine: same as previous one 
+%    \item Some reference on Neurosymbolic AI (e.g. neurosymbolic AI, the 3rd wave \cite{neurosymbolicAI})
+%\end{itemize}
+%}
+
+%\plm{After contributions: structure of the paper (introduce all sections).}
+
+\section{Related work}
+\shrink
+
+This section focuses on recent works most related to the proposed ideas; we do not aim to provide a broad overview in terms of related research fields. 
+%In this section, we do not aim to provide an overview on the domain of causal machine learning and related research tracks. Instead, we choose to only address works that strongly relate to our proposed idea. 
+%
+A basic premise for the presented work is the existence of causal knowledge in addition to observational data, to be injected into a neural network model. Our goal is therefore not \emph{causal discovery}, intended to recover the causal mechanisms underlying the distribution from which the observed data was generated \citep{learning_neural_causal_models, differentiable_causal_discovery}. 
+%Instead, we assume to have information on the causal structure and attempt to inject this information into a neural network.
+
+\cite{inducing_causal_structure} present a method to align different parts of a neural network with nodes in a causal graph, 
+%elements of causal knowledge a proposed high-level causal mechanism which may guide the task, 
+resulting in a model with improved interpretability. \cite{causal_learning_explanation} pursue a similar goal, summarising a neural model into a Bayesian causal model, to provide counterfactual explanations for the neural model. Instead of starting from a neural network and using causal models to understand or guide its inner workings, we work the other way round.
+
+In \cite{constructing_deep_NNs}, conditional independencies in the input distribution are encoded hierarchically in the network structure, as a way of performing unsupervised neural network structure learning. \cite{deep_structural_causal_models} and \cite{deep_causal_graphs} present each parent-child relation in a given structural causal model as a deep neural network unit. While we don't explicitly align parts of the neural network with a causal model, we do include structural information in the training process as a regulariser. This is related to the work from \cite{CASTLE}, who propose a prediction task with a regularisation objective to detect causal relationships between features. It is not based on prior knowledge of causal relationships, as in our work.
+
+Attempts have been made to build neural networks that implement belief propagation \citep{pearl_probabilistic_reasoning} to improve on accuracy and efficiency \citep{neural_enhanced_belief_propagation, belief_propagation_NN}. Our proposed neural networks also aim at answering probabilistic queries, but can freely learn the inference mechanics from the data.
+
+Another key related contribution is DeepProbLog \citep{Manhaeve18_deepproblog}. This neuro-symbolic model is able to implement our envisioned goal: its probabilistic logic programming core can represent any BN exactly, and its so-called neural predicates are able to encode unstructured data. However, whereas a fully neural model can at best reason only approximately with probabilities, it may have some benefits over the exact probabilistic reasoning component in DeepProbLog. Indeed, in future research we aim to model complex realistic observational data. Some of its properties a suitable model should be able to capture, may be hard to express in a probabilistic program.
+
+Finally, our work is not to be confused with the so-called \emph{Bayesian neural networks} \cite{bayesian_neural_networks}, aiming to obtain a probability distribution over neural networks. Instead, our goal is training a neural understudy for a Bayesian Network, i.e., a neural model that behaves similarly.
+
+%\note{I did not include the CausalVAE paper, I was not sure where it would fit in and if it is as closely related as the other ones I mentioned.}
+
+% \note{draft notes on works to include (on different by related tasks):\\
+% - distinction between our work and bayesian neural networks (maybe `Adversarial Distillation of Bayesian Neural Network Posteriors')\\
+% - `Constructing Deep Neural Networks by Bayesian Network Structure Learning': unsupervised neural network structure learning; propose the idea of encoding conditional independencies in the input distribution hierarchically in the network structure.\\
+% - CausalVAE: Structured Causal Disentanglement in Variational Autoencoder \\
+% - Causal Learning and Explanation of Deep Neural Networks via Autoencoded Activations; kan passen bij alternatief doel (NN2BN)
+% }
+
+%A significant portion of related work focuses on causal discovery, which is the problem of identifying the causal mechanisms underlying the distribution from which some observed data was generated. Causal discovery entails recovering both the structural parameters (how variables are interconnected) and functional parameters (describing how the distribution of an effect variable is derived from its causes). Notable works include \cite{learning_neural_causal_models}, \cite{differentiable_causal_discovery} and \cite{deep_end_to_end}, which present continuous optimisation methods for causal structure learning. Our work leans more towards the domain of partial causal discovery: we already have some pre-specified causal structure, and we use this information to model the joint distribution between the variables more accurately. In essence, we assume to have the structural parameters and attempt to learn the functional parameters from the data. Another causal discovery method is presented in \cite{learning_latent_causal_structures}, where the authors introduce a so-called redundant input neural network. Here, the goal is to recover latent variables forming the causal path between input and output. This requires a fixed distinction between input and output, while in our architecture all variables can be seen as either input or output depending on the query. 
+
+%\cite{CASTLE} presents a method to regularise a neural network by jointly learning the causal relationships between variables while training for a certain objective. On top of the standard prediction loss, the model is ordered to optimise a reconstruction loss and a DAG loss, which together encourage the model to discover the causal relationships among feature and target variables. Our method does not recover the causal relationships by itself, though our view on causal structure as a regulariser to a learned neural network function is similar. 
+
+%Others propose to use causal methods to improve explainability of deep neural networks. \cite{causal_abstractions} and \cite{inducing_causal_structure} present the interchange intervention method to explain the inner workings of a neural network with a high-level causal mechanism. The proposed method can align representations in the neural network with variables in the proposed causal model during training, resulting in a neural network with improved generalisation and interpretability. While we don't explicitly align parts of the neural network with a causal model, we do include structural information in the training process. 
+
+%In \cite{deep_structural_causal_models} and \cite{deep_causal_graphs}, the authors train neural networks which essentially act as structural causal models, meaning they are capable of reasoning on all three levels in Pearl's ladder of causation: association, intervention and counterfactual \cite{pearl_book_of_why}. Each parent-child relation in the causal model is represented as a deep neural network unit, and the causal reasoning levels are translated to operations on these deep net units (\plm{i hope i am interpreting the papers correct in saying this...}). Again, we do not make such an explicit alignment between the parts of our neural network and the causal model. We do aim to explore how to use our proposed methods for answering interventional and counterfactual questions in future work (\plm{so maybe this paragraph should go into future work instead?}).
+
+%The belief propagation algorithm \cite{pearl_probabilistic_reasoning} is a method to perform approximate probabilistic inference. Attempts have been made to build neural networks which implement this algorithm to improve its accuracy and efficiency, such as \cite{neural_enhanced_belief_propagation} and \cite{belief_propagation_NN}. Our proposed neural network is also tasked with solving probabilistic queries, but can freely learn its own inference process from the data.
+
+% \plm{search literature for recent developments on neural distillation of BN
+% \begin{itemize}
+%     \item Boltzmann machines (/deep belief networks) seem to be trained in a similar way to our sample-based training? Even more relevant: sigmoid belief networks (SBN). they are the directed version of boltzmann machines. you can probably use the concept and training process of SBNs for distilling a bayesian network into a neural network: you encode the structure into the SBN and learn the parameters as in a boltzmann machine. also see "deep directed generative models" (https://openreview.net/pdf/BNYAGZZj5S7PwR1riXzA.pdf). 
+% \end{itemize}
+% }
+
+\shrink
+\section{Training a neural understudy of a Bayesian network} % methods
+
+The following paragraphs describe our proposed neural architecture with full flexibility in the choice of input and output variables (Section~\ref{subsec:neuralbaseline}), followed by our proposed training strategies to inject causal structure into the model (Section~\ref{subsec:independencetraining}). 
+
+\subsection{Neural architecture and training}\label{subsec:neuralbaseline}
+
+A fully specified BN can be queried by providing inputs to any selection of variables (henceforth called the \emph{evidence}), after which the probabilities for each of the remaining variables (the \emph{targets}) can be inferred, conditioned on the evidence. We will require the same ability from our neural counterpart, and show that this can be achieved by using complementary masks at its inputs and outputs. This only induces restrictions on the input and output layers but not on the internal neural architecture. % \cdrc{Moet laatste zin er al bij?}
+
+We focus on problems involving a set of $N$ discrete variables $\mathcal{V} = \{X_1, X_2,..., X_N\}$, in which $X_i$ can take $n_i$ possible values in $\mathcal{X}_i = \{x_{i1},...,x_{in_i}\}$.
+%in which $X_i$ can only take $n_i$ possible values, $X_i = x_i$, whereby $x_i \in \mathcal{C}_i = \{c_{i1},...,c_{in_{i}}\}$ 
+Given a set $\mathcal{E}\subset \mathcal{V}$ of $m$ evidence variables ($m<N$), each with an assigned value $\{E_1=e_1, ..., E_m=e_m\}$ (for convenience written as $\mathcal{E}=e$), our goal is to train a neural network to predict the probability distribution $P(X\vert \mathcal{E}=e)$ for each of the remaining variables $X$. The latter are called the target variables, aggregated in the set $\mathcal{T}=\mathcal{V}\setminus \mathcal{E}$. 
+
+After training on an observed set of individual samples of the form $\{X_1=x_1,\ldots,X_N=x_N\}$, our model should be able to deal with any selection of evidence variables. The key idea to achieve that is through dynamic masking (i.e., a different mask for any variable split $\mathcal{E}$ vs.~$\mathcal{T}$): all variables are present at the model input and output, but target variables are filtered out of the inputs through an evidence mask, whereas predictions for the evidence variables are filtered from the outputs through a target mask. This is illustrated in Fig.~\ref{fig:NN_training}.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{figures/NN_training.pdf}
+  \caption{Illustration: training with evidence $\mathcal{E}=\{X_1,X_2\}$ and targets $\mathcal{T}=\{X_3\}$, for $P(X_3\vert X_1=x_{12}, X_2=x_{21})$. The mask at the input (output) indicates selection of evidence (target) entries.
+  %To train the model, we feed it samples as they are observed in the training set and randomly mask out a target set of variables, the other values are taken as evidence. In this example, $X_1 = F$ and $X_2 = T$ is the evidence, while $X_3$ is the target. At the output of the network, only the predicted distributions of the target variables contribute to the cross-entropy loss, in which these probabilities are contrasted with their observed values at the input.
+  }
+  \label{fig:NN_training}
+\end{figure}
+
+\shrink
+\paragraph{Model architecture:} Each input to the model is a vector $\vin$ of dimension $k=\sum_{i=1}^N n_i$, and is formed by concatenating the $n_i$-sized one-hot representation of the value held by each of the $N$ variables $X_i$ ($i=1,\ldots,N$). The masked positions of the target variables in $\vin$ are substituted by the corresponding components of a static vector $v_0$.
+%These values are however only known for the evidence variables. For the target variables, instead, 
+%the corresponding entries of a static  vector $v_0$ are used to complete $\vin$. This can be implemented conveniently through masking.
+The input $\vin$ is subsequently passed through one or more hidden layers, resulting at the output in a $k$-dimensional vector of logits. These are then locally normalised through softmax activations, for each variable $X_i$ considering its corresponding $n_i$ entries. The output vector $\vout$ is finally constructed by replacing the entries at the positions of evidence variables, by the corresponding one-hot representations from $\vin$.  The values corresponding to the target variables can be interpreted as the predicted target distributions given the evidence. This is illustrated in Fig.~\ref{fig:NN_training}. Note that the $k$-dimensional vector $v_0$ is obtained by applying the linear output layer with per-variable softmax normalisation on a randomly initialised trainable vector. 
+
+\shrink
+\paragraph{Model training:} Whereas a BN is naturally able to answer any query once its conditional probability tables are specified, we need to explicitly train our neural network for that ability. To that end, we iterate over the observed samples, randomly dividing the variables into evidence set $\mathcal{E}$ and targets $\mathcal{T}$,
+%This training approach can be readily modified to deal with incomplete samples as well. 
+%training: CE loss + formula + explanation
+%ref to proof in appendix that this leads to correct probs.
+%For training on a set of samples containing observations of all variables (divided into $\mathcal{E}$ and $\mathcal{T}$), \cdrc{Voorgaande mag weg? Of herschrijven naar iets: the model is trained by minimizing the summed ...} 
+and minimise the average cross-entropy loss for the target variables. %, which can be achieved by masking $\vout$ with the complementary mask as used at the input.
+The training loss can be expressed as $\mathcal{L}^{T} = \frac{1}{|\mathcal{T}|} \sum_{X_i \in \mathcal{T}} -\log \hat{p}_{ij}$, in which $\hat{p}_{ij}$ denotes the entry in $\vout$ corresponding to the actual observed input value $x_{ij}$ of target variable $X_i$, i.e., the predicted output probability for the target class of $X_i$. 
+
+Even though the model only receives discrete data samples and therefore never observes the class probabilities it is meant to predict, this training strategy steers the predicted probabilities towards the empirical (conditional) class probabilities. It only requires that each sample's frequency of occurrence during training corresponds to its relative frequency in the set of observations. Appendix \ref{app:sample_based_training} proves this for the canonical case of two binary variables, but the presented derivation can be extended to the multi-variable case. %, as confirmed in the results for our 7-variable proof-of-concept example (Section~\ref{sec:results}).
+
+\subsection{Training with causal structure} \label{subsec:independencetraining}
+We now propose the following two training strategies to augment the neural network with knowledge of the causal structure between the variables. They are based on the assumption that the causal knowledge can be represented as a DAG, reflecting the (conditional) independence relations that exist between the variables. 
+
+\shrink
+\paragraph{1. Injecting independence relations through regularisation (REG):} 
+In general, we can say a given DAG implies $M$ pairwise conditional independence relations between two variables, conditioned on a set of observed variables, shortly written as $X\perp Y \mid \mathcal{A}$, with $X, Y \in \mathcal{V}$ and the conditioning set $\mathcal{A} \subset \mathcal{V} \setminus \{X, Y\}$. 
+The first proposed training strategy is to inject these independence relations by constructing regularisation loss terms $\mathcal{L}_{X\perp Y \mid \mathcal{A}}^{\text{REG}}$ that quantify how strongly the model violates them:
+
+\shrink
+\begin{equation} \label{eq:IR_loss}
+    \mathcal{L}_{X\perp Y \mid \mathcal{A}}^{\text{REG}} = \frac{1}{n} \sum_{j=1}^{n} \big(\hat{p}(X = x_j \mid \mathcal{A} = a, Y = y) - \hat{p}(X = x_j \mid \mathcal{A} = a, Y = y')\big)^2
+\end{equation}
+
+in which the summation runs over all $n$ possible values of $X$. The model's predicted probability for $X=x_j$ with as evidence the assignment $\mathcal{A}=a$ and $Y=y$, is denoted as $\hat{p}(X = x_j \mid \mathcal{A} = a, Y = y)$.
+The loss term expresses that if the independence relation were satisfied by the model, its predicted probability for any value of $X$, given any evidence $\mathcal{A}=a$, should be independent of the value assumed by $Y$. The conditioning set $\mathcal{A}$ is randomly instantiated every time the corresponding loss term applies during training, and the values $y$ and $y'$ of $Y$ are chosen randomly (with $y\not = y'$). 
+
+During training, the regular loss $\mathcal{L}^T$ per data sample is augmented with the regularisation loss $\mathcal{L}^{\text{REG}}$ of one sampled independence relation, weighted with a hyperparameter $\alpha$.
+
+\shrink
+\paragraph{2. Injecting independence relations through evidence corruption (COR):} The second training strategy is based on the intuition that for particular observed data samples, the value of some of the evidence variables may no longer matter besides the other observed variables, when accounting for the relevant independence relations. During training, we detect these cases, and randomly corrupt (i.e., re-sample) those values in the evidence presented to the network.
+%The second approach applies the independence relations on the fly to corrupt the inputs encountered by the model during training. This approach integrates the two objectives: learning the conditional probabilities as reflected by the training samples, while at the same time using information from the causal structure to teach the model which variables should be conditionally independent. 
+
+Consider training on a particular observed sample, the variables divided into evidence $\mathcal{E}$ and targets $\mathcal{T}$. We then go through the known independence relations $X \perp Y \mid \mathcal{A}$, to see which ones are relevant to the training instance. This is the case if either of the following two conditions hold: (1)  $(\{Y\} \cup \mathcal{A}) = \mathcal{E}$ and $X \subset \mathcal{T}$, or (2) $(\{X\} \cup \mathcal{A}) = \mathcal{E}$ and $Y \subset \mathcal{T}$. 
+%
+%Assume that during training, we have sampled a random mask which divides all variables into a target set $\mathcal{T}$ and an evidence set $\mathcal{E}$. We then try to match this input with an independence relation which applies to this combination of evidence and targets. Say we have an independence relation of the form $X \perp Y \mid \mathcal{A}$, with $X, Y \in \mathcal{V}$ and $\mathcal{A} \subset \mathcal{V} \setminus \{X, Y\}$. This IR forms a match with the input when either of the following two conditions hold: (1) $\{Y\} \cup \mathcal{A} \subset \mathcal{E}$ and $X \subset \mathcal{T}$, or (2) $\{X\} \cup \mathcal{A} \subset \mathcal{E}$ and $Y \subset \mathcal{T}$. 
+%
+When condition (1) holds, the predicted outcome of target $X$ should not depend on the observed value of $Y$, as prescribed by the independence relation, since the conditioning set that is needed for this relation to hold is indeed part of the evidence. The observed input value for $Y$ can hence be disregarded, and we randomly assign a new value from its possible classes. Such a corruption of the input will condition the model to ignore $Y$ when predicting $X$, given that all variables in $\mathcal{A}$ are also provided as evidence. Note that predictions for other variables in $\mathcal{T}$ need to be done based on the original (i.e., non-corrupted) value for $Y$, as there is no guarantee that the same independence relation holds for those targets as well.  We apply a similar reasoning when condition (2) holds, now corrupting the value of $X$ instead of $Y$. If no relevant independence relation is found for a given selection of evidence and targets, the input sample is not corrupted and passed as-is to the model. 
+In Appendix \ref{app:IR_corruption}, we consider the basic two-variable case and show that the corruption strategy leads to the desired predicted probabilities. 
+
+
+
+
+%\section{[OLD] Training a Neural Understudy of a Bayesian Network} % methods
+%Assume we have a set of $n$ categorical variables $\mathcal{V} = \{X_1, X_2,..., X_n\}$, with each variable taking on a set of $n_i$ possible values $X_i = x_i \in \mathcal{C}_i = \{c_{i0},...,c_{in_i-1}\}$. The goal is to predict the probability distribution of a target variable over its possible values, given some evidence set with observed values: $P(X|\mathcal{E}=e)$. In this notation, $X \in \mathcal{V}$ is the target variable, and $\mathcal{E} = \{E_1, ..., E_m\}$ are the $m$ evidence variables with their corresponding observed values $e = \{e_1, ..., e_m\}$, $\mathcal{E} \subset \mathcal{V} \setminus X$.
+
+%The remainder of this section, which describes how to distil a neural network with the core properties of a Bayesian network, is structured as follows. First, section \ref{sec:methods_BN} will address the definition of a Bayesian network, since this will serve as a baseline for comparison with our distilled neural network. Then, section \ref{sec:basic_distillation} explains how to adapt the standard neural network architecture so it shows the same input-output flexibility as a Bayesian network, as well as how to train such a model. Finally, section \ref{sec:structure_injection} presents two ways to adapt the training process in order to inject knowledge of causal structure into our neural network. 
+
+%\subsection{Bayesian network} \label{sec:methods_BN}
+%\plm{all aspects of this section are now integrated in other parts of the paper and in the appendix. we can safely leave it out}
+
+%\plm{information is integrated in introduction to section 4.3}
+
+%A Bayesian network is a directed acyclic graph (DAG) in which each node is annotated with quantitative probability information. For a full specification, we refer to \cite{AI_russell_norvig}. In our problem setup, each node of the graph represents a categorical variable $X_i \in \mathcal{V}$ and an edge represents a causal relation between two variables. From this DAG we can extract conditional independence relations between sets of variables, following the rules of D-separation (\citet{d_separation}). When a variable $X$ is conditionally independent of another variable $Y$ given the conditioning set $\mathcal{A} \subset \mathcal{V}$, we write $X \perp Y \mid \mathcal{A}$. These conditional independence relations will later prove useful to encode some notion of the causal structure into our neural network.
+
+%\plm{information below is integrated in appendix and results section}
+
+%With each node in the graph, we associate a conditional probability distribution $P(X_i \mid Parents(X_i))$, which is represented by a conditional probability table (CPT). These CPTs can either be predefined manually or learned from the data, by studying the co-occurrence of particular values of each variable and its parents from a set of observed samples. By definition, the joint distribution $P(X_1, ..., X_n)$ can be written as the product of all these conditional distributions. The process of inference in Bayesian networks comes down to calculating the posterior probabilities of the form $P(X|\mathcal{E}=e)$. Examples of Bayesian network inference algorithms include \textit{variable elimination} for exact inference and \textit{belief propagation} for approximated inference, see \cite{AI_russell_norvig}. 
+
+%\plm{information below is now integrated in results section}
+
+%We will use Bayesian networks for two purposes. For one, we will use a predefined and fully specified Bayesian network (structure and conditional probability tables) to generate artificial data samples which will form our training set (and a test set, see \ref{sec:evaluation}). These samples can be used to train our neural network distillation, as will be described in section \ref{sec:basic_distillation}. On the other hand, we build a Bayesian network baseline which learns from the same samples our neural network receives. Here, we assume that the causal structure is fully and correctly specified, but the CPTs need to be estimated from the training data. The details of how we evaluate and compare our models are described in section \ref{sec:results}.
+
+%\subsection{Basic neural distillation of Bayesian network} \label{sec:basic_distillation}
+
+%\plm{need to compress this section even further, but don't know where to cut}
+
+%Our proposed neural network architecture is a simple feed-forward neural network with an arbitrary number of hidden layers. However, we need to make some small changes in the input and output layers in order to allow a flexible division between evidence variables and target variables. We will explain these changes, together with the proposed training procedure, with help of an example which is illustrated in figure \ref{fig:NN_training}.
+
+%\plm{use 3 classes instead of one for one of the variables in the example + figure, to show that our approach is not limited to binary. add some colour in the figure.}
+
+% \begin{figure}[t]
+%   \centering
+%   \includegraphics[width=\textwidth]{figures/NN_query.png}
+%   \caption{Illustration of how the model produces an answer to the query $P(X_3 \mid X_1=T,X_2=F)$. Here, the evidence provided at the input of the model is that $X_1$ is True and $X_2$ is False. The mask indicates the target variable $X_3$, which is not observed at the input, since its distribution is desired as an output.}
+%   \label{fig:NN_query}
+% \end{figure}
+
+% Assume we have 3 variables in our setup, $\{X_1, X_2, X_3\}$, each taking on the values True or False (all are binary categorical variables). Say we want our model to solve the query $P(X_3 \mid X_1=T,X_2=F)$, meaning $X_1$ and $X_2$ are observed evidence variables and $X_3$ is the target variable, for which we want a probability distribution of its possible classes. As shown in figure \ref{fig:NN_query}, we pass two vectors to the model: the input vector $<1, 0, 0, 1, nan, nan>$ (one-hot indication of the observed classes per variable) and a binary mask $<0, 0, 0, 0, 1, 1>$. Thanks to the mask, we can select any arbitrary number of variables as observed evidence and let the model predict the distribution for each remaining variable. The mask tells the model to replace the input values at the position of variable $X_3$ (our target) by a fixed initialization (\plm{say something about how this initialization is learned and how to interpret it (priors)}). The full input vector is then transformed by the network into 6 class probabilities through hidden layers and a softmax activation function, of which only the last 2 are relevant to our query and the others are ignored. \footnote{Note that in the binary case, we only need one activation with a sigmoid per variable to get the full probability distribution. However, in this example, we use a softmax since this generalises to categorical variables with more than 2 classes.} For full specifications on the model architecture, we refer to the appendix (\plm{initialization layer, output layer, hidden activations,...}).
+
+
+
+%\begin{figure}[t]
+%  \centering
+%  \includegraphics[width=\textwidth]{figures/NN_training.pdf}
+%  \caption{To train the model, we feed it samples as they are observed in the training set and randomly mask out a target set of variables, the other values are taken as evidence. In this example, $X_1 = F$ and $X_2 = T$ is the evidence, while $X_3$ is the target. At the output of the network, only the predicted distributions of the target variables contribute to the cross-entropy loss, in which these probabilities are contrasted with their observed values at the input.}
+%  \label{fig:NN_training}
+%\end{figure}
+
+%Assume we have 3 variables in our setup, $\{X_1, X_2, X_3\}$, $X_1$ and $X_2$ are binary (T/F), while $X_3$ can take on 3 classes ($c_1$, $c_2$ or $c_3$). Say we have access to $\nu$ training samples of the form $x = \{x_1, x_2, x_3\}$, which are sampled from some unknown joint distribution between the 3 variables. In figure \ref{fig:NN_training}, the model receives a sample $<F, T, c_3>$ from the training set. Together with the input vector $<0, 1, 1, 0, 0, 0, 1>$ (one-hot representation of the observed classes per variable for this sample), the model also receives a binary mask $<0, 0, 0, 0, 1, 1, 1>$. This mask selects any number of variables as observed evidence (set $\mathcal{E}$) and leaves the remaining ones as target variables (set $\mathcal{T}$). The model is told to predict the distribution for each remaining variable, taking the evidence as an input. At inference and test time, the mask is specified by the user, but during training it is sampled randomly so the model learns to deal with any subdivision of evidence and targets among the variables. 
+
+%In this iteration, the model will provide a prediction for the query $P(X_3 \mid X_1 = F, X_2 = T)$ as dictated by the mask. First, the sample values at the position of variable $X_3$ (the target) are set to a fixed initialisation. These initialisation values are taken from a trainable embedding and can be interpreted as our prior beliefs on the distribution of each variable. The full input vector is then transformed by the network into 7 class probabilities through hidden layers and a softmax activation function, of which only the last 3 are relevant to our query (the others are ignored).\footnote{Note that in the binary case, we only need one activation with a sigmoid per variable to get the full probability distribution. However, we opt to use a softmax for all variables, since this generalises to categorical variables with more than 2 classes.}
+
+%In a last step, the so-called \textit{selective} cross-entropy loss is calculated, which ensures only the targets contribute to the loss. Equation \ref{eq:network_prediction} shows how the outcome of the network is made up of a vector of predicted probabilities, one for each possible class per variable, though the predictions for the evidence variables are irrelevant for the loss calculation. Equation \ref{eq:selective_CE_loss} shows how the contributions of all variables $X_i$ in $\mathcal{T}$ are summed into the training loss, when input sample $x$ and random mask $m$ are provided to the model. Here, $n_i$ is the number of classes variable $X_i$ can take on, and $\hat{p}_{ij}$ is the output probability for class $j$ of variable $X_i$. 
+%We emphasise that the frequency of occurrence of any sample seen by the model during training must correspond to its relative frequency in the training set, otherwise we cannot expect the model to learn the correct probability distribution from the samples. 
+
+%\begin{equation} \label{eq:network_prediction}
+%    \hat{p} = <\underbrace{p_{11},...,p_{1n_1}}_{X_1},...,\underbrace{p_{n1},...,p_{nn_n}}_{X_n}>
+%\end{equation}
+
+%\begin{equation} \label{eq:selective_CE_loss}
+%    \mathcal{L}^{T} = \sum_{X_i \in \mathcal{T}} \frac{1}{n_i} \sum_{j=1}^{n_i} - m_{ij} x_{ij} log(\hat{p}_{ij})
+%\end{equation}
+
+%In appendix \ref{app:sample_based_training}, we provide a detailed example which shows that this approach indeed steers the output probabilities towards the desired class probabilities when optimising the model for the training loss as defined in equation \ref{eq:selective_CE_loss}. This is the case even though the model never observes class probabilities at the input and only sees categorical samples. For full specifications on the model architecture and what settings we used during training, we refer to appendix \ref{app:NN_training_details}. 
+
+%\subsection{Injection of causal structure knowledge in NN} \label{sec:structure_injection}
+
+%\plm{maybe mention DAG in title instead of causal structure knowledge?}
+
+%\plm{need a new name for both approaches, because IR = information retrieval. maybe DAG-R and DAG-C?}
+
+% edited this section to include the definition of a DAG
+%We now present two ways to inject information on the causal structure that connects the variables into the neural network. In causal literature, such a structure is usually depicted in a Directed Acyclic Graph (DAG) (\cite{AI_russell_norvig}). The DAG is essentially a visualisation of the (conditional) independence relations that exist between the variables. We will adapt our NN training procedure to inject these independence relations (IR) into the model. To this end, we propose two approaches. 
+
+%\paragraph{1. IR-based regularisation (IRR)} The first approach, which we dub IR-based regularisation (IRR), calculates an additional regularisation loss in each training epoch which reflects how well the IRs are satisfied in the predictions made by the model. 
+%We will explain this approach by another example. Assume we again have three variables ${X_1, X_2, X_3}$, all binary, and that the following conditional independence relation holds: $X_1 \perp X_2 \mid X_3$. This means that the predicted distribution for $X_1$ should be independent of the observed value of $X_2$ when $X_3$ is also observed. This means that in our example, where all variables are binary, equation \ref{eq:cond_ind} should hold for any value $x_3$ of variable $X_3$ (T or F). 
+
+% \begin{equation} \label{eq:cond_ind}
+%     P(X_1 \mid X_3=x_3, X_2=T) = P(X_1 \mid X_3=x_3, X_2=F)
+% \end{equation}
+
+%Translating this to our neural network setup, we can iterate over all independence relations and encourage the equality of the two outcomes as shown above. We query the network two times: once with the evidence set $E = {X_3 = x_3, X_2 = T}$ and once with the evidence set $E = {X_3 = x_3, X_2 = F}$, $x_3$ chosen randomly out of all possible classes for $X_3$. If the independence relation is satisfied, the two predicted distributions for $X_1$ should be exactly the same, so we can use the mean-squared-error (MSE) loss to contrast the two outcomes and encourage a weight update which brings them closer together.
+
+%Assume we have $M$ conditional independence relations in total, all of these being of the form $X \perp Y \mid \mathcal{A}$, with $X, Y \in \mathcal{V}$ and $\mathcal{A} \subset \mathcal{V} \setminus \{X, Y\}$. The contribution of independence relation $k$ (in which $X$ = $X_i$) to the regularisation loss is shown in equation \ref{eq:IR_loss}. Here, $n_i$ is the number of classes $X_i$ can take on as a value and $a$ is a vector of values for each variable in $\mathcal{A}$. The partial regularisation loss in equation \ref{eq:IR_loss} encourages the outcome for $X_i$ to be the same, regardless of the value taken on by $Y$ (given a fixed value for condition $\mathcal{A}$), in accordance with the IR at hand. The conditioning set $\mathcal{A}$ is randomly instantiated every time the independence relation is encountered. Values $y$ and $y'$ are chosen randomly out of all possible classes for variable $Y$. 
+
+%\begin{equation} \label{eq:IR_loss}
+%    \mathcal{L}_k^{R} = \frac{1}{n_i} \sum_{j=1}^{n_i} [P(X_i = x_j \mid \mathcal{A} = a, Y = y) - P(X_i = x_j \mid \mathcal{A} = a, Y = y')]^2
+%\end{equation}
+
+%The total loss which is used to optimise the parameters of the network is shown in equation \ref{eq:total_loss}. This takes the sum of the contributions of all training samples to the training loss, and all independence relations to the regularisation loss. The hyperparameter $\alpha$ can be used to trade off the influence of the causal structure against the information that is purely extracted from the training samples. 
+
+%\begin{equation} \label{eq:total_loss}
+%    \mathcal{L} = \sum_{t=1}^\nu \mathcal{L}_t^T + \alpha \sum_{k=1}^M \mathcal{L}_k^R
+%\end{equation}
+
+%\paragraph{2. IR-based corruption of inputs (IRC)} The second approach applies the independence relations on the fly to corrupt the inputs encountered by the model during training. This approach integrates the two objectives: learning the conditional probabilities as reflected by the training samples, while at the same time using information from the causal structure to teach the model which variables should be conditionally independent. 
+
+%Assume that during training, we have sampled a random mask which divides all variables into a target set $\mathcal{T}$ and an evidence set $\mathcal{E}$. We then try to match this input with an independence relation which applies to this combination of evidence and targets. Say we have an independence relation of the form $X \perp Y \mid \mathcal{A}$, with $X, Y \in \mathcal{V}$ and $\mathcal{A} \subset \mathcal{V} \setminus \{X, Y\}$. This IR forms a match with the input when either of the following two conditions hold: (1) $\{Y\} \cup \mathcal{A} \subset \mathcal{E}$ and $X \subset \mathcal{T}$, or (2) $\{X\} \cup \mathcal{A} \subset \mathcal{E}$ and $Y \subset \mathcal{T}$. 
+
+%When condition (1) holds, the predicted outcome of target $Y$ should not depend on the observed value of $Y$, as prescribed by the IR, since the conditioning set that is needed for this relation to hold is indeed part of the evidence. This means that we can disregard the observed value for $Y$ as provided in the input sample and randomly assign a new value from its possible classes. Such a corruption of the input will condition the model to ignore $Y$ when predicting $X$, given that all variables in $\mathcal{A}$ are also provided as evidence. When there are other variables in the target set $\mathcal{T}$ apart from $X$, we are careful to still base their prediction on the original, non-corrupted value for $Y$, since the selected IR does not necessarily hold for those targets. 
+
+%We apply a similar reasoning when condition (2) holds, now corrupting the value of $X$ instead of $Y$. It is possible that no appropriate IR can be found for a particular selection of evidence and targets. In that case, the input sample is not corrupted and passed as-is to the model. We refer to appendix \ref{app:IR_corruption} for a detailed example, where we prove that this new training approach indeed pulls the model towards the desired predictions, which accurately reflect the independence relations between the variables. 
+
+\shrink
+\section{Neural understudy of Bayesian network: proof-of-concept} \label{sec:results} 
+
+The experiments presented in this section aim at answering the following research questions:
+\begin{itemize}[noitemsep, leftmargin=5mm, topsep=-2pt]
+    \item [-] \textbf{RQ1}: How does the basic neural network perform in comparison with a Bayesian Network trained on the same set of samples, in terms of accuracy in predicted probabilities and in terms of sample efficiency? %How does this performance relate to sample efficiency? 
+    (Section \ref{sec:comparison_models})
+    \item [-] \textbf{RQ2}: What is the effect of injecting causal structure knowledge into our neural network on its performance? (Section \ref{sec:comparison_models})
+    \item [-] \textbf{RQ3}: How does each model's performance change when faced with a partially incorrect specification of the causal structure? (Section \ref{sec:robustness_miss_spec}) 
+\end{itemize}
+
+To this end, we compare the following models, trained on an artificial dataset of samples generated from a given joint distribution, as specified in the next section: % (see Section \ref{sec:evaluation}):
+%on a small dataset.  The models under comparison are trained on the same samples,
+%compares  We will now present initial results on the performance of four models for a small artificial data set. All models receive the same samples during training, 
+%which are randomly generated from a given ground-truth joint distribution (see Section \ref{sec:evaluation}). 
+%The models we compare are the following. 
+\begin{itemize}[noitemsep, leftmargin=5mm, topsep=-2pt]
+    \item [-] \textbf{Bayesian network baseline (BN)}: Bayesian Network with the correct DAG, its joint probability distribution estimated from the training samples using Maximum Likelihood Estimation with a K2 prior (see Appendix \ref{app:BN_implementation}). %It is a Bayesian Network n a Bayesian network, this comes down to estimating the distribution (in the form of conditional probability tables or CPTs) of each node given its parents \citep{AI_russell_norvig}. For more information on training and inference in our Bayesian model, we refer to Appendix \ref{app:BN_implementation}.
+    %To this end, we use the maximum likelihood estimator. To answer probabilistic queries with the trained model, we use variable elimination as an inference technique.
+    \item [-] \textbf{Neural network baseline (NN)}: Basic neural network approach  
+    %This is the basic version of our neural network which can answer conditional probabilistic queries, 
+    as presented in Section \ref{subsec:neuralbaseline}, implemented in a single-layer feed-forward model (see Appendix \ref{app:NN_training_details} for details). 
+    %We choose to use a standard feed-forward neural network, see Appendix \ref{app:NN_training_details} for the exact design.%This network has no notion of the causal structure that connects the variables and can only learn from the training samples.
+    \item [-] \textbf{NN with DAG-based regularisation (NN+REG)}: This model extends the basic NN model with independence relation information, through the regularisation technique REG (Section \ref{subsec:independencetraining}). %, meaning it has some notion of the true DAG structure that connects the variables. 
+    %receives additional information on the causal structure, on top of the training samples. 
+    \item [-] \textbf{NN with DAG-based corruption (NN+COR)}: This model, also based on NN, injects independence relations during training with the corrupted inputs strategy %, extends the basic NN model with DAG knowledge, now trained with the input corruption strategy  training  corrupted  architecture some knowledge on the DAG structure, now by applying the second technique 
+    introduced in Section \ref{subsec:independencetraining}. \\ %The input samples are corrupted according to the causal structure to softly teach the model some independence relations. 
+\end{itemize} 
+\shrink
+
+%First, Section \ref{sec:evaluation} will address how we evaluate the performance of our models and what dataset we use for our preliminary investigation. The two sections that follow after will answer three concrete research questions:
+
+\shrink
+\subsection{Evaluation} \label{sec:evaluation}
+
+\begin{wrapfigure}{r}{0.35\textwidth}
+  \centering
+  \shrink\shrink\shrink\shrink
+  \includegraphics[width=0.33\textwidth]{figures/asia_model.pdf}
+  \caption{The ``Asia'' BN model, %based on \citep{asia}, 
+  describing a basic lung cancer detection system (for details, see Appendix \ref{app:BN_implementation}).}% for the conditional probability tables (CPTs) that make up the joint distribution.}
+  \label{fig:asia_model}
+\end{wrapfigure}
+
+%\thms{We construct training instances by drawing samples from a fully specified Bayesian network.} %(structure and conditional probability tables) 
+%to generate artificial data samples which form a training set. 
+%\thms{In particular, we use} 
+%For our proof-of-concept experiments, investigation of our methods, we chose a small ground-truth Bayesian network:
+For the experiments in this section, we make use of the ``Asia'' network based on \citep{asia}, as depicted in Fig.~\ref{fig:asia_model}. Despite its simplicity, with only 7 binary variables, it has
+%We chose this network \thms{for our proof-of-concept experiments,} due to its simplicity: \thms{it has 7 binary nodes, but with}
+%all nodes are discrete, the number of variables is small, and there is 
+sufficient connectivity between the variables to make the problem non-trivial. Following the rules of D-separation \citep{d_separation}, we can in total extract 191 unique independence relations from its DAG, for the training strategies NN+REG and NN+COR. 
+%The ``Asia'' DAG structure used here encodes 191 unique independence relations. 
+%We would like to emphasise that we simply aim to present some preliminary results to get an idea of the performance of our proposed methods on a small artificial network. 
+%The models we propose are general enough to deal with any number of variables and Bayesian network structure, but their scalability should be investigated in future work.
+
+From the ground-truth ``Asia'' model (detailed in Appendix \ref{app:BN_implementation}), we can draw data samples to use as training instances.
+%Through the ``Asia'' model, we have access to the ground-truth joint distribution which generated the samples that are fed into our models. 
+%By applying the technique of 
+Through variable elimination \citep{AI_russell_norvig},  %\thms{on the joint probability distribution} %in this ground-truth model, 
+we can build test queries with the ground-truth conditional probabilities of target variables, for any particular assignment of evidence variables. Just like during training, this means that one query may contain multiple target variables. % which specify the conditional probability we expect when receiving a particular evidence combination. 
+We can then evaluate models by iterating through the test queries, and calculating 
+%To evaluate a model, we iterate through all test queries in a set and calculate 
+the mean absolute error (MAE) between the predicted target distribution and the desired one. For each query, we compute the MAE per target variable, sum all their contributions and divide by the number of targets in the query. We use two different test sets. 
+The first set contains all possible evidence assignments, in total 2,059 queries, and leads to the \textbf{total MAE}.
+%out of the variables and their possible values, 
+%measuring the \textbf{total MAE} (over 2059 queries). 
+The second set contains 1,000 queries, each constructed by drawing a sample from the joint probability distribution, then randomly selecting the set of evidence variables, and obtaining the conditional probabilities for the target variables. It measures the \textbf{sample MAE}, assigning more weight to the model's performance for queries with commonly observed evidence values, while the total MAE puts equal focus on common as well as rare assignments of the evidence variables. %combinations. 
+%For more information on how we build up these test sets and their respective size, we refer to appendix \ref{app:evaluation}.
+
+\subsection{Performance of Bayesian network vs. neural understudy} \label{sec:comparison_models} 
+
+\begin{figure}[t]
+  \centering
+    \includegraphics[width=0.49\textwidth]{figures/total_MAE_10seeds.pdf}
+    \includegraphics[width=0.49\textwidth]{figures/sample_MAE_10seeds.pdf}
+  \caption{Comparison of 4 models in terms of total MAE and sample MAE for different sizes of the training set. %For each size, 10 different seeds are used to sample a training set from the ground-truth distribution, which are all fed to the 4 models. %These sets of samples are then fed into the 4 models. The same seeds are used for the random initialisation of the neural network. 
+  The lines reflect the mean across 10 random seeds, used to sample the training set and initialise the neural networks. The shading represents the 95\% confidence interval.}
+  \label{fig:performance_MAE}
+\end{figure}
+
+In Fig.~\ref{fig:performance_MAE} we compare the sample efficiency of our 4 models in terms of total and sample MAE.
+%The curves depict the mean and confidence intervals for 10 different seeds used to pick the training samples, for each sample size. 
+For the NN+REG model, we set the regularisation parameter $\alpha$ to 10. The training hyperparameters (hidden layer dimensions, batch size, learning rate, number of training epochs) are kept fixed for all neural models to allow for a direct comparison. Details on the training process and hyperparameters are given in %how we chose these hyperparameters, we refer to 
+Appendix \ref{app:NN_training_details}. The results allow us to answer the first two research questions.
+
+%Based on Fig.~\ref{fig:performance_MAE} we can formulate an answer to the first two research questions. 
+
+\shrink
+\paragraph{RQ1 (Sample efficiency)} %The neural network shows better sample efficiency than the BN baseline in terms of total MAE, even it its basic form. This is remarkable, since the basic NN model does not have any knowledge of the DAG structure, while the BN does. 
+The proposed training strategy leads to neural understudy models that can approximately infer conditional probabilities. For smaller training sets, the basic NN model shows similar performance as the BN baseline in terms of total MAE. As the training set grows larger, the BN model's knowledge of the DAG structure allows it to significantly overtake the basic NN model in terms of performance. The BN baseline outperforms the neural models across the board when looking at sample MAE, though the gap is not large.
+%The same cannot be said for the sample MAE, where the BN baseline performs better than the neural models across the board. 
+
+\shrink
+\paragraph{RQ2 (Effect of including DAG info)} Including information on the DAG structure in the neural model improves its performance, with a more visible effect on the total MAE. In terms of that metric, injecting the independence relations during training allows the neural model to outperform the BN baseline for smaller sample sets. The NN+REG model performs slightly better than the NN+COR model, albeit not significantly. We hypothesise that this stems from the REG technique systematically iterating over all conditional independence relations, whereas the COR technique only applies a relation when the randomly sampled evidence forms a match. %The improvement in terms of sample MAE after adding DAG information is not significant. 
+The strength of the neural models appears to lie in their improved performance for rare evidence combinations, which are more heavily disadvantaged in smaller datasets.
+
+%As the size of the dataset increases, the overall MAE decreases for all models, which is to be expected. First, we focus on the total MAE. The basic neural distillation performs better than the BN baseline when the models see 500 samples or less. This is remarkable, since the basic NN model does not have any knowledge of the causal structure between the variables, while the BN does. Both techniques (IRR and IRC) to enrich the NN model with information on the independence relations perform significantly better than the basic NN model. The IRR technique performs slightly better than the IRC technique. Also note that the BN baseline exhibits a wider confidence interval, indicating its performance seems more dependent on the particular training samples it encounters, while the NN models seem a little more stable.
+
+%The sample MAE is always lower than the total MAE. This is not unexpected, since the sample MAE is a reflection of the performance of the model for queries containing more common combinations of observed evidence, while the total MAE assigns equal weight to very rare probabilistic queries. The BN baseline performs better than the NN distillation models for all sizes of the training set. We also note that the difference between the basic NN model and the version enriched with information on the IRs is not significant in terms of sample MAE. The added value of including IRs in the NN model clearly only pays off in terms of performance for evidence combinations which might barely (or not at all) appear in the training set.
+
+\subsection{Robustness against miss-specification of causal structure} \label{sec:robustness_miss_spec}
+
+\begin{figure}[t]
+  \centering
+    \includegraphics[width=0.48\textwidth]{figures/robustness_rm_total.pdf}
+    \includegraphics[width=0.48\textwidth]{figures/robustness_add_total.pdf}
+  \caption{Boxplots visualising the total MAE for models receiving the correct DAG (``base'') vs.~a partially miss-specified DAG (``miss''), i.e., either one edge removed (left) or added (right), for different models (BN; NN+REG; NN+COR) trained on 100 observed samples. All train runs are done for 5 random seeds, and for ``miss'' runs, 5 random DAG corruptions are done (resulting in 25 runs per model for the ``miss'' setting).
+  %Boxplots illustrating the effect of removing (left) or adding (right) one edge in the DAG on the total MAE. 
+  %\thms{Pairwise comparison between the correct DAG (``base'') and miss-specified DAG (``miss''; one edge removed or added).} 
+  %The figures show a pairwise comparison of the performance when receiving the correct DAG (``base'') and a partially miss-specified DAG (``miss''). 
+  %During each run, all models receive 100 training samples and one version of the DAG. The ``base'' results are obtained by running each model with 5 sample seeds (used to sample the training data and initialise the neural networks), while the ``miss'' results are obtained over 25 runs per model type (5 DAGs with one edge removed/added, each run with the same 5 seeds). %For training, we use the same settings as before (see Section \ref{sec:comparison_models}).
+  }
+  \label{fig:robustness_total_MAE}
+\end{figure}
+
+%On the left, we see the effect of removing an edge for the BN, NN+IRR and NN+IRC model (the basic NN model has no notion of the independence relations and is automatically not affected by a change in causal structure). All results are obtained by training the models with 100 samples, with the same settings from Section \ref{sec:comparison_models}. The ``base'' boxplots show the distribution of MAE for the correct causal structure when 5 different seeds are used for sampling the training set and initialising the neural networks. The ``miss'' boxplots are obtained by removing one random edge at a time, and running the models with 5 seeds for each configuration (which makes 25 runs in total). On the right, we see the effect of adding one random edge at a time. Here, we were careful not to add edges which might introduce cycles in the network, as this goes against the definition of a Bayesian network. Similar plots can be found for the sample MAE in appendix \ref{app:robustness}. 
+
+We now explore the impact of injecting partially incorrect information on the causal structure. To this end, we create 10 new DAGs, by randomly removing or adding \footnote{We were careful not to add edges which might introduce cycles in the network.} one edge at a time to the ground-truth DAG from Fig.~\ref{fig:asia_model}. While still being trained on samples from the correct ``Asia'' network, the BN, NN+REG and NN+COR models now get their conditional independence relations from a partially incorrect DAG. The results displayed in Fig.~\ref{fig:robustness_total_MAE} allow answering the third research question.
+
+%Our NN+IRR and NN+IRC models now receive a different set of independence relations, automatically extracted from the miss-specified causal structures. Before running these experiments, we hypothesise that the neural distillation will be less affected by miss-specification of the causal structure since this information is injected in a soft manner, as opposed to the Bayesian network where this is an integral part of its definition. 
+
+%Figure \ref{fig:robustness_total_MAE} shows the results of these robustness experiments in terms of total MAE. Based on this, we can formulate an answer to the third research question.
+
+\shrink
+\paragraph{RQ3 (Partially incorrect DAG)} While the inclusion of DAG information in the neural understudy brings clear additional benefits %over the BN baseline in terms of total MAE, this is only the case when the causal structure is accurately specified. 
+in terms of total MAE compared to its most basic form, we must be careful to correctly specify this causal structure.
+When we assume two variables to be independent when they are not (i.e. by removing an edge in the DAG), %the neural model sees a larger performance degradation than the Bayesian baseline, though none of the effects are significant. 
+both the Bayesian baseline and the neural models become less stable, showing higher variation across sample sets.
+Adding an edge in the DAG seems to do no harm, since this makes for a more conservative estimate of the DAG structure (we assume two variables to have some dependency when they do not).
+
+%The effect of removing an edge is overall more noticeable than the effect of adding an edge. This makes sense, as removing an edge corresponds with assuming conditional independence between two variables where this is not the case. Adding an edge means we cannot be sure of the independence of two variables, though they still might be. 
+
+%The Bayesian network performance seems less sensitive to the removal of edges than our neural distillations. Though a t-test confirms that none of the observed effects are significant, we still need to reject our hypothesis. Our proposed neural models do not show better robustness against miss-specification of the causal structure than Bayesian networks. In fact, the opposite is true when edges are removed. We can thus formulate the following answer to the final research question. 
+
+\section{Conclusions and future work}  
+
+We presented ideas for building neural networks that behave like Bayesian Networks. In future research we aim to combine the benefits of neural networks (i.e., encoding unstructured data) with some advantages of Bayesian networks, such as their ability to combine uncertainty with causal structure. As a first contribution in that direction, we presented a method to learn a neural network model on observational sample data, and two strategies to encode known causal relationships between the variables, by injecting independence relations. 
+
+We tested our method on a single small-scale example, and saw that our proposed training strategy generally works: our neural understudy models (w.r.t.~to their Bayesian Network counterpart trained on the same samples) were able to make approximate predictions of conditional probabilities. %We even noticed that the neural models may on average achieve better sample efficiency (when testing on all possible queries) than the Bayesian Network. 
+The inclusion of causal structure resulted in similar performance of the neural understudy compared to the BN baseline, with the neural understudy slightly outperforming the BN under low-sample regimes when testing on all possible queries. %brought additional performance benefits to the neural model, but the causal structure must be accurate. 
+We saw the performance of the NN models become less stable as soon as incorrect independence relations were injected, though this behaviour was also observed for the BN.
+%If the DAG we use as a basis for extracting conditional independence relations is missing an edge, the performance of our neural model may degrade to the point of performing worse than the Bayesian baseline. 
+
+We see multiple avenues for future work. We will first extend our experiments to larger, more realistic settings, to see whether the conclusions based on our small example still hold. %, to see if our observations generalise to more extensive causal network structures. As there are more nodes and connections in the causal structure, it becomes harder to exhaustively list all conditional independence relations. The question remains whether the two DAG-based techniques we proposed still show their merit when they only receive part of the relations between the variables. 
+%
+%The work presented in this article was motivated by the perspective to inject causal knowledge while training neural models on \textit{unstructured} data (text or images), since this is where their strengths lie. 
+%
+We then aim to investigate how our models can be extended towards continuous variables as well as unstructured data, to be able to answer probabilistic queries concerning a combination of any of these inputs. For example, we envision the use of pre-trained language encoders, although that will require considerable adaptation of the straightforward model with corresponding discrete nodes at input and output.
+
+%\plm{Reviewer: "Normally, this would have been valuable contribution, especially for a workshop, but the authors do not discuss how their work can be scaled to unstructured data (and what are the additional challenges of doing so compared with the simplified case they consider in this paper)." Extend the future work section a little bit, to include the encoder-decoder idea for unstructured data?}
+
+%To this end, our network must integrate discrete, continuous and unstructured variables all at once, and we must train it to answer probabilistic queries concerning a combination of any of these input types. Such a neural model has the potential to be much more powerful than any Bayesian network, where it is not possible to integrate unstructured nodes with the rest of the network during inference. 
+
+\bibliography{bibliography}
+
+%\newpage
+
+\appendix
+
+\section{Appendix}
+
+\subsection{Sample-based training of neural network} \label{app:sample_based_training}
+
+\begin{wraptable}{R}{0.4\textwidth}
+\centering
+\vspace{-18pt}
+\caption{Absolute frequency table showing the occurrence of $X = x$ and $Y = y$ in the hypothetical training set ($\nu = n_{00} + n_{01} + n_{10} + n_{11}$). \\}
+\label{tab:train_freq}
+\vspace{5pt}
+\begin{tabular}{ c c | c } 
+ x & y & freq. \\
+ \hline
+ 0 & 0 & $n_{00}$ \\ 
+ 0 & 1 & $n_{01}$ \\ 
+ 1 & 0 & $n_{10}$ \\ 
+ 1 & 1 & $n_{11}$ \\ 
+\end{tabular}
+\vspace{-10pt}
+\end{wraptable}
+
+%It is not trivial to see how providing observed samples at the input of our neural network during training leads to an estimation of conditional probabilities at the output. 
+We provide a small-scale proof of how optimising the cross-entropy loss for the observed samples leads to probabilistic outcomes. While the illustrative setting for which we provide the proof only concerns two binary variables, the proof can be extended to a more general setting. %one can easily see how it can be extended to a more general setting (more than two discrete variables, not necessarily binary).
+
+Assume we have two binary variables, and observe $\nu$ samples 
+%meaning we observe a sample 
+$\{X = x, Y = y\}$ during every training epoch.
+%during every training iteration, $\nu$ samples in total. 
+The distribution of the training data is shown in Table \ref{tab:train_freq}. Our model simultaneously optimises three partial training losses, each corresponding to a possible evidence mask: $\mathcal{L}_{X \rightarrow Y}$ (target Y, evidence X), $\mathcal{L}_{Y \rightarrow X}$ (target X, evidence Y), $\mathcal{L}_{XY}$ (target X and Y, no evidence). The random evidence/target mask decides which loss is optimised during which iteration, and the sum of these three losses forms the overall training objective. We will calculate the optimum for each partial training loss and show that this leads to the desired predictions for the targets at hand. 
+
+\shrink
+\paragraph{Evidence $X$, target $Y$:} Optimising the partial loss $\mathcal{L}_{X \rightarrow Y}$ should lead us to an estimate for query $P(Y = y | X = x)$. The model returns a prediction $\hat{y}_{x \rightarrow y}$ for target $Y = y$ taking evidence $X = x$ as an input. Taking into account the frequencies of each sample as listed in Table \ref{tab:train_freq}, we obtain the partial loss $\mathcal{L}_{X \rightarrow Y}$ as shown in eq.~(\ref{eq:loss_ev_X_tar_Y}). Here, we use the definition of binary cross-entropy loss as listed in eq.~(\ref{eq:binary_CE_loss}) and simplify by filling in the possible values (0 or 1) for target y. 
+
+\begin{equation} \label{eq:binary_CE_loss}
+    \mathcal{L_{CE}} = - y log(\hat{y}) - (1-y) log(1-\hat{y})
+\end{equation}
+
+\begin{equation} \label{eq:loss_ev_X_tar_Y}
+\begin{split}
+    \mathcal{L}_{X \rightarrow Y} & = - n_{01} log(\hat{y}_{0 \rightarrow 1}) - n_{00} log(\hat{y}_{0 \rightarrow 0}) - n_{11} log(\hat{y}_{1 \rightarrow 1}) - n_{10} log(\hat{y}_{1 \rightarrow 0}) \\ 
+    & = - n_{01} log(\hat{y}_{0 \rightarrow 1}) - n_{00} log(1-\hat{y}_{0 \rightarrow 1}) - n_{11} log(\hat{y}_{1 \rightarrow 1}) - n_{10} log(1-\hat{y}_{1 \rightarrow 1})
+\end{split}
+\end{equation}
+
+When given $X = 0$ as evidence, we will optimise this loss for $\hat{y}_{0 \rightarrow 1}$. Equation (\ref{eq:opt_loss_ev_X_tar_Y}) illustrates how calculating the partial derivative and setting it to zero, leads to the optimum for $\hat{y}_{0 \rightarrow 1}$ (whereby $\hat{y}_{0 \rightarrow 0}$ = 1 - $\hat{y}_{0 \rightarrow 1}$). A similar derivation for $X = 1$ leads to the optimum for $\hat{y}_{1 \rightarrow 1}$ (and $\hat{y}_{1 \rightarrow 0}$ = 1 - $\hat{y}_{1 \rightarrow 1}$). In other words, the predicted value for target Y moves towards its relative frequency in the training set, conditioned on the observed evidence values. 
+
+\begin{equation} \label{eq:opt_loss_ev_X_tar_Y}
+\begin{split}
+    \frac{\partial\mathcal{L}_{X \rightarrow Y}}{\partial \hat{y}_{0 \rightarrow 1}} = 0 \Rightarrow \hat{y}_{0 \rightarrow 1} = \frac{n_{01}}{n_{00}+n_{01}} ;\quad
+    \frac{\partial\mathcal{L}_{X \rightarrow Y}}{\partial \hat{y}_{1 \rightarrow 1}} = 0 \Rightarrow \hat{y}_{1 \rightarrow 1} = \frac{n_{11}}{n_{10}+n_{11}}
+\end{split}
+\end{equation}
+
+\shrink
+\paragraph{Evidence $Y$, target $X$:} Optimising the partial loss $\mathcal{L}_{Y \rightarrow X}$ should lead us to an estimate for query $P(X = x | Y = y)$. The derivation is  symmetrical to the previous case, with the roles of $X$ and $Y$ switched. 
+
+\shrink
+\paragraph{No evidence, targets $X$ and $Y$:} By optimising $\mathcal{L}_{XY}$, the model jointly optimises its predicted outcome for queries $P(X = x)$ and $P(Y = y)$. A training case only contributes to this partial loss when the evidence mask chooses both variables as targets. Now, we can write the loss as in eq.~(\ref{eq:loss_tar_XY}), where $\hat{x}$ is the prediction for $X = 1$ given no evidence, and analogous for $\hat{y}$. We use the same notation for the relative frequencies as before, and again use the definition of binary CE-loss from eq.~(\ref{eq:binary_CE_loss}).
+
+\begin{equation} \label{eq:loss_tar_XY}
+\begin{split}
+    \mathcal{L}_{XY} = 
+    - (n_{10} + n_{11}) log(\hat{x}) - (n_{00} + n_{01}) log(1-\hat{x}) \\
+    - (n_{01} + n_{11}) log(\hat{y}) - (n_{00} + n_{10}) log(1-\hat{y}) 
+\end{split}
+\end{equation}
+
+Again, we can optimise the loss above for $\hat{x}$ and $\hat{y}$. This leads to the optima shown in eq.~(\ref{eq:opt_loss_tar_XY}). The optimum for $\hat{x}$ simply corresponds to the relative frequency of seeing $X = 1$ in the training set, which is indeed what we want as a prediction for $P(X = 1)$. The same goes for $\hat{y}$. 
+
+\begin{equation} \label{eq:opt_loss_tar_XY}
+\begin{split}
+    \frac{\partial\mathcal{L}_{XY}}{\partial \hat{x}} = 0 \Rightarrow \hat{x} = \frac{n_{10}+n_{11}}{n_{00}+n_{01}+n_{10}+n_{11}} ;
+    \frac{\partial\mathcal{L}_{XY}}{\partial \hat{y}} = 0 \Rightarrow \hat{y} = \frac{n_{01}+n_{11}}{n_{00}+n_{01}+n_{10}+n_{11}} \\
+\end{split}
+\end{equation}
+
+We emphasise that the results above only hold if training happens uniformly over the available training instances, so that the frequency of occurrence of a target given a particular evidence actually corresponds with the empirical probability in the training data. We ensure that this is the case by properly shuffling our batches within each epoch. 
+
+\subsection{Injecting independence relations through evidence corruption} \label{app:IR_corruption}
+
+%To show why a corruption of the inputs according to the conditional independence relations leads to a model whose probabilistic outcomes reflect these independence rules, 
+We again consider the simple setting of two binary variables $X$ and $Y$, to show that the NN+COR method works as expected. We now add the knowledge that $X$ and $Y$ are independent. The total loss is made up of $\mathcal{L}_{X \rightarrow Y}$, $\mathcal{L}_{Y \rightarrow X}$ and $\mathcal{L}_{XY}$, as defined in Section \ref{app:sample_based_training}. Since the DAG-based corruption is only executed when the evidence set is not empty, only the partial losses $\mathcal{L}_{X \rightarrow Y}$ and $\mathcal{L}_{Y \rightarrow X}$ are affected. We zoom in on how to adapt the first one according to this new setting and how this affects the predicted outputs. The derivation for the other partial loss is symmetrical. 
+
+Say we receive a sample $\{X = x, Y = y\}$ during training and the mask indicates that $X$ is evidence, while $Y$ is the target. Since $X \perp Y$, the value of the target $y$ should be independent of the observed evidence value $x$. Therefore, we corrupt the value of $x$, setting it to 1 with probability $\gamma$ and to 0 with probability $1-\gamma$. We can use the frequencies from Table \ref{tab:train_freq} to write out the contribution of each training sample to the partial loss $\mathcal{L}_{X \rightarrow Y}$, taking into account that the evidence is corrupted for a fraction of the training samples. This is depicted in eq.~(\ref{eq:loss_IRC}). The predicted targets $\hat{y}_{0 \rightarrow 1}$ and $\hat{y}_{1 \rightarrow 1}$ are defined in the same way as described in Section \ref{app:sample_based_training}. 
+
+\begin{equation} \label{eq:loss_IRC}
+\begin{split}
+    \mathcal{L}_{X \rightarrow Y} = & - (1-\gamma) (n_{01} + n_{11}) log(\hat{y}_{0 \rightarrow 1}) - (1-\gamma) (n_{00}+n_{10}) log(1-\hat{y}_{0 \rightarrow 1}) \\ 
+    & - \gamma (n_{11}+n_{01}) log(\hat{y}_{1 \rightarrow 1}) - \gamma (n_{10}+n_{00}) log(1-\hat{y}_{1 \rightarrow 1})
+\end{split}
+\end{equation}
+
+When taking the partial derivative of the loss as shown in eq.~(\ref{eq:opt_IRC}), we get the optima for $Y = 1$ with either value of $X$ as evidence. Due to the corruptions we implemented in the training process, we now get $\hat{y}_{0 \rightarrow 1}$ = $\hat{y}_{1 \rightarrow 1}$. The prediction for $Y$ is indeed independent of the value of $X$ (in accordance to $X \perp Y$) and simply equal to the relative frequency of observing $Y = 1$ in the training set. 
+
+\begin{equation} \label{eq:opt_IRC}
+\begin{split}
+    \frac{\partial\mathcal{L}_{X \rightarrow Y}}{\partial \hat{y}_{0 \rightarrow 1}} = 0 \Rightarrow \hat{y}_{0 \rightarrow 1} = \frac{n_{01}+n_{11}}{n_{00}+n_{01}+n_{10}+n_{11}} \\
+    \frac{\partial\mathcal{L}_{X \rightarrow Y}}{\partial \hat{y}_{1 \rightarrow 1}} = 0 \Rightarrow \hat{y}_{1 \rightarrow 1} = \frac{n_{01}+n_{11}}{n_{00}+n_{01}+n_{10}+n_{11}} 
+\end{split}
+\end{equation}
+
+Note that the parameter $\gamma$ plays no role in the optimum for $\hat{y}$. It does not matter according to which distribution we corrupt the evidence. In our implementation, we sample uniformly over all possible classes for the variable in question to corrupt its value. We could also opt to pull a random sample from the training set and switch out the value of the evidence variable to its value in this sample.
+
+\subsection{Bayesian network implementation} \label{app:BN_implementation}
+
+\begin{figure}[t]
+  \centering
+    \includegraphics[width=0.7\textwidth]{figures/asia_CPTs.pdf}
+  \caption{Conditional probability tables defining the ground-truth ``Asia'' Bayesian network, based on \citep{asia}.}
+  \label{fig:asia_CPTs}
+\end{figure}
+
+We use the \textit{pgmpy} Python library \citep{pgmpy} (version 0.1.17) for sampling, training and inference in our Bayesian networks.
+
+To train our Bayesian networks from observed samples, we use the Maximum Likelihood Estimator. This estimator studies the co-occurrence of particular values of each variable and its parents in the training set, filling up the CPTs as such. We use a K2 prior as a smoothing strategy, to counteract the extremely skewed probability distributions that might appear in the CPTs when particular combinations of variables are never observed in the training set. %This comes down to learning all conditional probability distributions $P(X_i \mid Parents(X_i))$, which are represented by a conditional probability table (CPT), when the DAG structure is given. The \textit{MaximumLikelihoodEstimator} does this by studying the co-occurrence of particular values of each variable and its parents from a set of observed samples.
+
+Artificial samples are generated from the ground-truth Bayesian network using the method of forward sampling with a particular seed. As a ground-truth Bayesian model, from which our artificial training and test sets are created, we use the ``Asia'' model (see Fig.~\ref{fig:asia_model} for its DAG structure). The CPTs that define its joint distribution with 20 parameters are shown in Fig.~\ref{fig:asia_CPTs}.
+%\textit{BayesianModelSampling} class. We always define a seed to ensure reproducibility. As a ground-truth Bayesian model, from which our artificial training and test sets are created, we use the ``Asia'' model (see figure \ref{fig:asia_model}). Usually, an additional ``either'' node is included as a child of the ``tub'' and ``lung'' nodes to reduce the number of parameters needed to specify the joint probability. We used a version of the network without this node, altering the CPTs accordingly so the joint probability distribution was not impacted. The resulting conditional probability tables are shown in figure \ref{fig:asia_CPTs}. These CPTs fully define the joint distribution of the Bayesian network with 20 parameters. 
+
+%The process of inference in Bayesian networks comes down to calculating the posterior probabilities of the form $P(X|\mathcal{E}=e)$ from the joint probability, which is defined as the product of all conditional probability distributions. 
+We use the technique of variable elimination to perform exact inference on our Bayesian networks. There are some cases where this method fails because the query contains some evidence combination it has never seen before. %For example, when the ``asia'' node is always observed as ``no'' in the training set (which is probable for small sizes, since its probability to be ``yes'' is only 0.01), the conditional probability table does not provide any estimate for $P(asia = yes)$, and so it cannot readily answer queries of the form $P(X \mid asia = yes, \mathcal{E} = e)$. 
+When coming across such a case during test time, we simply throw out the evidence for this particular query and take $P(X)$ as an estimate. We believe this makes for a fairer comparison than simply ignoring those queries, since our NN is in fact able to provide an estimate for all queries, even if it has never seen a particular evidence set before. 
+
+\subsection{Neural network training details} \label{app:NN_training_details}
+
+Our neural network architecture and its training procedure are implemented in \textit{Pytorch} \citep{pytorch}.
+
+As shown in Fig.~\ref{fig:NN_training}, our neural network is made up of 3 layers. The network receives an input vector of dimension $k$. In our ``Asia'' example, $k$ is equal to 14 (all 7 variables have 2 classes). First, the values of the target variables (as selected by the evidence mask) are substituted by their respective value from $v_0$. The full input is then transformed to dimension $h$, using an input-to-hidden linear layer with tanh activation. Then, a hidden-to-hidden linear layer of size $h$, again with tanh activation is applied. %  layer applies another transformation, but retains dimension $h$ (also using the Tanh activation function). 
+Finally, the hidden-to-output layer transforms the activations back to dimension $k$. This layer applies $N$ softmax functions to transform the activations belonging to each variable separately into normalised probability values, as depicted in Fig.~\ref{fig:NN_training}.
+
+For initialisation of the input vector on the positions of the target variables, we use the vector $v_0$ of size $k$, obtained by applying the hidden-to-output layer to a trainable vector of size $h$, followed by the per-variable softmax normalisation. When no evidence is present, $v_0$ serves as the full input vector, and leads to the model predicting the empirical mean probability for all variables.
+%a trainable parameter vector of dimension $h$. This embedding is first transformed into a vector of dimension $k$ using the hidden-to-output layer. This layer returns a probability distribution per variable, due to the application of the softmax. These initialisation values are then substituted in the input vector on the corresponding positions of the target variables. 
+% We can interpret these values as the network's prior beliefs on the distribution of each variable when no evidence is provided. 
+
+We chose a hidden size $h$ of 50, since we noticed this allowed enough flexibility while still constraining the parameter space sufficiently to avoid overfitting. With these dimensions, our network has 4014 trainable parameters in total. We use the Adam optimiser \citep{adam_optimizer} with a learning rate of 0.001 and otherwise default parameters in Pytorch. The training samples are fed to the neural model in batches of size 16, and the model is trained for 500 epochs. %, without early stopping. 
+In the NN+REG model, we additionally use a regularisation batch size of 16. %, along with each equally sized batch for , so every training sample sees one randomly sampled independence relation.
+%We use a batched approach to calculate the regularisation loss $\mathcal{L}^{\text{REG}}$. This is mostly for efficiency purposes, since looping over 191 independence relations after every batch of 16 training samples would result in very slow training. 
+%We used a regularisation batch size of 16, the same as the training batch size. 
+%For every training sample that contributes to the loss, we also test one independence relation and let that contribute to the regularisation loss. 
+
+The hyperparameter $\alpha$ controls the trade-off between training and regularisation loss. The MSE naturally has a smaller order of magnitude than the cross-entropy loss, therefore rather large choices for $\alpha$ (10, 100, 1000) work best. We settled for $\alpha$ equal to 10 since this seemed to lead to the best performance of the NN+REG method, though we did not observe a big difference between any choice of $\alpha$ within the range of 1 to 1000. 
+
+% \subsection{Evaluation} \label{app:evaluation}
+
+% \note{Kan eventueel volledig weggelaten worden, als we in de body van de paper nog de grootte van de test sets krijgen}
+
+% Here, we provide additional information on how our two test sets are built and what queries they contain. 
+
+% \shrink
+% \paragraph{Total MAE} The first set is made up of queries containing all possible combinations of evidence variables: all possible subsets of $\mathcal{V}$ with size ranging from 0 to $N$-1, assigned with all possible values for the chosen variables. The desired probability distributions for all remaining targets are obtained by querying the ground-truth Bayesian network with these evidence sets. Once we have trained a model (BN or NN), we can obtain its predictions for all these possible queries and compare them to the desired target distributions. To compare the predicted probabilities with the desired ones, we use the mean absolute error (MAE) statistic, as shown in equation \ref{eq:MAE}. The sum of the errors for all possible queries gives us the total MAE.
+
+% \begin{equation} \label{eq:MAE}
+%     \sum_{X_i \in \mathcal{T}} \frac{1}{n_i} \sum_{j=1}^{n_i} \mid p_{ij} - \hat{p}_{ij} \mid
+% \end{equation}
+
+% \shrink
+% \paragraph{Sample MAE} The full set of queries used to compute the total MAE will assign the same weight to very common evidence settings as to very rare ones. %For example, say we have a variable $X$ which takes on True with a probability of 0.99. As evidence, we would observe $X = T$ way more commonly than $X = F$, 
+% We might not expect our models to perform as well when a query concerns an evidence set the model has rarely encountered during training. To assess how well the models perform on more common evidence combinations, we build up another test set. Instead of building up all possible evidence sets, we generate test samples from the ground-truth joint probability distribution, as we did when we built up our training set. By randomly masking these observed values, we create evidence sets whose observed values follow the underlying distribution more closely. By obtaining the model's predictions for these sampled queries and calculating the MAE, we obtain another test metric called the sample MAE. Note that this set of queries might contain duplicates, ensuring more weight is assigned to queries containing evidence that is more likely to occur. 
+
+% For the ``Asia'' network, there are 2059 possible test queries, which all count towards the total MAE. For calculation of the sample MAE, we obtain 1000 random test samples from the ground-truth joint distribution and randomly mask them to create an evidence set. In both cases, we use variable elimination to infer the correct probability from the ground-truth joint probability for each query.
+
+%\subsection{Robustness against miss-specification of the causal structure} \label{app:robustness}
+
+%\begin{figure}[t]
+%  \centering
+%    \includegraphics[width=0.48\textwidth]{figures/robustness_remove_sample.pdf}
+%    \includegraphics[width=0.48\textwidth]{figures/robustness_add_sample.pdf}
+%  \caption{Boxplots illustrating the effect of removing or adding one edge in the causal structure on sample MAE, for a training set of 100 samples. The figures show a pairwise comparison of the performance when receiving a causal structure in accordance with the ground-truth (``base'') and a partially miss-specified causal structure (``miss''). The ``base'' results are obtained by running each model with 5 seeds, while the ``miss'' results are obtained over 25 runs in total (5 edge removals/additions each run with 5 seeds). \plm{subfigures/subcaptions?}}
+%  \label{fig:robustness_sample_MAE}
+%\end{figure}
+
+%Figure \ref{fig:robustness_sample_MAE} shows the effect of removing or adding one edge at a time on the sample MAE. An incorrect specification of the causal structure seems to have little effect on the performance for queries containing common evidence combinations, both for the BN as for the NN models. 
+
+\end{document}

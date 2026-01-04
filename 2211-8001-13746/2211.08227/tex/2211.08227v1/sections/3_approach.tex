@@ -1,0 +1,169 @@
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=0.8\textwidth]{graphics/figure1.pdf}
+    \caption{Overview of Perona. Designed as extension to common approaches for resource configuration optimization, target infrastructures are thoroughly benchmarked, relevant information are extracted, and anomalous benchmark executions due to resource degradation or failures are detected and reported.}
+    \label{fig:overview}
+\end{figure*}
+
+\section{Approach}
+\label{sec:approach}
+This section presents the main ideas of our approach \emph{Perona} and how it can be used to explicitly fingerprint target infrastructures and extend existing resource configuration optimization solutions.
+An overview is depicted in \autoref{fig:overview}, and the main variables used are summarized in~\autoref{tab:variabledefinitions}.
+
+\begin{table}[hb]
+\centering
+\caption{Overview of main Variables}
+    \begin{tabular}[t]{rl}
+        \toprule
+        \multicolumn{2}{c}{\emph{Problem Formalization}}\\
+        \toprule
+        $c_j$ & resource configuration $j$; $c_j \in C$\\
+        $w_i$ & workload $i$; $w_i \in W$\\
+        $y_{ij}$ & vector of performance measures for $w_i$ run with $c_j$\\
+        \midrule
+        \multicolumn{2}{c}{\emph{Approach}}\\
+        \midrule
+        $p_r$ & configuration template for resource aspect $r$; $p_r \in P$\\
+        $m_k$ & machine type $k$; $m_k \in M$\\
+        $b_r(t)$ & benchmark execution at time $t$ with $p_r$; $b_r(t) \in B(t)$\\
+        $\vec{x}(t)$ & vector of all performance metrics in $B(t)$; $\vec{x}(t)\in \mathbb{R}^F$\\
+        $\vec{x'}(t)$ & compact version of $\vec{x}(t)$ after preprocessing; $\vec{x'}(t)\in \mathbb{R}^{F'}$\\
+        $\vec{c}(t)$ & dense learned encoding of $\vec{x'}(t)$; $\vec{c}(t)\in \mathbb{R}^{K}$\\
+        $\vec{\underline{c}}(t)$ & neighborhood-inferred encoding; $\vec{\underline{c}}(t)\in \mathbb{R}^{K}$\\
+        \bottomrule
+    \end{tabular}
+\label{tab:variabledefinitions}
+\end{table}
+
+\subsection{Overview}
+
+Existing solutions to resource configuration optimization of big data analytics workloads commonly explore the resource configuration search space only indirectly, i.e., by means of running a target workload with different resource configurations and observing its performance.
+While eventually an expedient approach, it does not provide an explicit and general understanding of resource configurations, which could be externalized and transferred for use in other contexts.
+Hence, there lies potential in tackling this limitation.
+
+We design a novel approach called Perona for explicit infrastructure fingerprinting, i.e., generalized benchmarking of resource configurations.
+As illustrated in~\autoref{fig:overview}, it is at its core composed of three steps and associated components, which will be thoroughly described in the subsequent sections:
+\begin{enumerate}
+    \item A comprehensive inspection of target infrastructures through standardized sets and configurations of benchmarking tools, followed by an automated preprocessing of recorded benchmark metrics (\autoref{sec:approach_step1}).
+    \item An internally employed graph-based modeling approach for representation learning of benchmark executions and context-aware outlier detection (\autoref{sec:approach_step2}).
+    \item An opportunistic strategy for comparing and ranking learned representations of diverse resource configurations, which can be employed to automatically improve resource efficiency (\autoref{sec:approach_step3}).
+\end{enumerate}
+In the following, these ordered steps are explained in detail.
+
+\begin{figure}[b]
+    \centering
+    \includegraphics[width=\columnwidth, keepaspectratio]{graphics/perona_figures-approach_step1.pdf}
+    \caption{Standardized sets and configurations of benchmarking tools are used to holistically assess the characteristics of target machines and to ensure comparability across machines and benchmark executions.}
+    \label{fig:approach_step1}
+\end{figure}
+
+\subsection{Standardized Resource Benchmarking}
+\label{sec:approach_step1}
+
+In order to sufficiently fingerprint a target infrastructure and carve out its individual characteristics, it is imperative to not only benchmark all relevant resources using dedicated tools, but also employ reasonable and fixed configurations for these benchmarking tools, so that individual runs are comparable across machine types and even infrastructures.
+This idea is further depicted in~\autoref{fig:approach_step1}.
+Let $r=1, \ldots, n$ index the up to $n$ different aspects of a resource configuration (e.g. memory, CPU, network) and $P=\{p_r\}_{r=1}^n$ be the associated set of configuration templates for benchmarking tools.
+We then write $b^{(m_k)}_r(t)$ to denote the execution of a benchmarking tool at time $t$ with configuration template $p_r$ for resource aspect $r$ on machine $m_k \in M$, where the latter is part of the respective target infrastructure (e.g. the set of machines to profile, or a ready-to-use cluster of different machines).
+The goal is then to initially fingerprint each so far unseen machine to obtain the complete set $B^{(m_k)}(t) = \{b^{(m_k)}_r(t)\}_{r=1}^n$, and latter on reschedule certain benchmarks if required. 
+In this case, the marker $t$ is only approximate, since not all benchmark executions are necessarily conducted strictly in parallel.
+With this, each machine is benchmarked the same way.
+In the following and for the sake of simplicity, we will however refrain from using subscripts and superscripts if not strictly necessary.
+This also makes sense given that our method is for the most part concerned with node-wise benchmark executions and benchmark-wise representation learning.
+
+Each executed element of a set $B^(t)$ returns a variety of numerical performance metrics. 
+We refer to the feature vector of all performance metrics associated with $B^(t)$ as $\vec{x}^(t)\in \mathbb{R}^F$, where $F$ denotes the total number of performance metrics and hence the feature dimension.
+As of now, it is not yet clear which features are exactly relevant to sufficiently describe the benchmarked resource. 
+Since a manual investigation can quickly become unmanageable, we are interested in automating this process.
+Therefore, we apply a series of preprocessing steps to ease downstream modeling:
+\begin{enumerate}
+    \item \emph{Unification}: It can not be guaranteed that performance metrics are always issued in the same units. 
+    Consequently, we ensure that all recordings of each individual performance metrics are among themselves comparable through unification of their associated units.
+    \item \emph{Selection}: Some performance metrics might have less of a predictive value than others, which is why we only retain metrics with a standard deviation greater equal a configurable threshold.
+    In addition, we require each metric to have at least two distinct historical values, otherwise its predictive character is questionable.
+    \item \emph{Orientation}: Naturally, certain metrics (e.g. latency) are meant to be minimized whereas others are not (e.g. throughput).
+    For our downstream modeling, we strive to equalize the various orientations as best as possible. 
+    A performance metric shall be maximized if its maximum value is closer to its median than its minimum value, otherwise minimization is desired.
+    Occasionally injecting synthetic stress into running benchmarks further helps in identifying the orientation of a metric.
+\end{enumerate}
+These steps help to reduce the dimensionality of feature vectors and to skip irrelevant individual features. 
+Lastly, we enrich each feature vector by a one-hot encoding of the respective \emph{benchmark type} (tool + configuration). 
+As a result, we obtain a compact feature vector $\vec{x'}(t)\in \mathbb{R}^{F'}$ with $F' \ll F$.
+
+\textbf{Training Notes.} Since the aforementioned steps are designed to be stateful, the metrics associated with any $b_r(t) \in B(t)$ will be processed the same way and a feature vector of fixed size will be created.
+In case of non-present features, e.g., an executed benchmark $b_r(t)$ evidently lacks the metrics generated by $b_s(t)$ with $r\neq s$, the missing values are filled with the so far observed average value of the metric of interest, which is a common machine learning practice. 
+
+\subsection{End-to-End Contextual Representation Learning}
+\label{sec:approach_step2}
+
+Correctly interpreting the results of a benchmark execution requires the consideration of relevant performance metrics and their contextualization with respect to prior benchmark executions. 
+Hence, we propose a graph-based model that relies on dense representations of feature vectors learned by an encoder model and a decoder model.
+It is illustrated in~\autoref{fig:approach_step2}.
+
+Let $\vec{x'} \in \mathbb{R}^{F'}$ be a feature vector produced by our procedure detailed in~\autoref{sec:approach_step1} at an arbitrary point in time, a decoder network function $dec:\mathbb{R}^K\rightarrow \mathbb{R}^{F'}$ will try to reconstruct $\vec{x'}$ from the code $\vec{c}\in\mathbb{R}^K$ calculated by the encoder network function $enc:\mathbb{R}^{F'} \rightarrow \mathbb{R}^K$, such that $\min\Arrowvert \vec{x'} - dec(\vec{c}) \Arrowvert_p$ and $K \ll F'$ (in this context, $p$ denotes a desired $p$-norm).
+This interaction enables the learning of meaningful and dense representations which can be used in downstream prediction tasks.
+More precisely, the autoencoder learns the relevance of features, hence implementing an additional feature selection and realizing a dimensionality reduction.
+
+\begin{figure}[b]
+    \centering
+    \includegraphics[width=\columnwidth, keepaspectratio]{graphics/perona_figures-approach_step2.pdf}
+    \caption{An autoencoder is employed for dimensionality reduction and feature extraction, such that key information are preserved. 
+    The relationships of subsequent benchmark executions are exploited to detect anomalous behavior.}
+    \label{fig:approach_step2}
+\end{figure}
+
+At this point, we manage to grasp the relevant information from the original performance metric vector, yet we still lack a notion of normal and anomalous execution behavior since we focus on a single vector only. 
+In a next step, we attempt to detect irregularities through consideration of previous benchmark executions.
+Let $G=(V,E)$ be a directed and attributed graph that consists of a set of vertices $V=\{v_1, \ldots, v_n\}$ and a set of edges $E\subseteq \{(v_i,v_j)| v_i,v_j \in V\}$. 
+An edge $e_{ij} \Leftrightarrow (v_i,v_j)\in E$ describes a directed connection between vertex $v_i$ and $v_j$. 
+Thus, the node $v_j$ is then called a neighbor of node $v_i$, formally written as $j\in \altmathcal{N}(i)$.
+Each node $v_i$ has an associated node feature vector $\vec{v_i}$, and each edge $e_{ij}$ can have an edge attribute vector $\vec{e_{ij}}$ as well. 
+In the context of this work, $G$ is formed by establishing forward edge connections between chronologically sorted executions of the same benchmark type acting as nodes, with associated node feature vectors outputted by the encoder model $enc$. 
+Furthermore, we use low-level metrics from the underlying compute instance obtained during a benchmark execution as well as various encodings of time intervals between each pair of benchmark executions to establish edge attributes. 
+Note that graphs are composed per benchmark type and compute instance, in order to connect the relevant executions with each other.
+The graph model $agg$ is then trained to predict the feature vector of a particular node via an aggregation of its respective neighborhood, i.e., through consideration of neighboring feature vectors and existing attributed edges:
+\begin{equation*}
+    \Vec{v_i}^{(k)} = \gamma^{(k)} \Big( \Vec{v_i}^{(k-1)}, \lambda_{j\in \altmathcal{N}(i)} \phi^{(k)} \Big( \Vec{v_i}^{(k-1)}, \Vec{v_j}^{(k-1)}, \vec{e_{ji}} \Big) \Big),
+\end{equation*}
+where $\lambda$ denotes a differentiable and permutation invariant function, $k$ denotes the number of hops, and both $\gamma$ and $\phi$ denote differentiable functions, e.g. feed-forward neural networks, which optionally alter the vector dimensionality.
+When several such steps are performed, structural information is effectively used and passed through the graph.  
+We temporarily denote the final aggregated version of a node feature vector $\vec{v_i}$ as $\vec{\underline{v_i}}$ -- the correctness of a benchmark execution can then be determined using a vector comparison.
+We calculate the probability of a benchmark execution being anomalous as
+\begin{equation*}
+    \mathds{P}(\vec{v_i}) = \sigma (f_1(\vec{v_i} - \vec{\underline{v_i}})),
+\end{equation*}
+where $\sigma$ is the logistic function and $f_1$ is a non-linear transformation function with learnable parameters.
+
+\textbf{Training Notes.} Due to the potentially significant imbalance of normal and anomalous benchmark executions, in our method implementation, we employ for the specific task of outlier detection a class-balanced focal loss~\cite{CuiJLSB19} (CBFL).
+For the autoencoder, we minimize the reconstruction error, which is measured as the mean squared error (MSE) between input vectors and their reconstructed counterparts. 
+
+\subsection{Aspect-Based Resource Ranking}
+\label{sec:approach_step3}
+
+\begin{figure}[b]
+    \centering
+    \includegraphics[width=\columnwidth, keepaspectratio]{graphics/perona_figures-approach_step3.pdf}
+    \caption{Our trainable function approximators are instructed to maximize the distance between benchmark clusters of learned encodings.
+    Within each cluster, the encodings are positioned and ranked in terms of their vector norm.}
+    \label{fig:approach_step3}
+\end{figure}
+
+In the previous step, we designed a way for learning latent benchmark execution encodings and detecting potential outliers. 
+Yet, we so far have limited control over the general quality of learned encodings, which makes their direct usage questionable. 
+In order to address this, we conceive several side tasks so that our model is instructed to learn more meaningful representations. 
+More precisely, we demand the following:
+\begin{itemize}
+    \item \emph{Clustering}: Learned representations of one benchmark type shall be in close proximity in terms of cosine similarity, whereas the cosine distance of representations from unequal benchmark types shall be substantially increased.
+    This leads to a class-based clustering of representations and is exemplarily depicted in~\autoref{fig:approach_step3}.
+    \item \emph{Classification}: Closely related is the requirement that learned representations shall be sufficiently informative and hence usable for predicting the associated benchmark type after a simple linear transformation already.
+    \item \emph{Ranking}: In order to embed our method into other approaches, it is imperative that learned representations are among each other comparable and rankable.
+    We enforce this by deducing a pairwise ranking groundtruth based on a desired $p$-norm of preprocessed performance vectors, and demanding our learned representations to obey to the same norm-based ranking. 
+    This is depicted within the clusters in~\autoref{fig:approach_step3} and consequently introduces a weak notion of order among representations.
+\end{itemize}
+The described additional learning tasks not only allow for more controlled representation learning, but also act as extra regularization component, since our model needs to optimize for multiple tasks simultaneously.
+For a practical application of learned representations, e.g., in the context of scheduling problems where a suitable resource needs to be found for a target processing workload, one straightforward approach would then be to calculate a vector norm to obtain a score reflecting the quality of the resource in question.
+This can be done for each resource aspect, allowing for a fine-granular assessment of resources and their capabilities.
+
+\textbf{Training Notes.} For the clustering task, we employ a triplet margin loss~\cite{SchroffKP15} (TML) and combine it with a miner to evaluate especially challenging triplets.
+The classification task is monitored using a cross entropy loss (CEL) operating on the output of the aforementioned linear transformation for obtaining class probabilities.
+Finally, for the ranking of learned representations, we utilize a margin ranking loss (MRL) which evaluates the pairwise ranking of representations based on a previously deduced ranking groundtruth.
+For pairs of normal representations, a ranking with minimal margins is sufficient, however, for unlike representations, we enforce a margin such that the anomalous representation is at least ranked smaller than the lowest normal representation observed so far.

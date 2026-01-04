@@ -1,0 +1,115 @@
+\vspace{-0.3cm}
+\section{Methodology}
+\label{sec:methodology}
+
+
+% some bu
+\subsection{Preliminary}
+Without loss of generality, we conduct our experiments on top of the BEVFormer model, which is a performant and representative multi-view 3D object detection architecture. To recap, BEVFormer consists of four stages, including feature extraction from single images, temporal information fusion, spatial information fusion, and prediction.
+
+\vspace{-0.35cm}
+\paragraph{(I) Feature Extraction of Single Images:} In multi-view 3D detection, at timestamp $t$, the input image set can be denoted as $\mathcal{X}^{(t)}=\{x_1^{(t)}, x_2^{(t)}, ..., x_v^{(t)}\}$, where $v$ denotes the number of views.
+BEVFormer firstly encodes the feature of each single image with a convolutional 2D backbone $f_{\text{2D}}$, which can be formulated as $F^{(t)}=f_{\text{2D}}(\mathcal{X}^{(t)})$. These features are then fed into spatial cross-attention in Stage~III for multi-view feature fusion.
+
+\vspace{-0.35cm}
+\paragraph{(II) Temporal Information Fusion:} Temporal self-attention is utilized to fuse the information between the current input images and the historical images.
+The input of temporal self-attention layers includes the predefined trainable BEV queries with positional encoding and the previous BEV embedding at timestamp $t-1$, which can be formulated as 
+$Q^{\text{BEV}}$ and $E_{\text{BEV}}^{(t-1)}$, respectively.
+Then, the computation of temporal self-attention can be written as
+\begin{equation}
+    \begin{aligned} 
+    E'^{(t)}_{\text{BEV}} &= \text{TSA}\left(Q^{\text{BEV}}_p, \{Q^{\text{BEV}}, E_{\text{BEV}}^{(t-1)}\}\right)
+    \\&=\mathop{\sum\nolimits_{V\in\{Q^{\text{BEV}}, E_{\text{BEV}}^{(t-1)}\}}} \text{DeformAttn}(Q_p^{\text{BEV}}, p, V),
+    \end{aligned}
+\end{equation}
+where DeformAttn indicates the deformable attention layers~\cite{zhu2020deformable} and $Q_p^{\text{BEV}}$ denotes 
+the BEV query located at the position $p$. TSA and $E'^{(t)}_{\text{BEV}}$ indicate temporal self-attention and its outputs, respectively.
+
+\vspace{-0.35cm}
+\paragraph{(III) Spatial Information Fusion:} In the stage of spatial information fusion, BEVFormer samples $N_{\text{ref}}$ 3D reference points from each pillar, and then projects them to 2D views.
+Then, spatial cross-attention is utilized to fuse the BEV embedding output by temporal information fusion with the reference points, which can be formulated as 
+\begin{equation}
+        E^{(t)}_{\text{BEV}} =\frac{1}{|v_{\text{hit}}|}\mathop{\sum_{i\in v_{\text{hit}}}}\mathop{\sum_{j=1}^{N_{\text{ref}}}} \text{DeformAttn}\left(E'^{(t)}_{\text{BEV}}, \mathcal{P}(p,i,j), F^{(t)}\right),
+\end{equation}
+where $v_{\text{hit}}$ indicates the number of views that contain the projection of the 3D reference points. 
+$\mathcal{P}(p,i,j)$ is the projection function to get the $j$-th reference point on the $i$-th view image. $F^{(t)}$ indicates the feature of single images computed in Stage~I.
+
+\vspace{-0.35cm}
+\paragraph{(IV) Prediction} In this stage, BEVFormer predicts the positions, dimensions, headings, and categories of objects based on the two inputs, including the output of spatial cross-attention and a set of object queries, which can be denoted as  $Q^{\text{Object}}$ and $E^{(t)}_{\text{BEV}}$, respectively.
+Its computation can be formulated as 
+\begin{equation}
+    \begin{aligned}
+        \text{B}, \text{P} = \text{Detection Head}(E^{(t)}_{\text{BEV}}, Q^{\text{Object}}), 
+    \end{aligned}
+\end{equation}
+where ``B'' and ``P'' indicate the predicted bounding boxes and the corresponding probability distribution. 
+
+
+\subsection{Structured Knowledge Distillation\label{sec:method}}
+In this subsection, we introduce the proposed knowledge distillation based on the above four stages in BEVFormer.
+Note that the Stage~I (2D convolutional feature extraction) and Stage~IV (prediction) in BEVFormer share quite some similarities with common 2D detectors. Successful attempts have been made to apply knowledge distillation onto these stages~\cite{kd_detection1,detectiondistillation}. Thus in this paper, we focus on the Stage~II and Stage~III, which are critical for multi-view 3D detection but rarely explored for knowledge distillation.
+In particular, our method can be divided into the following three folds.
+
+%Note that Stage~I and Stage~IV in BEVformer are the common feature extraction and the prediction stages which are almost identical to traditional 2D detection. Since knowledge distillation in these two stages has already been sufficiently studied in previous literature, in this paper, we mainly focus on Stage~II and Stage~III, which are the virgin land of knowledge distillation and important for multi-view 3D detection. Concretely, our methods can be divided into the following three folds.
+
+\vspace{-0.35cm}
+\paragraph{Spatial-Temporal Knowledge Distillation} 
+In Stage~II and Stage~III, BEVFormer first integrates the BEV queries with the BEV embeddings at the previous timestamp for temporal information fusion, and then fuses the information from different image views for spatial information fusion.
+Deformable attention layers are utilized during the two processes. 
+Recall that the computation of attention weights in  deformable attention layers is obtained by a linear projection over queries followed with a softmax function, which 
+can be formulated as 
+\begin{equation}
+    \mathcal{A}(\mathbf{Q}) =  \text{softmax}(\mathbf{W}\mathbf{Q}),
+\end{equation}
+where $\mathbf{Q}$ and $\mathbf{W}$ indicate the queries and the trainable parameters in the linear projection layer, respectively. 
+In temporal self-attention, $\mathbf{Q}$ indicates the BEV query $Q^{\text{BEV}}$. And the obtained attention weights are utilized to fuse information from $Q^{\text{BEV}}$ and the historical BEV embedding $E_{\text{BEV}}^{(t-1)}$. Hence, the attention weights here show the temporal relation between the information of the current inputs and the previous input.
+By distilling them, the student is allowed to learn how to fuse temporal information from the teacher detector.
+In spatial cross-attention, $\mathbf{Q}$ indicates the output of temporal self-attention $E'^{(t)}_{\text{BEV}}$. And the obtained attention weights are utilized to fuse the information from the reference points in the multi-view images. 
+Hence, distilling the attention weights here enables the student to learn how to fuse spatial information from the teacher detector.
+Concretely, we can denote the attention weights in temporal self-attention and temporal self-attention as $\mathbf{A}^{\text{temporal}}$ and $\mathbf{A}^{\text{spatial}}$, respectively, which can be formulated as  
+\begin{equation}
+  \begin{aligned}
+  \mathbf{A}^{\text{temporal}} &= \mathcal{A}(Q^{\text{BEV}}), \text{~and} \\
+  \mathbf{A}^{\text{spatial}} &= \mathcal{A}(E'^{(t)}_{\text{BEV}}) \text{,~~respectively.}
+  \end{aligned}
+\end{equation}
+Then, by distinguishing the student and teacher detector with the scripts $\mathcal{S}$ and $\mathcal{T}$ respectively, the proposed spatial-temporal attention can be formulated as
+\begin{equation}
+    \mathcal{L}_{\text{spatial-temp}} = \| \mathbf{A}^{\text{temporal}}_{\mathcal{S}} - \mathbf{A}^{\text{temporal}}_{\mathcal{T}} \|^2 + \| \mathbf{A}^{\text{spatial}}_{\mathcal{S}} - \mathbf{A}^{\text{spatial}}_{\mathcal{T}} \|^2.
+\end{equation}
+
+\vspace{-0.35cm}
+\paragraph{BEV Response Distillation}
+Besides distilling teacher knowledge on the fusion of the information from different timestamps and views, we also propose BEV response distillation to distill teacher responses to different object queries, which correspond to different pillars in 3D space.
+In this paper, we define the BEV response as the average score across the channel dimension on the absolute value of BEV embedding, which can be written as 
+\begin{equation}
+    \mathcal{R}(E_{\text{BEV}(i,j)}) = \sum\nolimits_{j=1}^C \frac{1}{C} |E_{\text{BEV}(i,j)}|,
+\end{equation}
+where $C$ denotes the number of channels. The scripts $(i,j)$ denotes the value on the i$_{th}$ BEV query (\emph{i.e.,} pillar) of the j$_{th}$ channel. As pointed out by abundant research~\cite{detectiondistillation,attentiondistillation,zhang2022region}, the response of features demonstrates the importance of their corresponding spatial positions.
+Hence, by distilling the BEV response from the teacher, the student model can better correlate between the learned semantic features and the potential object spatial occupancies. An example of BEV response is visualized in~\cref{fig:bev_vis}.
+An L2 loss is adopted for BEV response distillation:
+\begin{equation}
+    \mathcal{L}_{\text{response}} = \|\mathcal{R}(E_{\text{BEV})}^\mathcal{S} - \mathcal{R}(E_{\text{BEV}}^\mathcal{T})\|^2, 
+\end{equation}
+where $\mathcal{S}$ and $\mathcal{T}$ denote the student detector and the teacher detector, respectively.
+Based on the above notations, the overall training loss of the detector $\mathcal{L}$ becomes:
+\begin{equation}
+\mathcal{L} = \mathcal{L}_{\text{original}} + \lambda \cdot ( \mathcal{L}_{\text{spatial-temp}} + \mathcal{L}_{\text{response}}),
+\end{equation}
+where $L_{\text{original}}$ indicates the original training loss of BEVFormer. $\lambda$ is a hyper-parameter to balance the magnitudes of knowledge distillation loss, which is set to 1$\times$10$^{-2}$ in all the experiments.
+Please refer to the supplementary material for its sensitivity study.
+
+\vspace{-0.35cm}
+\paragraph{Weight-Inheriting}
+Convnets-based detectors usually only require images as input. But modern transformer-based detection models require additional learned queries and positional encodings as input. The teacher and the student model tend to have different query and positional encoding values after training converges.
+Intuitively, knowledge distillation works by aligning the output of the student with the teacher given the same input.
+Such paradigm is likely to fail for transformer-based detectors, as the teacher and student can have different learned queries and position encodings. The discrepancies between the transformer inputs must be resolved to make the underlying assumptions of knowledge distillation hold true.
+
+Hence, in this paper, we propose a weight-inheriting scheme that fixes the value of the BEV queries and positional encoding in the student with their values from the teacher detector \emph{during the whole training period}. Hence, the student detector can have consistent inputs with its teacher detector. 
+Surprisingly, we find that simply performing this weight-inheriting scheme can make a significant difference in the effectiveness of knowledge distillation, which has been discussed in the ablation study.
+
+
+
+
+% 1 - from the perspective of knowledge distillation
+% 2 - from the perspective of 

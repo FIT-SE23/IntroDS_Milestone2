@@ -1,0 +1,343 @@
+\documentclass{article}
+
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2022
+
+
+% ready for submission
+% \usepackage[preprint]{neurips_2022}
+% \usepackage[preprint]{gpsmdms_2022}
+\usepackage[final]{gpsmdms_2022}
+\usepackage{ant_cmds}
+
+% to compile a preprint version, e.g., for submission to arXiv, add add the
+% [preprint] option:
+%     \usepackage[preprint]{neurips_2022}
+
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+%     \usepackage[final]{neurips_2022}
+
+
+% to avoid loading the natbib package, add option nonatbib:
+    % \usepackage[nonatbib]{neurips_2022}
+
+
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{subfig}
+
+\newcommand{\robertcomment}[1]{\textcolor{olive}{[Robert:#1]}}
+
+\newcommand{\comment}[1]{\textcolor{red}{#1}}
+\renewcommand{\theequation}{\thesection.\arabic{equation}}
+
+
+\title{Provably Reliable Large-Scale Sampling from Gaussian Processes}
+
+
+\author{%
+  Anthony Stephenson \\
+  Department of Mathematics\\
+  Bristol University\\
+%   \texttt{hippo@cs.cranberry-lemon.edu} 
+\And
+  Robert Allison \\
+  Department of Mathematics\\
+  Bristol University\\
+  % \texttt{email} \\
+\And
+    Edward Pyzer-Knapp \\
+    IBM Research
+}
+
+\begin{document}
+
+\maketitle
+
+% \twocolumn
+
+\begin{abstract}
+  When comparing approximate Gaussian process (GP) models, it can be helpful to be able to generate data from any GP. If we are interested in how approximate methods perform at scale, we may wish to generate very large synthetic datasets to evaluate them. Na\"{i}vely doing so would cost \(\order{n^3}\) flops and \(\order{n^2}\) memory to generate a size \(n\) sample. We demonstrate how to scale such data generation to large \(n\) whilst still providing guarantees that, with high probability, the sample is indistinguishable from a sample from the desired GP.
+\end{abstract}
+
+\section{Introduction}
+
+\subsection{Motivation}
+    In the GP literature, even when an approximate model designed to be highly scalable is introduced, evaluation is usually done on a small-scale toy synthetic dataset of low dimension and on a selection of real datasets. When large synthetic data are used, they are often noisy versions of deterministic functions rather than genuine samples from a Gaussian process prior. We believe this leaves a gap in the analysis: careful assessment of performance at scale under controlled, model-consistent conditions. As such, in this paper we show how one can generate datasets that grant this option whilst defining the criteria necessary for these datasets to function as benchmarks. We acknowledge the work in \cite{Wilson2020} on sampling from the GP \emph{posterior} but point out that it is unhelpful for our purposes.
+
+\subsection{Sampling from Gaussian Processes}
+    To test GP approximations in a controlled environment we want to be able to generate reliable synthetic datasets from arbitrary GPs. Since a draw from a GP evaluated at a finite set of points is distributed according to a multivariate normal  distribution with some mean and covariance $m$ and $C$, we can form a sample by generating points from a standard Normal distribution and performing a linear  transformation using some decomposition of the covariance \(C=AA^T\) i.e. \(u \sim \normdist[u]{0}{I_n}\), \(y = Au + m\) \(\implies\) \(y \sim \normdist[y]{m}{C}\). Although we can generate $u$ efficiently, the decomposition \(C=AA^T\) is expensive (\(\order{n^3}\)) using standard methods (SVD or Cholesky). This quickly
+ becomes infeasible at large $n$, much like GP regression. As a result, we look to approximate methods to generate synthetic data at scale. 
+
+\subsection{Outline}
+    In this paper we seek to determine how to affordably generate large (approximate) samples from GPs such that any given sample is \emph{indistinguishable} (in some sense) from a sample drawn from the exact GP. 
+    We do so by first reviewing GP approximation techniques (excluding conjugate gradient based methods, which are considered in \ref{appx:cg}) from the literature that can be leveraged to generate samples from a GP prior and then computing bounds on relevant parameters to constrain the error between the approximate and exact samples (sections \ref{sec:rff} and \ref{sec:ciq}). We define this error in terms of the total variation distance. We go on to define our notion of ``indistinguishability'' in section \ref{sec:indistinguishable} before running experiments to support our claims in section \ref{sec:experiments}.
+    
+    % In section \ref{sec:rff} we consider using Random Fourier Features (RFF), first introduced in \cite{Rahimi2007} as a method of approximating an RBF kernel. \cite{Rahimi2007} and \cite{Sutherland2015} provide error analysis on the approximated kernel which we translate into a bound on the Total Variation distance (TV) between the exact GP and an approximate GP with the approximated kernel. 
+    % In section \ref{sec:ciq} we consider an alternative method; Contour Integral Quadrature (CIQ), described in \cite{Davies2005} and \cite{Hale2008}, and further developed in the context of GPs in \cite{Pleiss2020}. Here, we translate a result on the 2-norm error (in \cite{Pleiss2020}) into a bound on the TV.
+    % Section \ref{sec:precon} goes onto describe how the results from \ref{sec:ciq} can be improved with preconditioning.
+    % We then relate the bounds we obtain on the TV to a statement on the ``indistinguishability'' of the approximate and exact distributions in \ref{sec:indistinguishable}, before running some empirical experiments to support our claims. (\ref{sec:experiments}).
+
+\section{Random Fourier Features (RFF)}
+\label{sec:rff}
+  RFF were introduced as a method of approximating kernels at large scales in Support Vector Machines and Kernel Ridge Regression problems in \cite{Rahimi2007}. The method has since been studied extensively, for example in \cite{Li2019a,Yang2012,Sriperumbudur2015,Liu2021,Bach2017,Choromanski2018}. One of the appealing features of the RFF approximation for sampling from a GP is that we don't need to form the full Gram matrix (given by \(ZZ^T\) with \(Z \in \mathbb{R}^{n\times D}\)) to generate samples. To generate samples we need only construct a single $Z$ matrix and transform a variable $w\sim\normdist{0}{I_D}$ to get $\hat{f}=Zw$. We use the formulation suggested in \cite{Sutherland2015} to minimise the variance of our sampling and adapt their proof technique for our purposes in \ref{appx:rff_proof}.
+
+    \begin{lemma}
+        \label{lem:rff}
+            To generate a sample of size $n$ whose marginal distribution differs from the true marginal distribution from a
+            given GP by a total variation distance (\(\TV\)) of at most $\eps$, with probability \(1-\delta\) it is sufficient to use $D$ RFFs, where
+                \(
+                D \geq 8\log\left(\frac{n}{\sqrt{\delta}}\right)\frac{n^2}{8\eps^2\sigma_\xi^4}
+                \)
+            for some $\delta > 0$.
+    \end{lemma}
+     
+     This leads to an overall sampling complexity of \(\order{nD}=\order{n^3\log n}\) which
+     is \emph{worse} than what we would get using Cholesky decomposition. However, it is worth noting that, in terms of memory usage and ease of parallelism, this method is still competitive since we need only generate a single sample at a time, computing a single vector inner product per sample. With careful implementation, memory cost can be as low as \(\order{1}\) (see \ref{appx:rff} for details).
+     %%% need to say something about memory
+    %  This ostensibly requires storage of \(\order{D}\) since we need to store two \(D\)-dimensional vectors. This can be reduced to \(\order{d}\) (the dimensionality of the input space) if we are willing to further sacrifice time-complexity by regenerating our \(w\) vector at each point. Finally, in the special case of an RBF kernel with a single lengthscale, we can in fact decompose the spectral density componentwise to obtain a best-case memory-cost of \(\order{1}\).
+
+\section{Contour Integral Quadrature (CIQ)}
+\label{sec:ciq}
+   There is some literature dedicated to the computation of functions of square matrices via the approximation of the
+     Cauchy integral formula (\cite{Davies2005,Hale2008,Pleiss2020}). An algorithm for the function of interest for us, \(A^\half\), is derived in \cite{Hale2008} and subsequently built upon by \cite{Pleiss2020} where the authors derive an
+     efficient quadrature algorithm in this and the $A^{-\half}$ case, specifically citing sampling as a potential usage. We make use of their algorithm in this vein to estimate
+     matrix-vector products of the form $K^\half u$. We refer the reader to these sources for a thorough explanation of the method involved, but include a brief summary in \ref{appx:ciq_summary}.
+     
+     In addition to the superior time complexity we show below, this algorithm also has a modest memory overhead (\(\order{Qn}\) with \(Q\) the number of quadrature points) and general application to \emph{any} kernel, unlike the RFF method which is only applicable to stationary kernels and necessitates non-trivial derivations of Fourier features for non-RBF kernels.
+     
+    %   \subsection{Sampling}
+    %  \label{subsec:sampling}
+     \begin{algorithm}[H]
+         Define parameters $d$ ($x$-dimension), $\theta$ (kernel parameters), $\sigma_\xi^2$ (noise-variance) and $\eta$
+         (weight of noise-variance at CIQ approximation stage).
+         \begin{enumerate}
+             \item Sample $x$ data from some distribution, e.g. $x\sim\normdist[x]{0}{\frac{1}{d}I_d}$.
+             \item Construct partially noisy kernel $K_{\xi,ij}=k(x_i,x_j)+\eta\sigma_\xi^2\delta_{ij}$
+              \item Sample $u\sim\normdist[u]{0}{I_n}$.
+             \item Use CIQ to approximate $f\approx \hat{f} = M u$ where \(M\approx K_{\eta\xi}^\half\).
+             \item Add noise to the sample to get $\hat{y} = \hat{f} + \xi$ with 
+             $\xi \sim\normdist{0}{(1-\eta)\sigma_\xi^2 I_n}$.
+         \end{enumerate}
+         \caption{CIQ Sampling}
+         \label{alg:ciq_sample}
+     \end{algorithm}
+     
+     \begin{lemma}
+     \label{lem:ciq_bounds}
+         To sample approximate draws from a Gaussian Process with \(\TV < \eps\) when compared to a
+         draw from the exact Gaussian Process, $Q$ quadrature points and $J$ Lanczos iterations will be sufficient provided we use the
+         CIQ procedure from algorithm \ref{alg:ciq_sample} to generate our draw, where $Q$ and $J$ satisfy \(Q \geq \order{\log \left(\frac{n}{\eta\sigma_\xi^2}\right)(-\log\delta_Q)}\) and \(J \geq \ordtilde{\frac{\sqrt{n}}{\sqrt{\eta}\sigma_\xi}\log\frac{n}{\sigma_\xi(\eps\sigma_\xi\sqrt{1-\eta}-\delta_Q)}}\)
+        %  \eq{
+        %     Q & \geq \order{\log \frac{n}{\eta\sigma_\xi^2}(-\log\delta_Q)} \\
+        %     J &\geq \ordtilde{\frac{\sqrt{n}}{\sigma_\xi}\log\frac{n}{\sigma_\xi(\eps\sigma_\xi\sqrt{1-\eta}-\delta_Q)}}
+        %  }
+        with \(0<\delta_Q<\eps\sigma_\xi\sqrt{1-\eta}\).
+     \end{lemma}
+     
+     \subsection{Preconditioning}
+     \label{sec:precon}
+         It is shown in the appendix (\ref{eq:epsJ}) that the number of iterations $J$ depends primarily on the condition number of
+         the kernel, which implies that we can reduce \(J\) using preconditioning.
+
+         \begin{lemma}
+         \label{lem:nystrom_precond}
+             Using a rank-$k$ ($k=\sqrt{n}$) Nystr\"{o}m preconditioner on an ($n\times n$) kernel matrix with noise
+             variance $\eta\sigma_\xi^2$ and some constant \(\tilde{C}'>0\) means that setting
+             \newline
+             \(
+             J\geq 1 + \frac{\sqrt{\lambda_{k+1}}n^{3/8}}{\sqrt{\eta}\sigma_\xi} \left(\frac{5}{4}\log n-\log(\eps\sigma_\xi\sqrt{1-\eta}-\delta_Q) +\tilde{C}'\right)
+             \)
+             Lanczos iterations in the CIQ algorithm will satisfy our requirements.
+         \end{lemma}
+
+        %  \begin{lemma}
+        %  \label{lem:gauss_precond}
+        %  For a Gaussian kernel and $x\sim\normdist{0}{\sigma^2 I_d}$ with $\lambda_{k+1}\approx
+        %          ng(d,l)^dB^k$ (\cite{Wathen2015a}) where \(g\) is a function of dimension and lengthscale and \(B < 1\) and hence $B=\e^{-C}$ for some $C>0$;
+        %     %  For a Gaussian kernel and $x\sim\normdist{0}{\sigma^2 I_d}$ with $\lambda_{k+1}\approx
+        %     %      n(\frac{2a}{A})^{d/2}B^k$ (\cite{GP_book}) where \(B < 1\) and hence $B=\e^{-C}$ for some $C>0$;
+        %      \eq{
+        %          J &\geq \order{1}
+        %      }
+        %      will be sufficient, provided \(\frac{5}{4}\log n - C\sqrt{n}\) is a negative decreasing function of \(n\).
+        %  \end{lemma}
+         
+        %  which implies that for a large preconditioned Gaussian kernel with reasonable values of $\sigma^2$ and $l$ we will expect to need only $\order{1}$ iterations
+        %  (at moderately large $n$ - we might need considerably more than this at \emph{small} $n$). This illustrates a
+        %  trade-off between the effectiveness of the preconditioner and the rate of eigenvalue decay.
+
+        To make \ref{lem:nystrom_precond} more useful, we rely on a result from \ref{lem:general_precond} that shows that for a certain class of kernels we can relate the \(k+1^{th}\) eigenvalue to \(n\), to get a workable bound on \(J\):
+         \begin{lemma}
+         \label{lem:general_precond}
+             For a sufficiently smooth radial (\ref{proof:general_precond}) kernel function $k\in L^2_\mu$, some constant \(c_1>0\) and Nyström preconditioner of rank $\floor{\sqrt{n}}$ we define a variable \(\gamma = \frac{7}{8}\log n - \frac{c_1}{2}n^{1/d}\) to obtain sufficient conditions for \(J\) under three possible scenarios:
+             \begin{enumerate}[label=\roman*]
+                 \item \label{itm:modn} Moderate \(n\) s.t. \(\gamma > 1\): \( J \geq \order{n^{7/8}\log n} \)
+                 \item \label{itm:bign}Larger \(n\) s.t. \(\gamma \in (0,1)\): \(J \geq \order{(\log n)^2}\)
+                 \item \label{itm:asympn} \(n\rightarrow\infty\) s.t. \(\gamma < 0\): \(J \geq \order{1}\)
+             \end{enumerate}
+         \end{lemma}
+         
+        %  \begin{remark}
+        %          For sufficiently small lengthscale (e.g. \(l \lesssim 10^{-2}\)) and high dimensions (e.g. \(d \gtrsim 10\)) we expect the eigenvalues to decay slowly enough that the condition number improves, possibly to the extent that a preconditioner provides little-to-no additional benefit. Since the cost of preconditioning is the same order as a single Lanczos iteration we suggest applying it regardless.
+        %  \end{remark}
+        %  We note that there are cases (small \(n\) and certain regions of parameter space (e.g. where \(l<10^{-2},d>10\)) where preconditioning is ineffective and we ought not to apply it, but even in these cases, the additional work incurred by doing so is minimal next to the overall algorithm cost.
+        
+\section{``Indistinguishable'' distributions}
+\label{sec:indistinguishable}
+    We now define what we mean by `indistinguishable'. Assume that samples are provided either from the true GP $P_0$ with $p = \half$ or from the distribution of the approximating method  $P_1$ with $p = \half$ (i.e. a uniform prior on models). Our decision process is to select the model with the largest (exact) posterior probability. This can be shown to produce the smallest achievable error rate (\ref{proof:min_err_rate}). If the models were completely indistinguishable then the error rate would be $\half$. Perfect indistinguishability is an unachievable goal due to limited compute-resource so we instead require \(\Pr(\mbox{error})\) to be within \(\eps\) of \(\half\) for suitably small $\eps$.
+    
+    \begin{definition}[\(\eps\)-indistinguishable]
+        $P_0$ and $P_1$ are {\it $\eps$-indistinguishable}
+        if the above optimal Bayesian decision process has $\Pr(\mbox{error}) \geq \half - \eps$.
+    \end{definition}
+    
+    \begin{lemma}
+        \label{lem:indistinguishable}
+        $P_0$ and $P_1$ are $\eps$-indistinguishable
+        if $\TV(P_0,P_1) \leq 2 \eps $.
+    \end{lemma}
+    
+    When combining \ref{lem:indistinguishable} with \ref{lem:rff} and \ref{lem:ciq_bounds}, \ref{lem:nystrom_precond} and \ref{lem:general_precond} and by setting \(\eps\), we can obtain rigorous and stringent guarantees that synthetic data will behave like exact-GP data during subsequent analysis -  in particular for the purpose of evaluating approximate-GP regression performance. A further justification of this notion of indistinguishability and its relation to hypothesis testing is given in \ref{appx:indistinguishable}.
+
+\section{Experiments}
+\label{sec:experiments}
+    The results above provide bounds on fidelity parameters (\(D,J\)) of the sampling approximations. We run suboptimal hypothesis tests to demonstrate where choices of \(D,J\) are definitely insufficient to reach `indistinguishability' and to enable a like-for-like comparison between CIQ and RFF. The experiments we run generate data from a known GP (with an isotropic RBF kernel) using the approximate sampling procedure being tested. The data are then ``whitened'' using the true kernel matrix such that, when the data is sufficiently close to the true generating GP distribution, the output will be a vector of \(\normdist{0}{1}\) distributed points. We therefore test the hypothesis that the data is from the true GP by running a Cramér-von Mises test for normality on the output at a significance level \(\alpha\) (more detail on the specifics is provided in \ref{appx:experiments}).
+    
+    We generate a series of M datasets of sizes \((2^m)_{m=1}^M\) over a range of what we consider to be the data hyperparameters; that is the kernel-scale \(\sigma_f^2\), noise variance \(\sigma_\xi^2\), lengthscale \(l\) and dataset dimension \(d\). For each of these setups we run experiments with varying fidelity parameter to determine the value required for the rejection rate from the experiments to converge on the type I error rate, \(\alpha\), implying that the data is indistinguishable from the true GP using the (suboptimal) hypothesis test.
+
+\subsection{Results}
+\label{sec:results}
+    Figure \ref{main:a} shows the results of our experiments using the RFF method. We see that for each choice of \(n\) and for both lengthscales tested, the rate appears to have converged to the significance level before the number of RFFs predicted by \ref{lem:rff}. We suspect that the requirement that all elements of the difference matrix are bounded (see \ref{appx:rff_proof}) is too stringent and could be relaxed, on the grounds that there are only \(n\), not \(n^2\), independent elements. 
+    
+    \ref{main:b} and \ref{main:c} show the results when we use the CIQ method without and with preconditioning (respectively). As with the RFF experiments, we see convergence before the theorised bounds, as we should hope. It is clear that preconditioning improves the rate of convergence, as expected. 
+
+\begin{figure}
+    \centering
+    \subfloat[]{\label{main:a}\includegraphics[scale=0.3]{\detokenize{logreject-logD_byN_rff_1_2580211_rescaled}}}\\
+    
+    \begin{minipage}{.49\linewidth}
+    \centering
+    \subfloat[]{\label{main:b}\includegraphics[trim={0 0 3.55cm 0},clip,scale=0.3]{\detokenize{logreject-logD_byN_ciq_1_2703849_rescaled}}}
+    \end{minipage}
+    \begin{minipage}{.49\linewidth}
+    \centering
+    \subfloat[]{\label{main:c}\includegraphics[scale=0.3]{\detokenize{logreject-logD_byN_ciq_1_2686645_rescaled}}}
+    \end{minipage}
+    \caption{Rejection rate convergence with size of fidelity parameter. Significance level (\(\alpha\)) is shown by a blue dashed line and the 95\% CI around \(\alpha\) (for converged results) is in green. The range of results obtained from running a Cholesky benchmark is shown by the grey bar. The fidelity parameter is rescaled on the \(x\)-axis by the upper bound derived in the relevant section of this paper. Vertical black dashed line is at \(1.0\) indicating where we reach that bound. (a) shows the RFF case with no. RFF, D and \(\bar{D}(n)=n^2\log n\). (b) shows the convergence with Lanczos iterations \(J\) and \(\bar{J}(n)=\sqrt{n}\log n\). (c) is preconditioned CIQ with \(\bar{J}(n)=n^{3/8}\log n\).}
+    \label{fig:results}
+\end{figure}
+
+\section{Discussion and conclusion}
+    We show how to generate approximate samples from \emph{any} Gaussian Process that, with high probability, cannot be distinguished from a draw from the assumed GP. Bounds are derived to ensure that relevant approximation parameters are chosen to satisfy the requirements on the fidelity of the sample for arbitrary probabilistic bounds at a cost cheaper than a standard approach. We believe this work to be of use to researchers aiming to develop GP approximations for use on large datasets. For practical use, we generally suggest the use of CIQ over RFF or other common approaches on the basis of the strong theoretical guarantees we can provide, given some computational budget. We do note, however, that when memory is the main bottleneck RFF may be a preferable choice. We provide a table in \ref{appx:results} summarising the performance of different algorithms and discuss future work in \ref{appx:further}.
+
+
+\pagebreak
+\section*{Acknowledgments}
+% Removed for review to preserve anonymity.
+We would like to thank Hamza Alawiye for his original implementation of the RFF method; Nick Baskerville and Adam Lee for their advice on aspects of the GPytorch and CIQ code; IBM Research for supplying iCase funding for Anthony Stephenson; NCSC for contributing toward Robert Allison's funding and finally the reviewers for their constructive comments.
+
+
+\medskip
+
+\bibliographystyle{unsrt} %required to get references to show
+\bibliography{references.bib}
+\nocite{GP_book}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \section*{Checklist}
+
+
+% \begin{enumerate}
+
+
+% \item For all authors...
+% \begin{enumerate}
+%   \item Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?
+%     \answerYes{}
+%   \item Did you describe the limitations of your work?
+%     \answerYes{}
+%     {\bf Mentioned in passing in the general text and elaborated on in \ref{appx:further}.}
+%   \item Did you discuss any potential negative societal impacts of your work?
+%     \answerNo{}
+%     {\bf But we think the work is sufficiently abstract that any negative impacts would be negligible.}
+%   \item Have you read the ethics review guidelines and ensured that your paper conforms to them?
+%     \answerYes{}
+% \end{enumerate}
+
+
+% \item If you are including theoretical results...
+% \begin{enumerate}
+%   \item Did you state the full set of assumptions of all theoretical results?
+%     \answerYes{}
+%         \item Did you include complete proofs of all theoretical results?
+%     \answerYes{}
+% \end{enumerate}
+
+
+% \item If you ran experiments...
+% \begin{enumerate}
+%   \item Did you include the code, data, and instructions needed to reproduce the main experimental results (either in the supplemental material or as a URL)?
+%     \answerYes{}
+%     {\bf The URL is omitted for review to perserve anonymity.}
+%   \item Did you specify all the training details (e.g., data splits, hyperparameters, how they were chosen)?
+%     \answerNA{}
+%         \item Did you report error bars (e.g., with respect to the random seed after running experiments multiple times)?
+%     \answerNo{}
+%     {\bf Errorbars were omitted on figures for clarity, to stop them becoming too hard to read. Instead, a theoretically justified envelope was plotted to demonstrate the variability.}
+%         \item Did you include the total amount of compute and the type of resources used (e.g., type of GPUs, internal cluster, or cloud provider)?
+%     \answerYes{}
+%     {\bf See \ref{appx:implementation}. Precise details (location) removed to preserve anonymity.}
+% \end{enumerate}
+
+
+% \item If you are using existing assets (e.g., code, data, models) or curating/releasing new assets...
+% \begin{enumerate}
+%   \item If your work uses existing assets, did you cite the creators?
+%     \answerYes{}
+%     {\bf In the text and detailed further in \ref{appx:implementation}.}
+%   \item Did you mention the license of the assets?
+%     \answerNo{}
+%     {\bf But the paper introducing the software is cited and the GitHub linked where the licence is straightforward to find.}
+%   \item Did you include any new assets either in the supplemental material or as a URL?
+%     \answerYes{}
+%     {\bf A GitHub URL will be provided to the code used to generate datasets.}
+%   \item Did you discuss whether and how consent was obtained from people whose data you're using/curating?
+%     \answerNA{}
+%   \item Did you discuss whether the data you are using/curating contains personally identifiable information or offensive content?
+%     \answerNA{}
+% \end{enumerate}
+
+
+% \item If you used crowdsourcing or conducted research with human subjects...
+% \begin{enumerate}
+%   \item Did you include the full text of instructions given to participants and screenshots, if applicable?
+%     \answerNA{}
+%   \item Did you describe any potential participant risks, with links to Institutional Review Board (IRB) approvals, if applicable?
+%     \answerNA{}
+%   \item Did you include the estimated hourly wage paid to participants and the total amount spent on participant compensation?
+%     \answerNA{}
+% \end{enumerate}
+
+
+% \end{enumerate}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\appendix
+
+\input{appx}
+
+\end{document}

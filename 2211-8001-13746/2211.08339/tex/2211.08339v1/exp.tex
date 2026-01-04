@@ -1,0 +1,592 @@
+\documentclass[egpaper_final]{subfiles}
+\begin{document}
+    
+    \begin{table*}
+\caption{The VGG-16 architecture. The column "complexity" is portion of the theoretical time complexity each layer contributes. The column "PCA energy" shows feature map PCA Energy (top 50\% eigenvalues). }
+\label{tab:pca}
+\begin{center}
+\begin{tabular}{|l|c|c|c|c|c|}
+\hline
+           & \# channels & \# filters & output size & complexity (\%) & PCA energy (\%) \\ \hline
+conv1\_1  & 64          & 64         & 224         & 0.6             & 99.8            \\ 
+conv1\_2  & 64          & 64         & 224         & 12              & 99.0            \\ 
+pool1    &             &            & 112         &                 &                 \\ \hline
+conv2\_1  & 64          & 128        & 112         & 6               & 96.7            \\ 
+conv2\_2  & 128         & 128        & 112         & 12              & 92.9            \\ 
+pool2    &             &            & 56          &                 &                 \\ \hline
+conv3\_1  & 128         & 256        & 56          & 6               & 94.8            \\ 
+conv3\_2  & 256         & 256        & 56          & 12              & 92.3            \\ 
+conv3\_3  & 256         & 256        & 56          & 12              & 89.3            \\ 
+pool3    &             &            & 28          &                 &                 \\ \hline
+ conv4\_1 & 256         & 512        & 28          & 6               & 89.9            \\ 
+conv4\_2  & 512         & 512        & 28          & 12              & 86.5            \\ 
+conv4\_3  & 512         & 512        & 28          & 12              & 81.8            \\ 
+pool4    &             &            & 14          &                 &                 \\ \hline
+conv5\_1  & 512         & 512        & 14          & 3               & 83.4            \\ 
+conv5\_2  & 512         & 512        & 14          & 3               & 83.1            \\ 
+conv5\_3  & 512         & 512        & 14          & 3               & 80.8            \\ \hline
+\end{tabular}
+\end{center}
+\end{table*}
+    
+\begin{table*}[]
+\caption{Accelerating the VGG-16 model~\cite{Simonyan2014} using a speedup ratio of \x{2}, \x{4}, or \x{5} (\textit{smaller is better}).}
+        \label{tab:theo}
+\begin{center}        
+\begin{tabular}{|c|c|c|c|}
+\hline
+\multicolumn{4}{|c|}{Increase of top-5 error (1-view, baseline \origvgg\%)} \\ \hline
+Solution                    & \x{2}         & \x{4}         & \x{5}         \\ \hline
+\jader                      & -             & 9.7           & 29.7          \\ \hline
+\asym                       & 0.28          & 3.84          & -             \\ \hline
+\prft                   & 0.8           & 8.6           & 14.6          \\ \hline
+\RNP    &  -   & 3.23   &3.58   \\ \hline
+\spp    &  0.3   & 1.1   &2.3   \\ \hline
+Ours (without fine-tune)    & \vggtworaw    & \vggfourraw   & \vggfiveraw   \\ \hline
+Ours (fine-tuned)           & \textbf{0}             & \textbf{\vggfour}      & \textbf{\vggfive}      \\ \hline
+
+\end{tabular}
+\end{center}
+\end{table*}
+
+    We evaluation our approach for the popular VGG Nets~\cite{Simonyan2014}, ResNet~\cite{He2015}, Xception~\cite{chollet2016xception} on ImageNet~\cite{JiaDeng2009}, CIFAR-10~\cite{Krizhevsky2009} and PASCAL VOC 2007~\cite{pascal-voc-2007}.
+    
+    For Batch Normalization~\cite{ioffe2015batch}, 
+    we first merge it into convolutional weights, 
+    which do not affect the outputs of the networks. So that each \conv\ is followed by ReLU~\cite{nair2010rectified}.
+    We use Caffe~\cite{jia2014caffe}\footnote{https://github.com/yihui-he/caffe-pro/tree/master} for deep network evaluation, 
+    TensorFlow~\cite{tensorflow} for \sgd\ implementation (Sec.~\ref{sec:ablation})
+    and scikit-learn~\cite{scikit-learn} for solvers implementation.
+    For \channelpruning, we found that it is enough to extract 5000 images, and ten samples per image, which is also efficient (i.e., several minutes for VGG-16 \footnote{On Intel Xeon E5-2670 CPU}, Sec.~\ref{sec:ratio}).
+    On ImageNet, we evaluate the top-5 accuracy with the single view. 
+    Images are resized such that the shorter side is 256.
+    The testing is on the center crop of $224\times224$ pixels.
+    The augmentation for fine-tuning is the random crop of $224\times224$ and mirror.
+    
+    \subsection{Experiments with VGG-16}
+    VGG-16~\cite{Simonyan2014} is a 16 layers single-branch convolutional neural network, with 13 \conv s. 
+    It is widely used for recognition, detection and segmentation, \etc.
+    Single view top-5 accuracy for VGG-16 is \origvgg\%\footnote{http://www.vlfeat.org/matconvnet/pretrained/}. 
+    
+    \subsubsection{Single Layer Pruning}\label{sec:ablation}\label{sec:filtersingle}
+    
+    In this subsection,  we evaluate single layer acceleration performance using our algorithm in Sec.~\ref{sec:linear}.
+    For better understanding, we compare our algorithm with there naive channel selection strategies.
+    %Th
+    \firstk\ selects the first \textit{k} channels. 
+    \prune\ selects channels based on corresponding filters that have high absolute weights sum~\cite{Li2016}.
+    \sgd\ is a simple alternative of our approach to use the original weights as initialization, as solve the $\ell_1$ regularized problem in Eqn.~\ref{eq:l1} (\textit{w.r.t.} both the weights and connections) by stochastic gradient descent.
+
+    For fair comparison, 
+    we obtain the feature map indexes selected by each of them, 
+    then perform reconstruction (except \sgd, Sec. \ref{subprob1}).
+    We hope that this could demonstrate the importance of channel selection.
+    Performance is measured by the increase of error after a certain layer is pruned without fine-tuning, shown in Fig.~\ref{fig:ablation}.
+     
+    As expected, error increases as \ratio\ increases.
+    %r
+    Our approach is consistently better than other approaches in different \conv s under different \ratio.
+%    Al 
+    Unexpectedly, sometimes \prune\ is even worse than \firstk. % and \rand. 
+    We argue that \prune\ ignores correlations between different filters. 
+    Filters with large absolute weight may have a strong correlation. 
+    Thus selection based on filter weights is less meaningful.
+    Correlation on feature maps is worth exploiting.
+    We can find that channel selection affects reconstruction error a lot. Therefore, it is important for \channelpruning. 
+    
+    As for \sgd, we only performed experiments under \x{4} speed-up due to time limitation. Though it shares same optimization goal with our approach, simple \sgd\ seems difficult to optimize to an ideal local minimal. Shown in \figurename~\ref{fig:ablation}, SGD is obviously worse than our optimization method. 
+    
+    Also notice that \channelpruning\ gradually becomes hard, from shallower to deeper layers. 
+    It indicates that shallower layers have much more redundancy,
+    which is consistent with \cite{Zhang2015}.
+    We could prune more aggressively on shallower layers in whole model acceleration.
+    
+    \subsubsection{Whole Model Pruning} \label{sec:ratio}
+    
+
+    
+    
+%     \begin{table}
+%     \centering    
+%     \caption{VGG-16 feature map    PCA Energy (top 50\% eigenvalues)}
+%     \begin{tabular}{|c|c|}
+%         \hline
+%         Layer   & PCA Energy\\ \hline
+%         conv1\_1 & 99.8\%                            \\ \hline
+%         conv2\_1 & 96.7\%                            \\ \hline
+%         conv3\_1 & 94.8\%                            \\ \hline
+%         conv3\_2 & 92.3\%                            \\ \hline
+%         conv4\_1 & 89.9\%                            \\ \hline
+%         conv4\_2 & 86.5\%                           \\  \hline
+%     \end{tabular}
+%     \label{tab:pca}
+% \end{table}
+    
+
+    
+%     \begin{table}
+%     \centering
+%     \caption{Accumulated layerwise pruning error (top-5) for accelerating VGG-16 under $4\times$.}
+%     \begin{tabular}{|c|c|}
+%         \hline
+%         layer    & increased err. (\%) \\ \hline
+%         conv1\_2 & 0                   \\ 
+%         conv2\_1 & 0.1                 \\ 
+%         conv2\_2 & 0.2                 \\ 
+%         conv3\_1 & 0.8                 \\ 
+%         conv3\_2 & 4.4                 \\
+%         conv3\_3 & 4.2                 \\ 
+%         conv4\_1 & 5.7                 \\ 
+%         conv4\_2 & 7.4                 \\ 
+%         conv4\_3 & 7.9                 \\ \hline
+%         fine-tuned & 1.0                 \\ \hline
+%     \end{tabular}
+%     \label{tab:accum}
+% \end{table}
+
+    \begin{figure*}
+    \begin{center}
+        \includegraphics[width=\linewidth]{accum}
+    \end{center}
+    \caption{Accumulated layerwise pruning error for accelerating VGG-16 under $4\times$. "relative MSE" is the relative mean square error. After fine-tuning, the Top-5 drops is 1.0\%.}
+    \label{tab:accum}
+    \end{figure*}
+    
+%     \begin{table*}[]
+% \centering
+% \caption{Time consumption for pruning VGG-16 under \x{4}, on Intel Xeon E5-2670 CPU (time consumption may vary a little in each run). Our algorithm is very efficient.}
+% \label{tab:time}
+% \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|}
+% \hline
+%                & conv1\_2 & conv2\_1 & conv2\_2 & conv3\_1 & conv3\_2 & conv3\_3 & conv4\_1 & conv4\_2 & conv5\_3 & \multicolumn{2}{c|}{total}     \\ \hline
+% pruning        & 2.8      & 5.5      & 9.2      & 12.0     & 14.6     & 31.5     & 79.4     & 47.4     & -        & 202.4 & \multirow{2}{*}{265.6} \\ \cline{1-11}
+% reconstruction & 1.1      & 1.8      & 3.9      & 3.2      & 4.7      & 14.4     & 23.1     & 11.0     & -        & 63.2  &                        \\ \hline
+% \end{tabular}
+% \end{table*}
+
+
+    \begin{figure*}
+    \begin{center}
+    \includegraphics[width=\linewidth]{timecon}
+    \end{center}
+    \caption{Time consumption for pruning VGG-16 under \x{4}, on Intel Xeon E5-2670 CPU (measured by seconds, time consumption may vary a little in each run). Our algorithm is very efficient.}
+    \label{tab:time}
+    \end{figure*}
+
+    Shown in Table~\ref{tab:pca}, we analyzed PCA energy of VGG-16. It indicates that shallower layers of VGG-16 are more redundant, which coincides with our single layer experiments above. So we prune more aggressive for shallower layers. Preserving channels ratios for shallow layers (\verb|conv1_x| to \verb|conv3_x|) and deep layers (\verb|conv4_x|) is $1:1.5$.
+    \verb|conv5_x| are not pruned, since they only contribute 9\% computation in total and are not redundant, shown in Table~\ref{tab:pca}.
+    
+    We adopt the layer-by-layer whole model pruning proposed in Sec.~\ref{sec:whole}. \figurename~\ref{tab:accum} shows pruning VGG-16 under \x{4} speed-up, which finally reach 1.0\% increased of error after fine-tuning. It's easy to see that accumulated error grows layer-by-layer. And errors are mainly introduced by pruning latter layers, which coincides with our observation from single layer pruning and PCA analysis.
+    
+    Apart from the efficient inference model we attained, our algorithm is also efficient. Shown in \figurename~\ref{tab:time}, our algorithm could finish pruning VGG-16 under \x{4} within \textbf{5} minutes.
+    
+    Shown in Table~\ref{tab:theo}, whole model acceleration results under \x{2}, \x{4}, \x{5} are demonstrated.
+    After fine-tuning, we could reach \x{2} speed-up without losing accuracy.
+    Under \x{4}, we only suffers \vggfour\% drops.
+    Consistent with single layer analysis, our approach outperforms other recent pruning approaches (Filter Pruning~\cite{Li2016}, Runtime Neural Pruning~\cite{lin2017runtime} and Structured Probabilistic Pruning~\cite{wang2017structured}) by a large margin.
+    This is because we fully exploit channel redundancy within feature maps.
+    Compared with \tensordecom\ algorithms, our approach is better than \jadercite,
+    without fine-tuning. 
+    Though worse than \asym,
+    our combined model outperforms its combined Asym. 3D (Table~\ref{tab:combine}).
+    This may indicate that \channelpruning\ is more challenging than \tensordecom, 
+    since removing channels in one layer might dramatically change the input of the following layer.
+    However, \channelpruning\ keeps the original model architecture, do not introduce additional layers, 
+    and the absolute \ratio\ on GPU is much higher (Table~\ref{fig:real}).
+    
+    %In 
+    \subsubsection{Combined with Orthogonal Approaches}\label{sec:3Cexp}
+
+    \begin{table}
+        \caption{Performance of combined methods on the VGG-16 model~\cite{Simonyan2014} using a \ratio\ of \x{4} or \x{5}. 
+        Our 3C solution outperforms previous approaches. The top-5 error rate
+(1-view) of the baseline VGG-16 model is 10.1\%. (\textit{smaller is better}).}
+        \begin{center}
+    \begin{tabular}{|c|c|c|}
+        \hline 
+        \multicolumn{3}{|c|}{Increase of top-5 error (1-view)}                              \\ \hline
+        Solution & \x{4} & \x{5}  \\ 
+        \hline 
+        \asymd & 0.9 & 2.0  \\ 
+        \hline
+        \asymdft & 0.3 & 1.0  \\ 
+        \hline
+        Our 3C & \vggcfour  & \vggc  \\ 
+        \hline 
+        Our 3C (fine-tuned) & \textbf{\vggcftfour} & \textbf{\vggcft}  \\ 
+        \hline            
+    \end{tabular} 
+    \end{center}
+    \label{tab:combine}
+    \end{table}
+    
+    Since our approach exploits a new cardinality,
+    we further combine our \channelpruning\ with spatial factorization~\cite{jaderberg2014speeding} and channel factorization~\cite{Zhang2015} (Sec~\ref{sec:3C}).
+    Demonstrated in Table~\ref{tab:combine}, our 3 cardinalities acceleration (spatial, channel factorization, and \channelpruning, denoted by 3C) outperforms previous state-of-the-arts.
+    \asymd\ (spatial and channel factorization), factorizes a \conv\ to three parts: $1\times3,\ 3\times1,\ 1\times1$.
+    
+    We apply spatial factorization, channel factorization, and our \channelpruning\ together sequentially layer-by-layer. 
+    %E
+    We fine-tune the accelerated models for 20 epochs, 
+    since they are three times deeper than the original ones.
+    After fine-tuning, our \x{4} model suffers no degradation.
+    Clearly, a combination of different acceleration techniques is better than any single one.
+    This indicates that a model is redundant in each cardinality.
+    
+\subsubsection{Performance without Output Reconstruction}
+We evaluate whole model pruning performance without output reconstruction, to verify the effectiveness of the subproblem of $\wtwo$ (Sec.~\ref{subprob1}).
+Shown in Table \ref{tab:lls}, without reconstruction, the accumulated error will be unacceptable for multi-layer pruning. Without reconstruction, the error increases to 99\%. Even after fine-tuning the score is still much worse than the counterparts. This is because the LASSO step (Sec.~\ref{subprob0}) only updates $\lcoef$ with limited freedom ($dimensionality = \rank $), thus it is insufficient for reconstruction. So we must adapt original weights $\wtwo$ ($\out \times \rank \times \kh \times \kw$) to the pruned input channels.
+
+\begin{table}
+    \caption{Accelerating VGG-16 under \x{4} with or without subproblem $\lcoef$. It's clear that without reconstruction the error increases. The top-5 error rate
+(1-view) of the baseline VGG-16 model is 10.1\%.}
+    \begin{center}
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \multicolumn{3}{|c|}{Increase of top-5 err. (1-view)} \\ \hline
+        approach & before fine-tuning & fine-tuned \\ \hline
+        Ours & 7.9 & 1.0 \\ \hline
+        Without subproblem $\lcoef$ & 99 & 3.6 \\ \hline
+    \end{tabular}
+    \end{center}
+    \label{tab:lls}
+\end{table}
+
+\subsubsection{Comparisons with Training from Scratch}\label{sec:vggscratch}
+    \begin{table}
+    \caption{Comparisons with training from scratch, under \x{4} acceleration on the VGG-16 model. Our fine-tuned model outperforms scratch trained counterparts. The top-5 error rate
+(1-view) of the baseline VGG-16 model is 10.1\%. (\textit{smaller is better}).}
+    \begin{center}
+    \begin{tabular}{|c|c|c|}
+        \hline 
+           & Top-5 err. & Increased err.  \\ 
+        \hline 
+        From scratch  & \vggscratchacc  &  \vggscratcherr    \\ 
+        \hline 
+        From scratch (uniformed) & \vggscratchuniacc  & \vggscratchunierr     \\ 
+        \hline 
+        Ours & \vggfourrawacc & \vggfourraw  \\ % 0.3
+        \hline
+        Ours (fine-tuned) & \vggfouracc & \textbf{\vggfour}  \\ % 0.3
+        \hline
+    \end{tabular} 
+    \end{center}
+    \label{tab:orig}
+    \end{table}
+
+    Though training a compact model from scratch is time-consuming (usually 120 epochs),
+    it worths comparing our approach and from scratch counterparts.
+    To be fair, we evaluated both from scratch counterpart, 
+    and normal setting network that has the same computational complexity and same architecture.
+
+    Shown in Table~\ref{tab:orig}, 
+    we observed that it's difficult for from scratch counterparts to reach competitive accuracy.
+    Our model outperforms from scratch one.
+    Our approach successfully picks out informative channels and constructs highly compact models.  
+    We can safely draw the conclusion that the same model is difficult to be obtained from scratch.
+    This coincides with architecture design studies~\cite{huang2016speed,Alvarez2016} 
+    that the model could be easier to train if there are more channels in shallower layers.
+    However, \channelpruning\ favors shallower layers.
+    
+    For from scratch (uniformed),
+    the filters in each layer are reduced by half (e.g., reduce \verb|conv1_1| from 64 to 32).
+    We can observe that normal setting networks of the same complexity couldn't reach the same accuracy either.
+    This consolidates our idea that there's much redundancy in networks while training.
+    However, redundancy can be opt-out at inference time.
+    This may be an advantage of inference-time acceleration approaches over training-based approaches.
+    
+    Notice that there's a 0.6\% gap between the from scratch model and the uniformed one,
+    which indicates that there's room for model exploration.
+    Adopting our approach is much faster than training a model from scratch, even for a thinner one.
+    Further researches could alleviate our approach to do thin model exploring.
+
+  \subsubsection{Top-1 vs Top-5 Accuracy}
+    \begin{table*}
+    \caption{Increase of Top-1 and Top-5 error for accelerating VGG-16 on ImageNet. VGG-16 model's Top-5 and Top-1 error baselines are 29.5\% and 10.1\% respectively.}
+    \begin{center}
+    \begin{tabular}{|c|l|c|l|c|}
+\hline
+Model                     & \multicolumn{2}{l|}{Top-1}                 & \multicolumn{2}{l|}{Top-5}                 \\ \hline
+\multicolumn{1}{|l|}{}    & err. & \multicolumn{1}{l|}{increased err.} & err. & \multicolumn{1}{l|}{increased err.} \\ \hline
+$2\times$, fine-tuned     & 29.5 & 0.0                                 & 10.1 & 0.0                                 \\ \hline
+$4\times$, fine-tuned     & 31.7 & 2.2                                 & 11.1 & 1.0                                 \\ \hline
+$5\times$, fine-tuned     & 32.4 & 2.9                                 & 11.8 & 1.7                                 \\ \hline
+3C, $4\times$, fine-tuned & 29.2 & -0.3                                & 10.1 & 0.0                                 \\ \hline
+3C, $5\times$, fine-tuned & 29.5 & 0.0                                 & 10.4 & 0.3                                 \\ \hline
+From scratch              & 31.9 & 2.4                                 & 11.9 & 1.8                                 \\ \hline
+From scratch (uniformed)  & 32.9 & 3.4                                 & 12.5 & 2.4                                 \\ \hline
+\end{tabular}
+\end{center}
+    \label{tab:top1}
+\end{table*}
+
+Though our approach already achieved good performance with Top-5 accuracy, it is still possible that it can lead to significant Top-1 accuracy decrease.
+Shown in Table \ref{tab:top1}, we compare increase of Top-1 and Top-5 error for accelerating VGG-16 on ImageNet. 
+Though the absolute drop is slightly larger, Top-1 is still consistent with top-5 results. For 3C \x{4} and \x{5}, the Top-1 accuracy is even better. 3C \x{4} Top-1 accuracy outperforms the original VGG-16 model by \textbf{0.3}\%. 
+
+\subsubsection{Comparisons of Absolute Performance}\label{sec:gpu}
+\begin{table*}[]
+    \caption{GPU acceleration comparison. We measure forward-pass time per image. Our approach generalizes well on GPU. The top-5 error rate
+(1-view) of the baseline VGG-16 model is 10.1\%. (\textit{smaller is better}).}
+    \begin{center}
+\begin{tabular}{|c|c|c|c|}
+\hline
+Model & Solution & Increased err. & GPU time/ms \\ \hline
+VGG-16 & - & 0 & \round{3}{8.144125} \\ \hline
+\multirow{6}{*}{VGG-16 ($4\times$)} & \jader & 9.7 & \round{3}{8.05059375} (\x{1.01}) \\ \cline{2-4} 
+ & \asym & 3.8 & \round{3}{5.243625} (\x{1.55}) \\ \cline{2-4} 
+ & \asymd & 0.9 & \round{3}{8.5031875} (\x{0.96}) \\ \cline{2-4} 
+ & \asymdft & 0.3 & \round{3}{8.5031875} (\x{0.96}) \\ \cline{2-4} 
+ & Ours (fine-tuned) & \vggfour & \textbf{3.264 (\x{2.50})} \\ \cline{2-4} 
+ & Our 3C (fine-tuned) & \textbf{0.0} & 3.712 (\x{2.19}) \\ \hline
+\end{tabular}
+    \end{center}
+    \label{fig:real}
+\end{table*}
+
+    We further evaluate absolute performance of acceleration on GPU.
+    Results in Table~\ref{fig:real} are obtained under Caffe~\cite{jia2014caffe}, 
+    %\footnote{commit d8f79537977f9dbcc2b7054a9e95be00eb6f26d0 on Feb 10, 2017} 
+    CUDA8~\cite{cuda} and cuDNN5~\cite{cudnn}, with a mini-batch of 32 on a GPU\footnote{GeForce GTX TITAN X GPU}.
+    %Si
+    Results are averaged from 50 runs.
+    \Tensordecom\ approaches decompose weights into too many pieces, which heavily increase overhead.
+    They could not gain much absolute speed-up.
+    Though our approach also encountered performance decadence, 
+    it generalizes better on GPU than other approaches.
+    Our results for \tensordecom\ differ from previous research~\cite{Zhang2015,jaderberg2014speeding}, 
+    maybe because current library and hardware prefer single large convolution instead of several small ones.
+    
+    
+    
+    \subsubsection{Acceleration for Detection}    
+    VGG-16 is popular among object detection tasks~\cite{yolo,ssd,zhu2019feature,he2020deep,he2019bounding,he2019deep,he2018softer}.
+    We evaluate transfer learning ability of our \x{2}/\x{4} pruned VGG-16,
+    for Faster R-CNN~\cite{fasterrcnn}\footnote{https://github.com/rbgirshick/py-faster-rcnn} object detections.
+    PASCAL VOC 2007 object detection benchmark~\cite{pascal-voc-2007} contains 5k trainval images and 5k test images.
+    %O
+    The performance is evaluated by mean Average Precision (mAP) and mmAP (AP at IoU=.50:.05:.95, primary challenge metric of COCO~\cite{lin2014microsoft}).
+    %o
+    In our experiments, we first perform \channelpruning\ for VGG-16 on the ImageNet. 
+    Then we use the pruned model as the pre-trained model for Faster R-CNN.
+
+%         \begin{table}
+%     \centering
+%     \caption{\x{2}, \x{4} acceleration for Faster R-CNN detection. mmAP is AP at IoU=.50:.05:.95 (primary challenge metric of COCO~\cite{lin2014microsoft}). }
+%     \begin{tabular}{|c|c|c|c|c|}
+%         \hline 
+%         Speedup & mAP & $\Delta$ mAP & mmAP & $\Delta$ mmAP \\ 
+%         \hline 
+%         Baseline & 68.7  &  - & 36.7 & - \\ 
+%         \hline 
+%         \x{2} &  68.3 & 0.4 & 36.7 & 0.0 \\ 
+%         \hline 
+%         \x{4} & 66.9  & 1.8 & 35.1 & 1.6 \\ 
+%         \hline 
+%     \end{tabular} 
+    
+%     \label{tab:det}
+% \end{table}
+% 2x 0.6833
+
+\begin{table*}
+\caption{\x{2}, \x{4} acceleration for Faster R-CNN detection. mmAP is AP at IoU=.50:.05:.95 (primary challenge metric of COCO~\cite{lin2014microsoft}). }
+  \begin{center}
+  %\begin{adjustbox}{max width=\textwidth}
+  \tabcolsep=0.11cm
+\begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|}
+\hline 
+ & aero & bike & bird & boat & bottle & bus & car & cat & chair & cow & table & dog  & horse  & mbike & person & plant & sheep & sofa &train  & tv & mAP & mmAP \\ 
+\hline 
+orig & 68.5 & 78.1 & 67.8 & 56.6 & 54.3 & 75.6 & 80.0 & 80.0 & 49.4 & 73.7 & 65.5 & 77.7 & 80.6 & 69.9 & 77.5 & 40.9 & 67.6 & 64.6 & 74.7 & 71.7 & 68.7 & 36.7  \\ 
+\hline 
+\x{2} & 69.6&  79.3&  66.2&  56.1&  47.6&  76.8&  79.9&  78.2&  50.0&  73.0&  68.2&  75.7&  80.5&  74.8&  76.8&  39.1&  67.3&  66.8&  74.5&  66.1& 68.3 & 36.7\\ 
+\hline 
+\x{4} & 67.8 & 79.1 & 63.6 & 52.0 & 47.4 & 78.1 & 79.3 & 77.7 & 48.3 & 70.6 & 64.4 & 72.8 & 79.4 & 74.0 & 75.9 & 36.7 & 65.1 & 65.1 & 76.1 & 64.6 & 66.9 & 35.1 \\ 
+\hline 
+\end{tabular} 
+%\end{adjustbox}
+\end{center}
+\label{tab:det}
+\end{table*}
+
+    The actual running time of Faster R-CNN is 220ms / image. %\footnote{https://github.com/rbgirshick/py-faster-rcnn\#disclaimer}.
+    The \conv s contributes about 64\%.
+    %(
+    We got actual time of 94ms for \x{4} acceleration.
+   From Table~\ref{tab:det}, we observe 0.4\% mAP and 0.0\% mmAP drops of our \x{2} model, which is not harmful for practice consideration. Observed from mmAP, For higher localization requirements our speedup model does not suffer from large degradation.
+    
+    \subsection{Experiments with Residual Architecture Nets}
+    For Multi-path networks~\cite{szegedy2015going,He2015,chollet2016xception}, 
+    we further explore the popular ResNet~\cite{He2015} and latest Xception~\cite{chollet2016xception}, 
+    on ImageNet and CIFAR-10.
+    Pruning residual architecture nets is more challenging. 
+    These networks are designed for both efficiency and high accuracy.
+    \Tensordecom\ algorithms~\cite{Zhang2015,jaderberg2014speeding} are not applicable to these model.
+    Spatially, $1\times1$ convolution is favored, which could hardly be factorized.
+
+    \subsubsection{Filter-wise Pruning}
+    
+    \begin{figure}
+    \begin{center}
+    \includegraphics[width=\linewidth]{filter}
+    \end{center}
+    \caption{\filterwise\ performance analysis under different speed-up ratios (without fine-tuning), measured by increase of error on VGG-16 conv3\_2.
+        (\textit{smaller is better}).}
+    \label{fig:filterperf}
+    \end{figure}
+    
+    Under single layer acceleration, \filterwise\ (Sec.~\ref{sec:multi}) is more accurate than our original one, since it is more flexible, shown in \label{fig:filterperf}.
+    %Ho
+    From our ResNet pruning experiments in the next section, 
+    it improves 0.5\% top-5 accuracy for \x{2} ResNet-50 (applied on the first layer of each residual branch) without fine-tuning.
+    However, after fine-tuning, there's no noticeable improvement.
+    Besides, it outputs "irregular" \conv s, which need special library implementation support to gain practical speed-up.
+    Thus, we did not adopt it for our residual architecture nets.
+    
+    \subsubsection{ResNet Pruning} \label{sec:resnetimagenet}
+    
+\begin{table}[]
+    \caption{ResNet-50 Computational Complexity (bottleneck structure). ResNet-50 complexity uniformly drops on each residual block. $ix$ stands for the $x$th block of $i$th stage, $i=2,3,4,5, x=a,b,c$. The "Complexity" column is the portion of computation complexity each block contributes.}
+\begin{center}
+\begin{tabular}{|c|c|}
+\hline
+layer name & Complexity (\textperthousand) \\ \hline
+conv1      & 30                            \\ \hline
+$2a_{1}$   & 13                            \\ \hline
+$2a_{2a}$  & 3                             \\ \hline
+$ia_{1}$   & 26                            \\ \hline
+$ia_{2a}$  & 6                             \\ \hline
+$ix_{2a}$  & 13                            \\ \hline
+$ix_{2b}$  & 29                            \\ \hline
+$ix_{2c}$  & 13                            \\ \hline
+\end{tabular}
+\end{center}
+    \label{tab:rescomp}
+\end{table}
+
+    \begin{table}[]
+        \caption{\x{2} acceleration for ResNet-50 on ImageNet, the baseline network's top-5 accuracy is \resorig\% (one view). 
+        We improve performance with multi-branch enhancement (Sec. \ref{sec:multi}, \textit{smaller is better}).}
+        \begin{center}
+\begin{tabular}{|c|c|c|}
+\hline
+Solution & Speedup & Increased err. \\ \hline
+\thinet & $1.58\times$ & 1.53 \\ \hline
+\spp & $2\times$ & 1.8 \\ \hline
+Ours & \multirow{3}{*}{2$\times$} & 8.0 \\ \cline{1-1} \cline{3-3} 
+\begin{tabular}[c]{@{}c@{}}Ours\\ (enhanced)\end{tabular} &  & \resmb \\ \cline{1-1} \cline{3-3} 
+\begin{tabular}[c]{@{}c@{}}Ours \\ (enhanced, fine-tuned)\end{tabular} &  & \textbf{\resft} \\ \hline
+\end{tabular}
+        \end{center}
+        \label{tab:resnet}
+    \end{table}
+
+
+    ResNet complexity uniformly drops on each residual block, as is shown in Table~\ref{tab:rescomp}.
+    Guided by single layer experiments (Sec. \ref{sec:ablation}),
+    we still prefer reducing shallower layers heavier than deeper ones. 
+    
+    Following similar setting as \filterpruning~\cite{Li2016},
+    we keep 70\% channels for sensitive residual blocks (\verb|res5| and blocks close to the position where spatial size change, \eg \verb|res3a,res3d|). 
+    As for other blocks, we keep 30\% channels.
+    With the multi-branch enhancement, we prune \verb|branch2a| more aggressively within each residual block.
+    The preserving channels ratios for \verb|branch2a,branch2b,branch2c| is $2:4:3$ (\eg, Given 30\%, we keep 40\%, 80\%, 60\% respectively).
+    
+    We evaluate the performance of multi-branch variants of our approach (Sec. \ref{sec:multi}).
+    Our approach outperforms recent approaches (ThiNet~\cite{luo2017thinet}, Structured Probabilistic Pruning~\cite{wang2017structured}) by a large margin.
+    From Table~\ref{tab:resnet}, we improve 4.0\% % \eval{\resraw-\resmb} 
+    with our multi-branch enhancement.
+    This is because we accounted the accumulated error from shortcut connection which could broadcast to every layer after it.
+    And the large input \featch\ at the entry of each residual block is well reduced by our \sampling.
+
+   \subsubsection{Xception Pruning}
+%   
+       
+          \begin{table}
+        \caption{Comparisons for \xceptionfifty, under \x{2} acceleration ratio. The baseline network's top-5 accuracy is \xceptionorig\%. Our approach outperforms previous approaches. Most \structured\ methods are not effective on Xception architecture (\textit{smaller is better}).}
+        \begin{center}
+           \begin{tabular}{|c|c|}
+               \hline
+               Solution                      & Increased err.        \\ \hline
+               \pr                                                                     & \xceptionorig        \\ \hline
+               \prfttwo &  \xceptionpr          \\ \hline
+               Ours              & \xceptioncr          \\ \hline
+               Ours (fine-tuned)       &\textbf{\xceptionft} \\ \hline
+           \end{tabular}
+       \end{center}
+       \label{tab:xception}
+   \end{table}    
+   Since computational complexity becomes important in model design, 
+   separable convolution has been payed much attention~\cite{xie2016aggregated,chollet2016xception}.
+   Xception~\cite{chollet2016xception} is already spatially optimized and \tensordecom\ on $1\times1$ \conv\ is destructive.
+   Thanks to our approach, it could still be accelerated with graceful degradation.
+   For the ease of comparison, we adopt Xception convolution on ResNet-50, denoted by Xception-50.
+   Based on ResNet-50, we swap all \conv s with spatial conv blocks.
+   To keep the same computational complexity, 
+   we increase the input channels of all \verb|branch2b| layers by \x{2}.
+   The baseline Xception-50\footnote{https://github.com/yihui-he/Xception-caffe} has a top-5 accuracy of \xceptionorig\% and complexity of 4450 MFLOPs.
+   
+   We apply multi-branch variants of our approach as described in Sec. \ref{sec:multi}, 
+   and adopt the same pruning ratio setting as ResNet in the previous section.
+   Maybe because of Xception block is unstable,
+   %si
+   Batch Normalization layers must be maintained during pruning.
+   Otherwise, it becomes non-trivial to fine-tune the pruned model.
+
+   Shown in Table~\ref{tab:xception},
+   after fine-tuning, we only suffer \textbf{\xceptionft\%} increase of error under \x{2}.
+   \prli\ could also apply on Xception, though it is designed for small \ratio.
+   Without fine-tuning, the top-5 error is 100\%. 
+   After training 20 epochs, the increased error reach \xceptionpr\% which is like training from scratch.
+   % to
+   Our results for Xception-50 are not as graceful as results for VGG-16 since modern networks tend to have less redundancy by design.
+   
+       \subsubsection{Experiments on CIFAR-10}
+       Even though our approach is designed for large datasets,
+       it could generalize well on small datasets.
+       We perform experiments on CIFAR-10 dataset~\cite{Krizhevsky2009}, which is favored by many acceleration studies.
+       It consists of 50k images for training and 10k for testing in 10 classes. 
+       The original $32\times32$ image is zero padded with 4 pixels on each side, 
+    then random cropped to $32\times32$ at training time.
+    Our approach could be finished within minutes.
+
+   \begin{table*}
+    \caption{\x{1.4} and \x{2} speed-up comparisons for ResNet-56 on CIFAR-10, the baseline accuracy is 92.8\% (one view). We outperforms previous approaches and scratch trained counterpart (\textit{smaller is better}). 
+        %U
+    }
+    \begin{center}
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+Model & \multicolumn{2}{c|}{\x{1.4}}            & \multicolumn{2}{c|}{\x{2}} \\ \hline
+                                             & err.           & increased err.         & err.    & increased err.   \\ \hline
+\prft                                   & 7.2            & \textbf{0.0}           & 8.5     & 1.3              \\ \hline
+From scratch                                 & 7.8            & 0.6                    & 9.1     & 1.9              \\ \hline
+Ours                                         & 7.7            & 0.5                    & 9.2     & 2.0              \\ \hline
+Ours (fine-tuned)                            & 7.2            & \textbf{0.0}           & 8.2     & \textbf{1.0}     \\ \hline
+from scratch (uniformed)                     & \multicolumn{2}{c|}{\multirow{3}{*}{-}} & 8.7     & 1.5              \\ \cline{1-1} \cline{4-5} 
+ours (uniformed)                             & \multicolumn{2}{c|}{}                   & 10.2    & 3.0              \\ \cline{1-1} \cline{4-5} 
+ours (uniformed, fine-tuned)                 & \multicolumn{2}{c|}{}                   & 8.6     & \textbf{1.4}     \\ \hline
+\end{tabular}
+\end{center}
+    \label{tab:cifar}
+    \end{table*}
+
+       We reproduce ResNet-56\footnote{https://github.com/yihui-he/resnet-cifar10-caffe}, which has accuracy of 92.8\% (Serve as a reference, the official ResNet-56~\cite{He2015} has accuracy of 93.0\%).
+       For \x{2} acceleration, we follow similar setting as Sec.~\ref{sec:resnetimagenet} (keep the final stage unchanged, where the spatial size is $8\times8$).
+       Shown in Table~\ref{tab:cifar}, our approach is competitive with scratch trained one, without fine-tuning,
+       under both \x{1.4} and 
+       \x{2} speed-up.
+       After fine-tuning, our result is significantly better than \filterpruning~\cite{Li2016} and scratch trained one for both \x{1.4} and \x{2} acceleration.
+%   
+
+      \textbf{\textit{Reduce Shallow vs. Deep layers}}:
+      Denoted by \textit{(uniform)} in Table \ref{tab:cifar}, uniformed solution prune each layer while the same pruning ratio.
+%       Our \x{2} model distribute reduction uniformly on $conv1_x$ and $conv2_x$.
+      Clearly, our uniformed results are worse than shallow layers heavily reduced ones.
+      However, uniformed model from scratched is better than its counterpart.
+      This is because \channelpruning\ favors less channels on shallow layers, however from scratch models performs better with more shallower layers.
+      It indicates that redundancy on shallow layers is necessary while training, which could be removed at inference time. 
+
+
+\end{document}

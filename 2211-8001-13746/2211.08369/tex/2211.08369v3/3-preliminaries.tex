@@ -1,0 +1,76 @@
+\section{Preliminaries}
+
+% The main goal of our work is to analyze the underlying cause of low agreement between various saliency methods for the same model instance.
+In this section, we delineate our experimental setup, detailing the considered datasets, models, their training procedure, the saliency methods which we use to interpret the decisions of the models, and the regularization techniques we use to improve agreement between saliency methods.
+
+\subsection{Datasets}
+\label{subsec:datasets}
+Leaning on the work of \citet{neely2021order}, which motivated us to explore the valley of explainability, we aim to investigate the protruding problem of low agreement between saliency methods. We investigate three different types of single-sequence binary classification tasks on a total of four datasets. In particular, we evaluate sentiment classification on the movie reviews \cite[\textbf{IMDB};][]{maas-etal-2011-learning} and the Stanford Sentiment Treebank \cite[\textbf{SST-2};][]{socher-etal-2013-parsing} datasets, using the same data splits as \citet{jain2019attention}. We include two more tasks, examining the subjectivity dataset \cite[\textbf{SUBJ};][]{pang-lee-2004-sentimental}, which classifies movie snippets into subjective or objective, and question type classification  \cite[\textbf{TREC};][]{li-roth-2002-learning}. To frame the TREC task as binary classification, we select only the examples labeled with the two most frequent classes (ENTY -- entities, HUM -- human beings) and discard the rest.
+
+\subsection{Models}
+For comparability, we opt for the same models as \citet{neely2021order}. Specifically, we employ the Bi-LSTM with additive self-attention \cite[\textbf{\textsc{jwa}};][]{jain2019attention}.
+We initialize word representations for the \textsc{jwa} model to $300$-d GloVe embeddings  \cite{pennington-etal-2014-glove}. 
+We also employ a representative model from the Transformer family  \cite{vaswani-etal-2017-attention} in DistilBERT  \cite[\textbf{\textsc{dbert}};][]{sanh-etal-2019-distilbert}.
+% Mislim da nije relevantno (Martin)
+% \alert{We use a linear head for classification, placing a head on top of each model.}
+% \todo{training procedure}
+
+Both models work similarly: the input sequence of tokens $\{x_1, \ldots, x_T\}$ is first embedded $\{e_1, \ldots, e_T\}$ and then contextualized $\{h_1, \ldots, h_T\}$ by virtue of an LSTM network or a Transformer.
+The sequence of contextualized hidden states is then aggregated to a sequence representation $h$, which is then fed as input to a decoder network. % \todo{myb sequence repr = $s$ instead of $h$}
+
+\subsection{Explainability Methods}
+We make use of ready-made explainability methods from the propagation- and gradient-based families used by \citet{neely2021order}: Deep-LIFT \cite{shrikumar2017learning}, Integrated Gradients \cite[Int-Grad;][]{sundararajan2017axiomatic} and their Shapley variants \cite{lundberg2016unexpected}, Deep-SHAP and Grad-SHAP.\footnote{We use implementations of explainability methods from the Captum framework: \url{https://github.com/pytorch/captum}}
+Since we evaluate agreement on the entire test set instead of an instance subset \cite{neely2021order}, we exclude LIME \cite{ribeiro2016should} from the comparison as it is not computationally feasible to train the surrogate model for all test instances across all training setups.
+
+% Intro: explainability
+Each saliency method produces a set of importance scores for each input (sub)word token.
+When evaluating the agreement between different saliency methods for a single trained model, one would expect the importance scores for the same input instance to be similar, as the same set of parameters should produce a unique and consistent importance ranking of input tokens.
+% Where in computer vision the inputs are pixels, in natural language processing they are (sub)word tokens.
+% Intro: Saliency scores
+% In our case, we limit ourselves to importance scores assigned by the aforementioned set of saliency methods, where the higher the importance score $s_t$, the more important the corresponding token $x_t$.
+% Intro: evaluating agreement
+
+\subsection{Regularization Methods}
+
+% As we will elaborate later on (\Cref{sec:agreement-cartography}), 
+As alluded to earlier, we suspect one cause of disagreement between saliency method explanations to be rooted in representation entanglement.
+To counteract this issue, we employ two regularization schemes that have been shown to improve the faithfulness of the attention mechanism as a method of interpretability: \textsc{conicity} \cite{mohankumar2020towards} and \textsc{tying} \cite{tutek2020staying}.
+Both of these methods address what we believe is the same underlying issue in \textit{recurrent} models -- the fact that hidden representations $h_t$ are often very similar to each other, indicating that they act more as a sequence representation rather than a contextualization of the corresponding input token $x_t$.
+
+Each regularization method tackles this problem in a different manner. \textsc{conicity} aims to increase the angle between each hidden representation and the mean of the hidden representations of a single instance.
+The authors first define the \textit{alignment to mean} (ATM) for each hidden representation as the cosine similarity of that representation to the average representation:
+%
+\begin{equation}
+    \text{ATM}(h_i, \mathbf{H}) = \text{cosine}(h_i, \frac{1}{T}\sum_{j=1}^T h_j)
+    \label{eq:atm}
+\end{equation}
+%
+\noindent where $\mathbf{H}=\{h_1, \ldots, h_T\}$ is the set of hidden representations for an instance of length $T$. Conicity is then defined as the average ATM for all hidden states $h_i \in H$:
+%
+\begin{equation}
+    \text{conicity}(\mathbf{H}) = \frac{1}{T}\sum_{i=1}^T \text{ATM}(h_i, H)
+    \label{eq:conicity}
+\end{equation}
+%
+A conicity value implies that all hidden representations exist in a narrow cone and have high similarity -- to counteract this unwanted effect, during training, we minimize this regularization term weighted by $\lambda_{con}$ along with the binary cross entropy loss.
+
+Similarly, \textsc{tying} also aims to incentivize differences between hidden states by enforcing them to ``stay true to their word'' through minimizing the $L_2$ norm of the difference between each hidden state $h_t$ and the corresponding input embedding $e_t = \text{embed}(x_t)$:
+%
+\begin{equation}
+    \text{tying}(\mathbf{H}, \mathbf{E}) = \frac{1}{T} \sum_{i=1}^T \lVert h_i - e_i \rVert_2^2
+    \label{eq:tying}
+\end{equation}
+%
+\noindent where $\mathbf{E} = \{e_1, \ldots, e_T\}$ is the sequence of embedded tokens. During training, we minimize this regularization term weighted by $\lambda_{tying}$ along with the binary cross entropy loss.
+
+By penalizing the difference between hidden representations and input embedding, one achieves two goals: (1) the embedding and hidden state representation spaces become better aligned, and (2) each hidden representation comes closer to its input embedding.
+The latter enforces hidden states to differ from each other: because different embeddings represent the semantics of different tokens, their representations should also differ, and this effect is then also evident in the hidden representations.
+
+% Perhaps remove this reasoning, not necessary
+Although both works introduced other methods of enforcing differences between hidden states, namely orthogonal-LSTM and masked language modeling as an auxiliary task, we opt for \textsc{conicity} and \textsc{tying} as they were both shown to be more efficient and more stable in practice.
+
+
+% \subsection{Experimental Setup}
+% When training our models, we perform a grid search over the regularization hyperparameters for all datasets and models considered, selecting the models which yielded best average $F_1$ score across datasets over $5$ runs with different random seeds.
+% Due to space limitations we report the detailed experimental setup in \Cref{sec:A}.
+

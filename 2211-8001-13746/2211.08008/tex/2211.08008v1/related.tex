@@ -1,0 +1,293 @@
+\section{Preliminaries \& Related Work}
+
+\subsection{Adversarial Attacks}
+
+An adversarial example
+adds a small perturbation,
+typically bounded a small value
+with \( \ell^p \) norms,
+to the original image,
+such that the model under attack
+can be deceived into giving incorrect results.
+The advent of adversarial attacks~\cite{szegedy14}
+has piqued the interest of deep learning practitioners,
+and revealed security concerns
+of deep learning~\cite{%
+    tramer2019adversarial,rosenberg2021adversarial},
+improved GAN training~\cite{bashkirova2019adversarial}
+transfer learning~\cite{utrera2021adversariallytrained,deng2021adversarial},
+and DNN interpretability~\cite{ross2018improving},
+\etc{}
+Formally,
+assuming a defending classifier
+\( f: \inputset \to \outputset \),
+taking an input image
+\( \x \in \inputset = \intensorset \)
+as input,
+and \( \arg\max f\parens{\x} \)
+predicts the correct class label \( y \in \classset \),
+then an attacker attempts to find an adversarial example
+\( \xadv \) in the set:
+\begin{equation}
+    \braces{
+        \xadv \in \advset
+        \colon
+        \arg\max f\parens{\xadv} \neq y
+    }.
+    \label{eq:adversarial_example}
+\end{equation}
+Here,
+\( \xadv \in \advset \)
+constrains the adversarial example \( \xadv \)
+to be within both the input space \( \inputset \)
+and a small \( \epsilon \)-ball
+of \( \ell^p \)-distance
+from the original image \( \x \),
+or equivalently \( \norm{\x - \xadv}_p \leq \epsilon \).
+Satisfying the condition
+\( \arg\max f\parens{\x} \neq y \)
+means that \( f\parens{\x} \) fails
+to give the expected correct classification \( y \).
+We focus on the \( \ell^\infty \)
+white-box threat model
+commonly considered by the defenses
+examined in this paper,
+which grants the attacker completely access
+to the internals of the defender,
+including, for instance, its model architecture,
+parameters, training algorithms, \etc{}
+
+One of the popular and effective white-box attacks
+used by many defenders
+to evaluate their robustness
+is \emph{projected gradient descent} (PGD)~\cite{madry18},
+which finds adversarial examples
+by maximizing the classification loss
+with gradient descent:
+\begin{equation}
+    \xadv_{i + 1} = \project\parens{
+        \xadv_i + \alpha_i \sign\parens{
+            \nabla \loss\parens{f\parens{\xadv_i}, y}
+        }
+    },
+\end{equation}
+where
+\( \loss \) is typically
+the softmax cross-entropy (SCE) loss
+used to train the model,
+ \( \alpha_i \) is the step size,
+and we let the initial
+\( \xadv_0 \triangleq \project\parens{\x + \m} \).
+The projection function \( \project\parens{\mathbf{v}} \)
+constrains its input \( \mathbf{v} \)
+to be within the feasible region \( \advset \),
+and finally
+\( \m \sim \uniform{-\epsilon, \epsilon} \)
+is a uniformly distributed noise
+bounded by \( \bracks{-\epsilon, \epsilon} \).
+Besides PGD,
+C\&W~\cite{carlini17}
+is also a gradient-based attack
+which, instead of projection,
+indirectly constrains the search space
+by regularization.
+
+As PGD gains popularity,
+many defense mechanisms
+rely on it to evaluate their robustness.
+Unfortunately,
+AutoAttack (AA)~\cite{croce20aa}
+finds that many of the defenses
+may inadvertently break PGD-based attacks,
+which result in drastic overestimation of their robustness,
+and proposes to combine an ensemble of diverse attacks
+to minimize robustness overestimation.
+LAFEAT~\cite{lafeat}
+learns to leverage intermediate layers of the DNN,
+and shows that attacking multiple layers
+can produce stronger attacks,
+but unfortunately
+it cannot be applied to ensemble defenses.
+Adaptive Auto Attack (\aaa)~\cite{ye2022aaa}
+improves attack success rates
+by using the gradient directions
+to prescribe a more effective initial random perturbation.
+As defenders
+may design mechanisms
+to circumvent existing attacks,
+Adaptive attacks~\cite{tramer2020adaptive}
+manually tailor specific attack strategies
+for an extensive set of defenses.
+Finally,
+Composite Adversarial Attacks (CAA)~\cite{mao2021caa}
+further combine a large selection
+of attack methods,
+and use a genetic algorithm
+to learn an optimal attacking sequence.
+In comparison,
+\attack{}
+is a unified approach
+which uses only one attack algorithm,
+does not require
+a compute-intensive learning procedure,
+and yet it still achieves
+fast and SOTA estimation
+of ensemble robustness.
+% In this paper
+% we provide comprehensive comparisons of \attack{}
+% against all above attack strategies
+% except LAFEAT,
+
+\subsection{Defending Against Adversarial Attacks}
+
+Defending against adversarial attacks
+can be defined as a saddle-point problem
+to minimize the training loss
+on adversarial examples~\cite{madry18}
+with samples \( (\x, y) \) drawn from the training set:
+\begin{equation}
+    \min_{\allw} \expect[\parens{\x, y}]{
+        \max_{\xadv \in \advset}
+        \loss\parens{ f\parens\xadv, y }
+    },
+\end{equation}
+where \( \loss \) is the training loss,
+\eg{}, the SCE loss.
+A direct optimization-based approach
+to approximately
+solving the above problem
+is \emph{adversarial training}~\cite{madry18},
+\ie{}, to train the DNN model
+with its own adversarial examples.
+Training DNNs to be robust
+is, however, a challenging endeavor.
+First,
+it may be much more compute intensive
+as training examples
+are typically generated with PGD~\cite{madry18},
+requiring a few forward/backward passes
+of the DNN\@.
+Second,
+to avoid overfitting,
+it requires stopping training early,
+a much larger size of the training set~\cite{carmon19},
+and using improved data augmentation~\cite{rebuffi2021data}
+or generated data~\cite{gowal2021generated}.
+Thirdly,
+as noted
+by other literatures~\cite{croce20aa,lafeat},
+currently no other design choices
+can rival the robustness provided by adversarial training,
+and notably,
+many defense strategies
+are considered harmful
+to model robustness~\cite{tramer2020adaptive}.
+Finally,
+the resulting models often
+cannot achieve high clean accuracy~\cite{tsipras2018robustness}.
+
+\subsection{Ensemble Defenses \& Ensemble-forming Strategies}
+
+Ensemble-based defense techniques
+may pave an alternative path
+to address the challenges of adversarial robustness,
+as they could potentially work around
+the above limitations of adversarial training.
+Adopting the theme
+of minimizing adversarial example transferability
+across sub-models,
+each ensemble defense
+proposed unique solutions.
+ADP~\cite{pang2019adp}
+increases the orthogonality
+of non-maximal class logits among sub-models
+to encourage diversity.
+GAL~\cite{kariyappa2019gal}
+minimizes a gradient alignment loss,
+which directly reduces the cosine-similarity
+between sub-models.
+Building on top of this,
+TRS~\cite{yang2021trs}
+further regularizes the smoothness of the loss function,
+as gradient orthogonality with smoothness
+may further diversify sub-models.
+Dverge~\cite{yang2020dverge}
+instead uses the adversarial examples
+of a sub-model to train another sub-model,
+thus lowering transferability.
+Ensemble defenses are also particularly interesting,
+as they are the last line of defense
+against even the strongest existing white-box attacks
+% (\Cref{fig:intro:scatter}),
+without resorting to adversarial training,
+showing a certain degree of robustness.
+% TODO PDD
+
+% \subsection{Ensemble-forming Strategies}
+
+Besides the above mechanisms
+for training a successful ensemble defense,
+there exists different ways
+to combine sub-model predictions.
+Let us assume
+that an ensemble defense
+trains \( M \) sub-models,
+\( \f{m}: \inputset \to \outputset \)
+for \( m \in [1:M] \),
+an ensemble
+\( \f{\E}: \inputset \to \outputset \)
+thus forms a final classification result
+by combining individual decisions
+from the sub-models,
+namely:
+\begin{equation}
+    \textstyle \f{\E}(\x) =
+    \frac1M \ssum_{m\in[1:M]} \ensop\parens{\f{m}\parens{\x}},
+\end{equation}
+where \( \ensop \) is the ensemble-forming operator.
+In this paper,
+we investigate
+\( \ensop \in \braces{\softmax, \wta, \id} \),
+where the potential choices
+respectively denoting forming an ensemble
+from sub-model outputs \( \f{m}\parens{\x} \)
+by either summing predicted probabilities
+(evaluated with \( \softmax \)),
+or majority votes
+(using \( \wta \), the winner-take-all operator),
+or simply summing the logits
+(with \( \id \), the identity operator).
+Defending ensemble methods~\cite{
+    pang2019adp,kariyappa2019gal,yang2020dverge,yang2021trs}
+tested in this paper
+all employed the \( \softmax \)-based strategy
+to report their robustness.
+Methods that are exceptions
+to these options exist,
+for instance,
+ECOC~\cite{verma2019ecc}
+allows sub-models
+to produce binary predictions,
+and use error correcting codes
+based on the Hamming distance
+to combine the predictions
+into classification outputs.
+This approach
+is unfortunately not robust,
+and the added complexity
+is error-prone
+and may harm robustness~\cite{tramer2020adaptive}.
+
+Moreover,
+as the voting (\( \wta \)) strategy
+is non-differentiable,
+an attacker can soften it approximately
+using a softmax operation
+with temperature \( \tau \),
+where we used \( \tau = 0.1 \) universally:
+\begin{equation}
+    \textstyle
+    \softwta_{\tau}\parens{\x}
+    \triangleq \softmax\parens*{\x / \tau}.
+    \label{eq:softwta}
+\end{equation}

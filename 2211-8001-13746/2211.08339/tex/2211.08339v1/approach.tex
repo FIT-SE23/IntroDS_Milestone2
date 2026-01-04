@@ -1,0 +1,247 @@
+\documentclass[egpaper_final]{subfiles}
+\begin{document}    
+    In this section, we first propose a \channelpruning\ algorithm for a single layer,
+    then generalize this approach to multiple layers or the whole model.
+    Furthermore, we discuss variants of our approach for multi-branch networks.
+    
+    \subsection{Formulation}\label{sec:linear}
+    \newcommand{\rankcontrain}{ \norm{\lcoef}_0 \leq \rankp}
+    \newcommand{\wtwocontrain}{ \forall i \norm{\wtwoi}_F =1}    
+    
+    \figurename~\ref{fig:ill} illustrates our \channelpruning\ algorithm for a single \conv.
+    We aim to reduce the number of channels of feature map B while maintaining outputs in feature map C.
+    Once channels are pruned, 
+    we can remove corresponding channels of the filters that take these channels as input.
+    %T
+    Also, filters that produce these channels can also be removed.
+    % R
+    It is clear that \channelpruning\ involves two key points. %: ch
+    The first is channel selection since we need to select proper channel combination to maintain as much information.
+    The second is reconstruction. We need to reconstruct the following feature maps using the selected channels.
+    
+    Motivated by this, we propose an iterative two-step algorithm:
+    \begin{enumerate}
+    \item In one step, we aim to select most representative channels.
+    Since an exhaustive search is infeasible even for small networks,
+    we come up with a \las\ based method to figure out representative channels and prune redundant ones.
+    \item In the other step, we reconstruct the outputs with remaining channels with linear least squares.
+    \end{enumerate}
+    We alternatively take two steps.
+
+    Formally, to prune a feature map B with $\rank$ channels, we consider applying $\out \times \rank \times \kh \times \kw$ convolutional filters $\wtwo$ on $\samp \times \rank  \times \kh \times \kw$ input volumes $\reX$ sampled from this feature map, which produces $\samp \times \out$ output matrix $\reY$ from feature map C.
+    Here, $\samp$ is the number of samples, $\out$ is the number of output channels, and $\kh, \kw$ are the kernel size. 
+    For simple representation, bias term is not included in our formulation.
+    To prune the input channels from $\rank$ to desired $\rankp$ ($0 \leq \rankp \leq \rank$), while minimizing reconstruction error, 
+    we formulate our problem as follow:
+    \begin{equation}\label{eq:l0}
+    \begin{aligned}
+    &     \argmin_{\lcoef, \wtwo} \frac{1}{2\samp} \norm{\reY - \sum_{i=1}^{\rank} \lcoefi \reXi \wtwoi^\top }^2_F \\
+    & \st \rankcontrain
+    \end{aligned}
+    \end{equation}
+    
+    $\norm{ \cdot }_F$ is Frobenius norm.
+    $\reXi$ is $\samp \times \kh\kw$ matrix sliced from $i$th channel of input volumes $\reX$, $i = 1,...,\rank$.
+    $\wtwoi$ is $\out \times \kh\kw$ filter weights sliced from $i$th channel of $\wtwo$. 
+    $\lcoef$ is coefficient vector of length $\rank$ for channel selection, and $\lcoefi$ ($i$th entry of $\lcoef$) is a scalar mask to $i$th channel (i.e. to drop the whole channel or not).
+    Notice that, if $\lcoefi = 0$, $\reXi$ will be no longer useful,
+    which could be safely pruned from feature map B.
+    $\wtwoi$ could also be removed.
+    $\rankp$ is the number of retained channels, which is manually set as it can be calculated from the desired speed-up ratio. For whole-model speed-up (i.e. Section \ref{sec:ratio}), given the overall speed-up, we first assign speed-up ratio for each layer then calculate each $\rankp$.
+    
+    \subsection{Optimization}
+    Solving this $\ell_0$ minimization problem in Eqn.~\ref{eq:l0} is NP-hard. 
+    %In a
+    Therefore, we relax the $\ell_0$ to $\ell_1$ regularization:
+    \begin{equation}\label{eq:l1}
+    \begin{aligned}
+    &     \argmin_{\lcoef, \wtwo} \frac{1}{2\samp} \norm{\reY - \sum_{i=1}^{\rank} \lcoefi \reXi \wtwoi^\top }^2_F + \lalpha \norm{\lcoef}_1 \\
+    & \st \rankcontrain, \wtwocontrain
+    \end{aligned}
+    \end{equation}
+    
+    $\lalpha$ is a penalty coefficient.
+    By increasing $\lalpha$, there will be more zero terms in $\lcoef$ and one can get higher \ratio.
+    We also add a constraint $\wtwocontrain$ to this formulation to avoid trivial solution.
+
+    Now we solve this problem in two folds.
+    First, we fix $\wtwo$, solve $\lcoef$ for channel selection.    
+    Second, we fix $\lcoef$, solve $\wtwo$ to reconstruct error.
+    
+    \subsubsection{(i) The subproblem of $\lcoef$} \label{subprob0}
+    In this case, $\wtwo$ is fixed. 
+    We solve $\lcoef$ for channel selection.
+    %$
+    This problem can be solved by \las~\cite{tibshirani1996regression,breiman1995better}, which is widely used for model selection.
+    \begin{equation}
+    \begin{aligned}
+    & \hat{\lcoef}^{LASSO}(\lalpha)= \argmin_{\lcoef} \frac{1}{2\samp}\norm{\reY -  \sum_{i=1}^{\rank} \lcoefi\wxi}_F^2 + \lalpha \norm{\lcoef}_1 \\
+    & \st \rankcontrain
+    \end{aligned}
+    \end{equation}
+    Here $\wxi = \reXi\wtwoi^\top$ (size $\samp \times \out$).
+    We will ignore $i$th channels if $\lcoefi = 0$.
+    
+    \subsubsection{(ii) The subproblem of $\wtwo$} \label{subprob1}
+    In this case, $\lcoef$ is fixed.
+    We utilize the selected channels to minimize reconstruction error.
+    We can find optimized solution by least squares:
+    \begin{equation}
+    \argmin_{\reW} \norm{\reY - \cx(\reW)^\top}_F^2
+    \end{equation}
+    Here $\cx = [\lcoefx{1}\reXx{1}\; \lcoefx{2}\reXx{2}\; ...\; \lcoefx{i}\reXx{i}\; ...\; \lcoefx{c}\reXx{c}]$ (size $\samp \times  \rank\kh\kw$). 
+    $\reW$ is $\out \times \rank\kh\kw$ reshaped $\wtwo$, 
+    $\reW=[\wtwox{1}\; \wtwox{2}\; ...\; \wtwox{i}\; ...\; \wtwox{c}]$.
+    After obtained result $\reW$, it is reshaped back to $\wtwo$.
+    Then we assign $\lcoefi \leftarrow \lcoefi \norm{\wtwoi}_F, \wtwoi \leftarrow \wtwoi / \norm{\wtwoi}_F$. 
+    Constrain $\wtwocontrain$ satisfies.
+
+
+    We alternatively optimize (i) and (ii).
+    %T
+    In the beginning, $\wtwo$ is initialized from the trained model,  $\lalpha=0$, namely no penalty,
+    and $\norm{\lcoef}_0=\rank$.
+    We gradually increase $\lalpha$. 
+    For each change of $\lalpha$, we iterate these two steps until $\norm{\lcoef}_0$ is stable. 
+    After $\rankcontrain$ satisfies, 
+    we obtain the final solution $\wtwo$ from $\{\lcoefx{i}\wtwox{i}\}$.
+    %$
+    In practice, we found that the two steps iteration is time consuming. 
+    So we apply (i) multiple times until $\rankcontrain$ satisfies.
+    Then apply (ii) just once, to obtain the final result.
+    From our observation, this result is comparable with two steps iteration's result.
+    Therefore, in the following experiments, we adopt this approach for efficiency.
+
+    \subsubsection{Discussion}
+    Some recent works~\cite{wen2016learning,Alvarez2016,han2015learning} (though training based) also introduce $\ell_1$-norm or LASSO.
+    However, we must emphasize that we use different formulations.
+    %\cite{wen2016learning,han2015learning} 
+    Many of them introduced sparsity regularization into training loss, 
+    instead of explicitly solving LASSO.
+    Other work~\cite{Alvarez2016} solved LASSO, while feature maps or data were not considered during optimization.
+
+    Because of these differences, our approach could be applied at inference time.
+    
+    \subsection{Whole Model Pruning}\label{sec:whole}
+    Inspired by \cite{Zhang2015}, we apply our approach layer by layer sequentially.
+    For each layer, we obtain input volumes from the current input feature map, 
+    and output volumes from the output feature map of the un-pruned model.
+    This could be formalized as: 
+
+    \begin{equation}\label{eq:whole}
+    \begin{aligned}
+    &     \argmin_{\lcoef, \wtwo} \frac{1}{2\samp} \norm{\reY^\prime - \sum_{i=1}^{\rank} \lcoefi \reXi \wtwoi^\top }^2_F \\
+    & \st \rankcontrain
+    \end{aligned}
+    \end{equation}
+    
+    Different from Eqn.~\ref{eq:l0}, $\reY$ is replaced by $\reY^\prime$, 
+    which is from feature map of the original model.
+    Therefore, the accumulated error could be accounted during sequential pruning.
+    
+    \subsection{Pruning Multi-Branch Networks}\label{sec:variants}
+    The whole model pruning discussed above is enough for single-branch networks like LeNet~\cite{lecun1998gradient}, AlexNet~\cite{krizhevsky2012imagenet} and VGG Nets~\cite{Simonyan2014}.
+    However, it is insufficient for multi-branch networks like GoogLeNet~\cite{szegedy2015going} and  ResNet~\cite{He2015}.
+    %F
+    We mainly focus on pruning the widely used residual structure (\eg, ResNet~\cite{He2015}, Xception~\cite{chollet2016xception}).
+    Given a residual block shown in \figurename~\ref{fig:sampler}~(left), the input bifurcates into the shortcut and the residual branch.
+    On the residual branch, there are several \conv s (\eg, 3 \conv s which have spatial size of $1\times1,3\times3,1\times1$, \figurename~\ref{fig:sampler}, left). 
+    Other layers except the first and last layer can be pruned as is described previously.
+    For the first layer, the challenge is that the large input \featch\ (for ResNet, four times of its output) can't be easily pruned since it is shared with the shortcut.
+    For the last layer, accumulated error from the shortcut is hard to be recovered, since there's no parameter on the shortcut.
+    To address these challenges, we propose several variants of our approach as follows.
+    \begin{figure}
+    \begin{center}
+       \includegraphics[width=\linewidth]{sampler}
+    \end{center}
+    \caption{Illustration of multi-branch enhancement for residual block. 
+        \textbf{Left}: original residual block. 
+        \textbf{Right}: pruned residual block with enhancement, $\mathrm{c_x}$ denotes the \featch. Input channels of the first \conv\ are sampled, so that the large input \featch\ could be reduced. As for the last layer, rather than approximate $\reY_2$, we try to approximate $\reY_1+\reY_2$ directly (Sec.~\ref{sec:multi} Last layer of residual branch).}
+    \label{fig:sampler}
+    \end{figure}
+
+    %\subsubsection{Multi-branch Case}
+    \label{sec:multi}
+    \subsubsection{Last layer of residual branch}
+    Shown in \figurename~\ref{fig:sampler}, the output layer of a residual block consists of two inputs: 
+    feature map $\reY_1$ and $\reY_2$ from the shortcut and residual branch.
+    We aim to recover $\reY_1 + \reY_2$ for this block.
+    Here, $\reY_1, \reY_2$ are the original feature maps before pruning.
+    $\reY_2$ could be approximated as in Eqn.~\ref{eq:l0}.
+    However, shortcut branch is parameter-free, then $\reY_1$ could not be recovered directly.
+    To compensate this error, 
+    the optimization goal of the last layer is changed from $\reY_2$ to $\reY_1 - \reY^\prime_1 + \reY_2$,
+    which does not change our optimization.
+    Here, $\reY^\prime_1$ is the current feature map after previous layers pruned.
+    When pruning, volumes should be sampled correspondingly from these two branches.
+%    \
+
+    \subsubsection{First layer of residual branch}
+    Illustrated in \figurename~\ref{fig:sampler}(left),
+    the input feature map of the residual block could not be pruned,
+    since it is also shared with the shortcut branch.
+    In this condition, we could perform \sampling\ before the first convolution to save computation.
+    We still apply our algorithm as Eqn.~\ref{eq:l0}.
+    Differently, we sample the selected channels on the shared feature maps to construct a new input for the later convolution,
+    shown in \figurename~\ref{fig:sampler}(right).
+    The computational cost for this operation could be ignored.    
+    More importantly, after introducing \textit{feature map sampling},
+    the convolution is still "regular".
+    %\label{sec:filter}
+    
+    \begin{figure}
+        \begin{center}
+                \includegraphics[width=\linewidth]{filterwise}
+        \end{center}
+        \caption{\Filterwise\ for accelerating the first \conv\ on the residual branch. 
+        We aim to reduce the number of channels filter-wise in weights $\wtwo$,
+        while minimizing the reconstruction error on feature map C. Channels of feature map B is not pruned.
+        We apply our Eqn.~\ref{eq:l0} to each filter independently (each filter chooses its own representative input channels).
+         $c,n$: number of channels for feature maps B and C, $k_h\times k_w$: kernel size. %, $h\times w$: feature maps size
+        }
+        \label{fig:filterwise}
+    \end{figure}
+    
+    \Filterwise\ is another option for the first convolution on the residual branch, shown in \figurename~\ref{fig:filterwise}.
+    Since the input channels of parameter-free shortcut branch could not be pruned,
+    we apply our Eqn.~\ref{eq:l0} to each filter independently (each filter chooses its own representative input channels). It outputs "irregular" \conv s, which need special library implementation support.
+    
+        \subsection{Combined with \TensorDecom}\label{sec:3C}
+    \Channelpruning\ can be easily combined method with \tensordecom, quantization, and lowbits etc.
+    We focus on combination with \tensordecom.
+    
+        \begin{figure*}[!t]
+    \begin{center}
+        \includegraphics[width=\linewidth]{single}
+    \end{center}
+    \caption{Single layer performance analysis under different speed-up ratios (without fine-tuning), measured by increase of error.
+        To verify the importance of channel selection refered in Sec.~\ref{sec:linear}, we considered three naive baselines.
+         \firstk\ selects the first $k$ feature maps. \prune\ selects channels based on absolute sum of corresponding weights filter~\cite{Li2016}.
+         \sgd\ is a simple SGD alternative of our approach. Our approach is consistently better (\textit{smaller is better}).}
+    \label{fig:ablation}
+    \end{figure*}
+    
+    
+    In general, \tensordecom\ could be represent as:
+    \begin{equation}
+    W^{l_n} = W_1\cdot W_2\cdot...\cdot W_n
+    \end{equation}
+    Here, $W^{l_n}$ is the original \conv\ filters for layer $n$, and $W_1\cdot W_2\cdot...\cdot W_n$ are several decomposed weights of the same size as $W$.
+    Since the input and output channels of \tensordecom\ methods could not shrink, 
+    it becomes a bottleneck when reaching high \ratio. 
+    We apply channels reduction on first and last weights decomposed layers, namely the output of $W_n$ and the input of $W_1$.
+    In our experiments (Sec.~\ref{sec:3Cexp}), we combined \cite{jaderberg2014speeding}, \cite{Zhang2015} and our approach. First, a $3\times3$ weights is decomposed to $3\times1,1\times3,1\times1$. Then our approach is applied to $3\times1$ and $1\times1$ weights.
+
+        \subsection{Fine-tuning}
+    We fine-tune the approximated model end-to-end on training data,
+    which could gain more accuracy after reduction. 
+    We found that since the network is in a pretty unstable state, 
+    fine-tuning is very sensitive to the learning rate. 
+    The learning rate needs to be small enough. Otherwise, the accuracy quickly drops. 
+    If the learning rate is large, the finetuning process may jump out of the initialized local optimum by the pruned network and behave very similar to training the pruned architecture from scratch (Table~\ref{tab:orig}).
+
+    On ImageNet, we use learning rate of $1e^{-5}$ and a mini-batch size of 128. 
+    Fine-tune the models for ten epochs in the Imagenet training data (1/12 iterations of training from scratch). 
+    On CIFAR-10, we use learning rate of $1e^{-4}$ and a mini-batch size of 128 and fine-tune the models for 6000 iterations (training from scratch need 64000 iterations).
+    
+\end{document}
