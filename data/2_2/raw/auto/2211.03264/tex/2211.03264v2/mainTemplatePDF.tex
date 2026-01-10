@@ -1,0 +1,839 @@
+\UseRawInputEncoding
+\documentclass[10pt,twocolumn]{article} 
+\pdfoutput=1
+\usepackage{simpleConference}
+\usepackage{times}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{makecell}
+\usepackage{cuted}
+\usepackage{float}
+\usepackage{capt-of}
+\usepackage{hyperref}
+\hypersetup{pagebackref,breaklinks,colorlinks}
+
+\begin{document}
+
+\title{Few-shot Image Generation with Diffusion Models}
+
+\author{JingYuan Zhu \\
+Tsinghua University, China \\
+jy-zhu20@mails.tsinghua.edu.cn\\
+\and
+Huimin Ma \\
+University of Science and Technology Beijing, China \\
+mhmpub@ustb.edu.cn  \\
+\and
+Jiansheng Chen \\
+University of Science and Technology Beijing, China \\
+jschen@ustb.edu.cn  \\
+\and
+Jian Yuan  \\
+Tsinghua University, China \\
+jyuan@tsinghua.edu.cn  \\
+}
+
+\maketitle
+\thispagestyle{empty}
+
+\begin{abstract}
+  Denoising diffusion probabilistic models (DDPMs) have been proven capable of synthesizing high-quality images with remarkable diversity when trained on large amounts of data. However, to our knowledge, few-shot image generation tasks have yet to be studied with DDPM-based approaches. Modern approaches are mainly built on Generative Adversarial Networks (GANs) and adapt models pre-trained on large source domains to target domains using a few available samples. In this paper, we make the first attempt to study when do DDPMs overfit and suffer severe diversity degradation as training data become scarce. Then we fine-tune DDPMs pre-trained on large source domains on limited target data directly. Our results show that utilizing knowledge from pre-trained models can accelerate convergence and improve generation quality and diversity compared with training from scratch. However, the fine-tuned models still fail to retain some diverse features and can only achieve limited diversity. Therefore, we propose a pairwise DDPM adaptation (DDPM-PA) approach based on a pairwise similarity loss to preserve the relative distances between generated samples during domain adaptation. DDPM-PA further improves generation diversity and achieves results better than current state-of-the-art GAN-based approaches. We demonstrate the effectiveness of DDPM-PA on a series of few-shot image generation tasks qualitatively and quantitatively. 
+\end{abstract}
+
+ %$\mathcal{L}_{pair}$ converts the pairwise similarity between predicted images $\tilde{x}_0^{i}, \tilde{x}_0^{j}\ (0\leq i,j \leq N)$ into probability distributions. 
+
+
+%%%%%%%%% BODY TEXT
+\section{Introduction}
+\label{sec:intro}
+ Recent advances in generative models including GANs \cite{NIPS2014_5ca3e9b1, DBLP:conf/iclr/BrockDS19, Karras_2019_CVPR, Karras_2020_CVPR, Karras2021}, variational autoencoders (VAEs) \cite{kingma2013auto, rezende2014stochastic, vahdat2020nvae}, and autoregressive models \cite{van2016conditional,chen2018pixelsnail,henighan2020scaling} have realized high-quality image generation with great diversity. Diffusion probabilistic models \cite{sohl2015deep} are introduced to match data distributions by learning to reverse multi-step noising processes. Ho et al. \cite{NEURIPS2020_4c5bcfec} demonstrate the capability of DDPMs to produce high-quality results. Following works \cite{song2020improved, dhariwal2021diffusion, nichol2021improved,kingma2021variational} further optimize the noise addition schedules, network architectures, and optimization targets of DDPMs. Besides, classifier guidance is added to realize DDPM-based conditional image generation \cite{dhariwal2021diffusion}. DDPMs have shown excellent results competitive with GANs \cite{Karras_2020_CVPR, DBLP:conf/iclr/BrockDS19} on datasets including CIFAR-10 \cite{krizhevsky2009learning}, LSUN \cite{yu2015lsun}, and ImageNet \cite{van2016conditional}. Moreover, DDPMs have also achieved compelling results in generating videos \cite{ho2022video, harvey2022flexible, yang2022diffusion, zhang2022motiondiffuse}, audios \cite{kong2020diffwave, austin2021structured}, point clouds \cite{zhou20213d, luo2021diffusion, lyu2021conditional, liu2022let}, and biological structures \cite{xu2022geodiff,hoogeboom2022equivariant}.  
+
+Modern DDPMs depend on large amounts of data to train the millions of parameters in their networks like other generative models, which tend to overfit seriously and fail to produce high-quality images with considerable diversity when training data is limited. Unfortunately, it is not always possible to obtain abundant data under some circumstances. A series of GAN-based approaches \cite{wang2018transferring, ada,mo2020freeze, wang2020minegan, ewc, ojha2021few-shot-gan, zhao2022closer} have been proposed to adapt models pre-trained on large-scale source datasets to target datasets using a few available training samples (e.g., 10 images). These approaches utilize knowledge from source models to relieve overfitting and achieve improvement in generation quality and diversity. Nevertheless, the performance of DDPMs trained on limited data and effective DDPM-based few-shot image generation approaches remain to be investigated.
+
+  %As for GANs, a series of works \cite{wang2018transferring, ada,mo2020freeze, wang2020minegan, ewc, ojha2021few-shot-gan, zhao2022closer} have provided effective methods to realize few-shot image generation with high quality and great diversity by adapting the models pre-trained on related large-scale source datasets to target datasets utilizing a few training samples (e.g., 10 images).  However, the performance of DDPM-based models under small scale datasets or effective DDPM-based few-shot image generation approaches have not been investigated yet. %DDPMs make use of deep U-Net networks and also face overfitting when trained on only a few images.
+
+Therefore, we first evaluate the performance of DDPMs trained on small-scale datasets and show that DDPMs suffer similar overfitting problems to other modern generative models when trained on limited data. Then we fine-tune pre-trained DDPMs on target domains using limited data directly. The fine-tuned DDPMs achieve faster convergence and greater generation diversity compared with DDPMs trained from scratch but still fail to maintain the relative distances between generation samples during domain adaptation. To this end, we introduce a pairwise similarity loss to keep the distributions of relative distances in target models similar to source models for greater generation diversity, as shown in Fig. \ref{pairwise}. The main contributions of this paper can be concluded as:
+
+\begin{itemize}
+    \item We make the first attempt to study when do DDPMs overfit as training data become scarce and propose a Nearest-LPIPS metric to evaluate generation diversity.
+    \item We propose a DDPM-PA approach based on the pairwise similarity loss designed for DDPMs to preserve the relative distances between samples during domain adaptation and achieve great generation diversity.
+    \item  We demonstrate the effectiveness of DDPM-PA qualitatively and quantitatively on a series of few-shot image generation tasks and show that DDPM-PA achieves better generation quality and diversity than current state-of-the-art GAN-based approaches.
+    
+\end{itemize}
+
+%\item We study the performance of DDPMs trained from scratch on small-scale datasets and propose a Nearest-LPIPS metric to evaluate generation diversity.
+%\item We propose a DDPM-A approach to adapt DDPMs pre-trained on large-scale source datasets to target domains using limited data and show that our approach can relieve diversity degradation, accelerate the convergence of models, and achieve high-quality results.
+%\item We design a DDPM-based pairwise similarity loss to preserve the relative distances between samples during domain adaptation and propose a DDPM-PA approach based on that to further improve generation diversity.
+
+\section{Related Work}
+\subsection{Diffusion Denoising Probabilistic Models}
+%We first review the basic formulation of DDPMs \cite{NEURIPS2020_4c5bcfec} and then introduce related researches. 
+\textbf{DDPMs Formulation} Given training images $x_0$ following the distribution $q(x_0)$, DDPMs define a forward noising (diffusion) process $q$ adding Gaussian noises with variance $\beta_t \in (0,1)$ at diffusion step $t$ and produce the noised image sequences: $x_1,x _2,...,x_T$ as follows:
+\begin{align}
+\label{eq1}
+    q(x_1,x_2,...,x_T|x_0) &:= \prod_{t=1}^{T} q(x_t|x_{t-1}), \\
+\label{eq2}
+    q(x_t|x_{t-1}) &:= \mathcal{N}(x_t;\sqrt{1-\beta_t}x_{t-1},\beta_t \mathbf{I}).
+\end{align}
+We can sample an arbitrary step of the noising process conditioned on $x_0$ as follows:
+\begin{align}
+\label{eq3}
+        q(x_t|x_0) &= \mathcal{N}(x_t;\sqrt{\overline{\alpha}_t}x_0,(1-\overline{\alpha}_t)\mathbf{I}), \\
+        x_t &= \sqrt{\overline{\alpha}_t}x_0 + \sqrt{1-\overline{\alpha}_t}\epsilon, \label{eq4}
+\end{align}
+where $\alpha_t:=1-\beta_t$, $\overline{\alpha}_t:=\prod_{s=0}^{t}\alpha_s$, and $\epsilon$ represents Gaussian distributions following $\mathcal{N}(0,\mathbf{I})$. Based on the Bayes theorem, we have the posterior $q(x_{t-1}|x_t,x_0)$:
+\begin{equation}
+    q(x_{t-1}|x_t,x_0)=\mathcal{N}(x_{t-1};\hat{\mu}_t(x_t,x_0),\hat{\beta}_t\mathbf{I}),
+\end{equation}
+where $\hat{\mu}_t(x_t,x_0)$ and $\hat{\beta}_t$ are defined in terms of $x_0, x_t$ and the variance as follows:
+\begin{align}
+    \hat{\mu}_t(x_t,x_0)&:=\frac{\sqrt{\overline{\alpha}_{t-1}}\beta_t}{1-\overline{\alpha}_t}x_0 + \frac{\sqrt{\alpha_t}(1-\overline{\alpha}_{t-1})}{1-\overline{\alpha}_t}x_t, \label{eq6}\\ 
+    \hat{\beta}_t&:=\frac{1-\overline{\alpha}_{t-1}}{1-\overline{{\alpha}}_t}\beta_t.
+\end{align}
+
+With a large enough $T$, the noised image $x_T$ almost follows an isotropic Gaussian distribution. Therefore, we can randomly sample a $x_T$ from $\mathcal{N}(0,\mathbf{I})$ and apply the reverse distribution $q(x_{t-1}|x_t)$ to reverse the diffusion process and get the sample following $q(x_0)$. DDPMs employ a UNet-based neural network to approximate the reverse distribution $q(x_{t-1}|x_t)$ as follows:
+\begin{align}
+\label{eq8}
+    p_{\theta}(x_{t-1}|x_t):=\mathcal{N}(x_{t-1};\mu_{\theta}(x_t,t),\Sigma_{\theta}(x_t,t)).
+\end{align}
+Naturally, we can train the network to predict $x_0$ and apply it to Equation \ref{eq6} to parameterize the reverse distribution mean $\mu_{\theta}(x_t,t)$. Besides, we can also derive the prediction of $\mu_{\theta}(x_t,t)$ combing Equations \ref{eq4} and \ref{eq6} as:
+\begin{align}
+    \mu_{\theta}(x_t,t)=\frac{1}{\sqrt{\alpha_t}}(x_t-\frac{\beta_t}{\sqrt{1-\overline{\alpha}_t}}\epsilon_{\theta}(x_t,t)),
+\end{align}
+ if we train the network as a function approximator $\epsilon_{\theta}(x_t,t)$ to predict the noise $\epsilon$ in Equation \ref{eq4}. Ho et al. \cite{NEURIPS2020_4c5bcfec} demonstrate that predicting $\epsilon$ performs well and achieves high-quality results using a reweighted loss function:
+\begin{align}
+\label{loss_simple}
+    \mathcal{L}_{simple}=E_{t,x_0,\epsilon}\left[||\epsilon-\epsilon_{\theta}(x_t,t)||\right]^2.
+\end{align}
+In Ho et al.'s work \cite{NEURIPS2020_4c5bcfec}, the variance $\Sigma_{\theta}(x_t,t)$ is fixed as a constant $\sigma_t^2 \mathbf{I}$, where $\sigma_t^2=\beta_t$ and is not learned. The network is only trained to learn the model mean $\mu_{\theta}(x_t,t)$ through predicting noises with $\epsilon_\theta(x_t,t)$. Following works \cite{nichol2021improved} propose to add an additional optimization term $L_{vlb}$ to optimize the variational lower bound (VLB) and guide the learning of $\Sigma_{\theta}(x_t,t)$ as follows:
+\begin{align}
+    L_{vlb}:&=L_0+L_1+...+L_{T-1}+L_T, \\
+    L_0:&=-log\ p_{\theta}(x_0|x_1), \\
+    L_{t-1}:&=D_{KL}(q(x_{t-1}|x_t,x_0)\,||\,p_{\theta}(x_{t-1}|x_t)), \\
+    L_T:&=D_{KL}(q(x_T|x_0)\,||\,p(x_T)),
+\end{align}
+where $D_{KL}$ represents the Kullback-Leibler (KL) divergence used to evaluate the distance between distributions.
+
+%Naturally we can train the network to predict $x_0$ and apply it to Equation \ref{eq6} to get $\mu_{\theta}(x_t,t)$. Besides, the network can also be trained to predict the noise $\epsilon$ in Equation \ref{eq4}. Combined with Equation \ref{eq6}, we can derive the prediction of model mean $\hat{\mu}(x_t,x_0)$ of $q(x_{t-1}|x_t,x_0)$ as:
+%Fast sampling
+\textbf{Fast Sampling} DDPMs need time-consuming iterative processes to realize sampling following Equation \ref{eq8}. Recent works including DDIM and gDDIM \cite{song2020denoising, zhang2022gddim} extend the original DDPMs to non-Markovian cases for fast sampling. DPM-solver \cite{lu2022dpm,lu2022dpm2} presents a theoretical formulation for the solution of probability flow ordinary differential equations (ODEs) and achieves a fast ODE solver needing only 10 steps for DDPM sampling. Diffusion Exponential Integrator Sampler (DEIS) \cite{zhang2022fast} makes use of an exponential integrator to approximately calculate the solution of ODEs. Karras et al. \cite{karras2022elucidating} present a design space to identify changes in both the sampling and training processes and achieve state-of-the-art FID \cite{heusel2017gans} on CIFAR-10 \cite{krizhevsky2009learning} under a class-conditional setting.
+
+%DDPM-based works
+\textbf{Applications} DDPMs have already been applied to many aspects of applications such as image super-resolution \cite{li2022srdiff, saharia2022image, rombach2022high,ho2022cascaded}, image translation \cite{saharia2022palette, ozbey2022unsupervised}, semantic segmentation \cite{baranchuk2021label, asiedu2022decoder}, few-shot generation for unseen classes \cite{giannone2022few,sinha2021d2c}, and natural language processing \cite{austin2021structured, li2022diffusion, chen2022analog}. Besides, DDPMs are combined with other generative models including GANs \cite{xiao2021tackling, wang2022diffusion}, VAEs \cite{vahdat2021score, huang2021variational, luo2022understanding}, and autoregressive models \cite{rasul2021autoregressive, hoogeboom2021autoregressive}. Different from existing works, this paper focuses on model-level, unconditional, few-shot image generation with DDPM-based approaches.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{scratch2.jpg}
+    \caption{ For small-scale datasets including Babies, Sunglasses, and LSUN Church containing 10, 100, and 1000 images, \textbf{Left}: samples picked from the small-scale datasets, \textbf{Right}: samples produced by DDPMs trained on the small-scale datasets from scratch.}
+    \label{scratch}
+\end{figure*}
+
+\subsection{Few-shot Image Generation}
+    Few-shot image generation aims to achieve high-quality generation with great diversity using only a few available training samples. However, modern generative models easily overfit and suffer severe diversity degradation when trained on limited data (e.g., 10 images). They tend to replicate training samples instead of generating diverse images following similar distributions. GAN-based few-shot image generation approaches mainly follow TGAN \cite{wang2018transferring} to adapt GANs pre-trained on large source domains, including ImageNet \cite{van2016conditional}, LSUN \cite{yu2015lsun}, and FFHQ \cite{Karras_2020_CVPR}, to target domains with limited data. Augmentation approaches \cite{tran2021data, zhao2020differentiable, zhao2020image, ada} also help improve generation diversity with diverse augmented training samples. BSA \cite{noguchi2019image} fixes all the parameters except for the scale and shift parameters in the generator. FreezeD \cite{mo2020freeze} freezes parameters in high-resolution layers of the discriminator to relieve overfitting. MineGAN \cite{wang2020minegan} uses additional fully connected networks to modify noise inputs for the generator. EWC \cite{ewc} makes use of elastic weight consolidation to regularize the generator by making it harder to change the critical weights which have higher Fisher information values. CDC \cite{ojha2021few-shot-gan} proposes a cross-domain consistency loss and patch-level discrimination to build a correspondence between source and target domains. DCL \cite{zhao2022closer} utilizes contrastive learning to push away the generated samples from real images and maximize the similarity between corresponding image pairs in the source and target domain. The proposed DDPM-based approach follows similar strategies to adapt models pre-trained on large source domains to target domains. Our experiments show that DDPMs are appropriate for few-shot image generation tasks and can achieve better results than current state-of-the-art GAN-based approaches in quality and diversity. 
+
+
+\section{DDPMs Trained on Small-scale Datasets}
+\label{section3}
+% Previous DDPM-based works \cite{NEURIPS2020_4c5bcfec,nichol2021improved,dhariwal2021diffusion} focus on training models on large-scale datasets such as ImageNet, LSUN \cite{yu2015lsun}, and FFHQ \cite{Karras_2020_CVPR}. DDPM-based models have already achieved high-quality results competitive with GAN-based models on these large-scale datasets. Many prior works \cite{wang2018transferring,ada,wang2020minegan,ewc,ojha2021few-shot-gan,zhao2022closer} have been proposed for GAN-based few-shot image generation methods using a few real samples (e.g., 10 images). However, similar researches have not been carried out with DDPM-based models.
+
+To evaluate the performance of DDPMs when training data is limited, we train DDPMs on small-scale datasets containing various numbers of images from scratch. We analyze generation diversity qualitatively and quantitatively to study when do DDPMs overfit as training samples decrease. 
+
+\textbf{Basic Setups} We sample 10, 100, and 1000 images from FFHQ-babies (Babies), FFHQ-sunglasses (Sunglasses) \cite{ojha2021few-shot-gan}, and LSUN Church \cite{yu2015lsun} respectively as small-scale training datasets. The image resolution of all the datasets is set as $256\times 256$. We follow the model setups in prior works \cite{nichol2021improved, dhariwal2021diffusion} used for LSUN $256^2$ \cite{yu2015lsun}. The max diffusion step $T$ is set as 1000. Our experiments are carried out on $\times 8$ NVIDIA RTX A6000 GPUs (with 48 GB of memory each). We use a learning rate of 1e-4 and a batch size of 48. We train DDPMs for $40K$ iterations on datasets containing 10 or 100 images and $60K$ iterations on datasets containing 1000 images, respectively.
+
+\textbf{Qualitative Evaluation} In Fig. \ref{scratch}, we visualize the generated samples of DDPMs trained from scratch on small-scale datasets and provide some training samples for comparison (more generation and training samples are provided in Appendix \ref{appendix_scratch}). We observe that DDPMs overfit and tend to replicate training samples when the datasets are limited to 10 or 100 images. Since some training samples are flipped in the training process as a step of data augmentation, we can also find some generated images symmetric to the training samples. While for datasets containing 1000 images, DDPMs can generate samples following similar distributions of training samples instead of replicating them. The overfitting problem is relatively alleviated. As shown in the bottom row of Fig. \ref{scratch}, all kinds of babies, people wearing sunglasses, and churches different from training samples can be found in the generated images.
+
+
+\textbf{Quantitative Evaluation} LPIPS \cite{zhang2018unreasonable} is proposed to evaluate the perceptual distances between images. We propose a Nearest-LPIPS metric based on LPIPS to evaluate the generation diversity of DDPMs trained on small-scale datasets. More specifically, we first generate 1000 images randomly and find the most similar training sample having the lowest LPIPS distance to each generated sample. Nearest-LPIPS is defined as the LPIPS distances between generated samples and the most similar training samples in correspondence, averaged over all the generated samples. If a generative model reproduces the training samples exactly, the Nearest-LPIPS metric will have a score of zero. Larger Nearest-LPIPS values indicate lower replication rates and greater diversity compared with training samples. 
+
+
+\begin{table}[htbp]
+\centering
+\begin{tabular}{c|c|c|c}
+Number of Samples & Babies & Sunglasses & Church \\
+\hline
+$10$ & $0.2875$ & $0.3030$ & $0.3136$ \\
+$100$ & $0.3152$ & $0.3310$ & $0.3327$ \\
+$1000$  & $\pmb{0.4658}$ & $\pmb{0.4819}$ & $\pmb{0.5707}$ \\
+\hline
+$10$ (+flip) & $0.1206$ & $0.1217$ & $0.0445$\\
+$100$ (+flip) & $0.1556$ & $0.1297$ & $0.1177$ \\
+$1000$ (+flip) & $\pmb{0.4611}$ & $\pmb{0.4726}$ & $\pmb{0.5625}$ \\
+\end{tabular}
+\caption{Nearest-LPIPS ($\uparrow$) results of DDPMs trained from scratch on several small-scale datasets.}
+\label{nearlpips}
+\end{table}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{result1.jpg}
+    \caption{DDPM-based image generation samples on 10-shot FFHQ $\rightarrow$ Babies, FFHQ $\rightarrow$ Sketches, and LSUN Church $\rightarrow$ Haunted houses.}
+    \label{result1}
+\end{figure*}
+
+We provide the Nearest-LPIPS results of DDPMs trained from scratch on small-scale datasets in the top part of Table \ref{nearlpips}. For datasets containing 10 or 100 images, we have lower Nearest-LPIPS values. While for datasets containing 1000 images, we get measurably improved Nearest-LPIPS values. To avoid the influence of generated images symmetric to training samples, we flip all the training samples as supplements to the original datasets and recalculate the Nearest-LPIPS metric. The results are listed in the bottom part of Table \ref{nearlpips}. With the addition of flipped training samples, we find apparently lower Nearest-LPIPS values for datasets containing 10 or 100 images. However, we get almost the same Nearest-LPIPS results for DDPMs trained on larger datasets containing 1000 images, indicating that these models can generate diverse samples different from the original or symmetric training samples.
+
+
+Based on the above analysis of DDPMs trained from scratch on limited data, we conclude that it becomes harder for DDPMs to learn the representations of the datasets as training data become scarce. With extremely limited training samples like 10 or 100 images, DDPMs overfit and can only replicate them but fail to match the data distributions or generate diverse results different from the training samples. 
+
+% \begin{table}[htbp]
+% \centering
+% \begin{tabular}{l|c|c}
+%  Approaches & \makecell[c]{Haunted houses} & \makecell[c]{Van Gogh houses}
+%  \\
+%  \hline
+%  TGAN \cite{wang2018transferring} &  0.585 \pm 0.007 & 0.611 \pm 0.016 \\
+%  TGAN+ADA \cite{ada} & 0.615 \pm 0.018 & 0.627 \pm 0.023 \\
+%  FreezeD \cite{mo2020freeze} & 0.558 \pm 0.019 & 0.606 \pm 0.018 \\
+%  MineGAN \cite{wang2020minegan} & 0.586 \pm 0.041 & 0.669 \pm 0.034 \\
+%  EWC \cite{ewc} & 0.579 \pm 0.035 & 0.611 \pm 0.029 \\
+%  CDC \cite{ojha2021few-shot-gan} &  0.620 \pm 0.029 & 0.683 \pm 0.014 \\
+%  DCL \cite{zhao2022closer} & 0.616 \pm 0.043 & 0.637 \pm 0.017 \\
+%  \hline
+%  DDPM-A (ours) & 0.590 \pm 0.045 & 0.631 \pm 0.049 \\
+%  DDPM-PA (ours) &  $\pmb{0.627 \pm 0.050}$ & $\pmb{0.689 \pm 0.032}$ \\
+% \end{tabular}
+% \caption{Intra-LPIPS ($\uparrow$) results of GAN-based and DDPM-based approaches on 10-shot image generation tasks adapted from the source domain LSUN Church. Standard deviations are computed across 10 clusters (the same number as training samples). The proposed DDPM-PA achieves state-of-the-art performance compared with the modern GAN-based approaches}
+% \end{table}
+
+% In addition, we compute the average pairwise LPIPS distance within 1000 generated samples for DDPM models trained from scratch to further evaluate their generation diversity as shown in Table \ref{lpips}. We also provide the average pairwise LPIPS distance of the above-mentioned datasets in Table \ref{lpipsdata}.
+
+% \begin{table}[htbp]
+% \centering
+% \setlength\tabcolsep{5pt}
+% \begin{tabular}{c|c|c|c}
+% Number of Samples & Babies & Sunglasses & Church \\
+% \hline
+% 10 & 0.6182 & 0.6262 & 0.6921 \\
+% 100 & 0.6604 &  0.6537 & 0.7161 \\
+% 1000  & \pmb{0.6612} & \pmb{0.6693} & \pmb{0.7167}  \\
+% \end{tabular}
+% \caption{LPIPS ($\uparrow$) results for different scales of datasets from scratch on FFHQ-babies, FFHQ-sunglasses, and LSUN Church.}
+% \label{lpips}
+% \end{table}
+
+
+% \begin{table}[htbp]
+% \centering
+% \setlength\tabcolsep{5pt}
+% \begin{tabular}{c|c|c|c}
+% Number of Samples & Babies & Sunglasses & Church \\
+% \hline
+% 10 & 0.5549 & 0.5745 & 0.6345 \\
+% 100 & \pmb{0.6146} & \pmb{0.6467}  & 0.6777 \\
+% 1000  & 0.5917 & 0.6179 & \pmb{0.7370}  \\
+% \end{tabular}
+% \caption{LPIPS ($\uparrow$) results for DDPMs trained on different scales of datasets from scratch on FFHQ-babies, FFHQ-sunglasses, and LSUN Church.}
+% \label{lpipsdata}
+% \end{table}
+
+
+\section{Few-shot Pairwise DDPM Adaptation}
+For large-scale datasets with great diversity, DDPMs can learn the representations of datasets and generate high-quality and diverse images following similar distributions to training samples. However, when the datasets are limited to 10 or 100 samples, DDPMs trained from scratch also need large amounts of iterations to generate reasonable images but still lack diversity and can only replicate the training samples as illustrated in Sec. \ref{section3}. Unfortunately, there is no guarantee of obtaining abundant data in many cases, such as artists' paintings and some other corner cases.
+
+To realize DDPM-based few-shot image generation, we first fine-tune DDPMs pre-trained on large-scale source datasets on target domains using limited data directly. The fine-tuned models only need about $3K$ iterations to converge. As shown in the middle row of Fig. \ref{result1}, they can produce diverse samples for target domains utilizing only 10 training samples. However, there still exists room for greater generation diversity. For example, similar hairstyles and facial expressions can be found in the samples produced by the fine-tuned DDPM trained on FFHQ $\rightarrow$ Babies.
+
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1.0\linewidth]{degrade.jpg}
+    \caption{Samples synthesized from fixed noise inputs by the fine-tuned DDPM on 10-shot FFHQ $\rightarrow$ Amedeo's paintings throughout training.}
+    \label{degrade}
+\end{figure}
+
+
+
+
+Compared with pre-trained models, the diversity degradation of fine-tuned models mainly comes from the shortened relative distances between generated samples. As shown in Fig. \ref{degrade}, two samples synthesized from fixed noise inputs by the fine-tuned DDPM become more and more similar (e.g., eyes, ears, and facial expressions) throughout training. Therefore, we design a pairwise similarity loss to preserve the relative distances between generated samples during domain adaptation and propose the DDPM-PA approach based on that to achieve greater generation diversity.
+
+%However, there still exists room for greater diversity. For example, samples on FFHQ $\rightarrow$ Sketches still have some differences from training samples in image style. 
+
+
+
+%We propose DDPM-A to adapt DDPMs pre-trained on large source domains to target domains using limited data. The adapted models only need about $3K$ iterations to converge and produce diverse images. As shown in the middle row of Fig. \ref{result1}, DDPM-A can produce diverse samples for target domains like babies, sketches, and haunted houses utilizing only 10 training samples. DDPM-A achieves fast convergence and improvement in generation quality and diversity benefiting from the knowledge provided by models pre-trained on large-scale source datasets. However, there still exists room for better target distribution learning and greater diversity. For example, samples produced by DDPM-A on FFHQ $\rightarrow$ Sketches still have some differences from training samples in image style. Moreover, DDPM-A cannot reach greater generation diversity than some GAN-based approaches as shown in Table \ref{intralpips}.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{pairwise.jpg}
+    \caption{The proposed DDPM-PA adds a pairwise similarity loss $\mathcal{L}_{pair}$ to keep the relative distances between samples generated by the target models similar to the source models. The pairwise similarity between predicted images $\tilde{x}_0^{i}, \tilde{x}_0^{j}\ (0\leq i,j \leq N)$ is converted into probability distributions for $\mathcal{L}_{pair}$ computation. Taking the 10-shot FFHQ $\rightarrow$ Amedeo's paintings as an example, DDPM-PA can generate diverse samples sharing similar styles with training samples utilizing the knowledge provided by the source model pre-trained on FFHQ.}
+    \label{pairwise}
+\end{figure*}
+
+\subsection{Pairwise Similarity Loss}
+\label{42}
+
+We illustrate the pairwise similarity loss in Fig. \ref{pairwise} using 10-shot FFHQ $\rightarrow$ Amedeo's paintings as an example. The weights in the target model $\epsilon_{tar}$ are initialized to the source model $\epsilon_{sou}$ and adapted to target domains. To construct N-way probability distributions for each image, we sample a batch of noised images $\left\lbrace x_t^{n} \right\rbrace_{n=0}^{N}$ by randomly adding Gaussian noises to training samples $x_0\sim q(x_0)$ following Equations \ref{eq1} and \ref{eq2}. Then the source and target models are applied to predict the fully denoised images $\left\lbrace \tilde{x}_0^{n} \right\rbrace_{n=0}^{N}$. We have the prediction of $\tilde{x}_0$ in terms of $x_t$ and $\epsilon_{\theta}(x_t,t)$ as follows:
+\begin{align}
+\label{eq11}
+    \tilde{x}_0 = \frac{1}{\sqrt{\overline{\alpha}_t}}x_t-\frac{\sqrt{1-\overline{\alpha}_t}}{\sqrt{\overline{\alpha}_t}}\epsilon_{\theta}(x_t,t),
+\end{align}
+which can be derived from Equation \ref{eq4}. Cosine similarity is employed to measure the relative distances between the predicted samples $\tilde{x}_0$.  The probability distribution for $\tilde{x}_0^{i}\ (0\leq i \leq N)$ in the source and target models can be expressed as follows:
+\begin{align}
+    p_{i}^{sou} = Softmax(\left\lbrace sim(\tilde{x}_{0_{sou}}^{i},\tilde{x}_{0_{sou}}^{j})\right\rbrace_{\forall i\neq j}), \\
+    p_{i}^{tar} = Softmax(\left\lbrace sim(\tilde{x}_{0_{tar}}^{i},\tilde{x}_{0_{tar}}^{j})\right\rbrace_{\forall i\neq j}),
+\end{align}
+where $sim$ denotes cosine similarity. Then we have the pairwise similarity loss $\mathcal{L}_{pair}$ as follows:
+\begin{align}
+    \mathcal{L}_{pair}(\epsilon_{sou},\epsilon_{tar}) = \mathbb{E}_{t,x_0,\epsilon} \sum_{i} D_{KL} (p_{i}^{tar}\,||\, p_{i}^{sou}),
+\end{align}
+where $D_{KL}$ represents KL-divergence. The pairwise similarity loss guides the target models to preserve the relative distances between samples and keep similar distributions to source models, leading to greater generation diversity. 
+
+
+%In Fig. \ref{pairwise}, We pick two noised images $x_{t}^{i}$ and $x_{t}^{j}\ (0\leq i,j \leq N)$ and apply the source model $\epsilon_{sou}$ and target model $\epsilon_{tar}$ to predict the noise $\epsilon$ as $\epsilon_{sou}(x_t,t)$ and $\epsilon_{tar}(x_t,t)$. 
+%Different from GAN-based approaches \cite{ojha2021few-shot-gan} which convert the similarities of perceptual features into probability distributions, we directly use the predicted images $\tilde{x}_0$ to compute distributions and preserve relative distances between samples.
+
+%Our approach is inspired by similar approaches applied to GAN-based few-shot image generation method keep the relative distances between the perceptual  \cite{oord2018representation, he2020momentum, chen2020simple}
+
+The overall loss function of DDPM-PA is the weighted sum of three terms, including $\mathcal{L}_{simple}$, $\mathcal{L}_{vlb}$, and $\mathcal{L}_{pair}$: 
+\begin{align}
+\label{loss}
+    \mathcal{L} = \mathcal{L}_{simple} + \lambda_1 \mathcal{L}_{vlb} + \lambda_2 \mathcal{L}_{pair}.
+\end{align}
+We follow prior works \cite{nichol2021improved} to set $\lambda_1$ as 0.001 to avoid $\mathcal{L}_{vlb}$ from overwhelming $\mathcal{L}_{simple}$. The proposed pairwise similarity loss $\mathcal{L}_{pair}$ is added to relieve overfitting and preserve generation diversity during adaptation when training data is limited. We empirically find $\lambda_2$ ranging between 0.2 and 5.0 to be effective for few-shot adaptation setups. 
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{result2.jpg}
+    \caption{DDPM-PA image generation samples on 10-shot FFHQ $\rightarrow$ Raphael's paintings, FFHQ $\rightarrow$ Sunglasses, and LSUN Church $\rightarrow$ Landscape drawings.}
+    \label{result2}
+\end{figure*}
+
+\begin{table*}[htbp]
+\centering
+\setlength{\tabcolsep}{2mm}{
+\begin{tabular}{l|c|c|c|c|c}
+   Approaches & \makecell[c]{FFHQ $\rightarrow$ \\ Sketches} & \makecell[c]{FFHQ $\rightarrow$ \\ Babies} & \makecell[c]{FFHQ $\rightarrow$ \\ Raphael's paintings} & \makecell[c]{LSUN Church $\rightarrow$ \\ Haunted houses} & \makecell[c]{LSUN Church $\rightarrow$ \\ Landscape drawings} 
+ \\
+\hline
+TGAN \cite{wang2018transferring} & $0.394 \pm 0.023$ & $0.510 \pm 0.026$ & $0.533 \pm 0.023$ & $0.585 \pm 0.007$ & $0.601 \pm 0.030$ \\
+TGAN+ADA \cite{ada} & $0.427 \pm 0.022$ & $0.546 \pm 0.033$ & $0.546 \pm 0.037$ &  $0.615 \pm 0.018$ & $0.643 \pm 0.060$ \\
+FreezeD \cite{mo2020freeze} & $0.406 \pm 0.017$ & $0.535 \pm 0.021$ & $0.537 \pm 0.026$ & $0.558 \pm 0.019$ & $0.597 \pm 0.032$ \\
+MineGAN \cite{wang2020minegan} & $0.407 \pm 0.020$ & $0.514 \pm 0.034$ & $0.559 \pm 0.031$ & $0.586 \pm 0.041$ & $0.614 \pm 0.027$   \\
+EWC \cite{ewc} & $0.430 \pm 0.018$ & $0.560 \pm 0.019$ & $0.541 \pm 0.023$ & $0.579 \pm 0.035$ & $0.596 \pm 0.052$ \\
+CDC \cite{ojha2021few-shot-gan} & $0.454 \pm 0.017$ & $0.583 \pm 0.014$ & $0.564 \pm 0.010$ &  $0.620 \pm 0.029$ & $0.674 \pm 0.024$ \\
+DCL \cite{zhao2022closer} & $0.461 \pm 0.021$ & $0.579 \pm 0.018$ & $0.558 \pm 0.033$ & $0.616 \pm 0.043$ & $0.626 \pm 0.021$ \\
+\hline
+Fine-tuned DDPMs & $0.473 \pm 0.022$ & $0.513 \pm 0.019$ & $0.466 \pm 0.018$ & $0.590 \pm 0.045$ &  $0.666 \pm 0.044$ \\
+DDPM-PA (ours) & $\pmb{0.509 \pm 0.054}$ & $\pmb{0.603 \pm 0.017}$ &  $\pmb{0.579 \pm 0.027}$ & $\pmb{0.627 \pm 0.050}$ & $\pmb{0.686 \pm 0.032 }$  \\
+\end{tabular}}
+\caption{Intra-LPIPS ($\uparrow$) results of DDPM-based approaches and GAN-based baselines on 10-shot image generation tasks adapted from the source domain FFHQ and LSUN Church. Standard deviations are computed across 10 clusters (the same number as training samples). The proposed DDPM-PA achieves state-of-the-art performance in generation diversity compared with modern GAN-based approaches.}
+\label{intralpips}
+\end{table*}
+
+
+
+ %Utilizing the knowledge of pre-trained DDPMs, we aim to relieve overfitting and improve the generation diversity of DDPMs when the size of target datasets is limited. More specifically, we first directly fine-tune the pre-trained DDPMs using limited training samples (DDPM adaptation (DDPM-A), Sec. \ref{41}). Then we propose a DDPM-based pairwise similarity loss to preserve the relative distances between generation samples and further improve the generation diversity (pairwise DDPM adaptation (DDPM-PA), Sec. \ref{42}).
+
+
+
+\subsection{Quality and Diversity Evaluation}
+\label{422}
+
+\textbf{Basic Setups} To demonstrate the effectiveness of DDPM-PA, we evaluate it with a series of few-shot image generation tasks using extremely few training samples (10 images). The performance of DDPM-PA on relatively abundant data is added in Appendix \ref{appendix_adaptation}. We choose FFHQ \cite{Karras_2020_CVPR} and LSUN Church \cite{yu2015lsun} as source datasets and train DDPMs from scratch on these two datasets for $300K$ and $250K$ iterations as source models. As for the target datasets, we employ 10-shot Sketches \cite{wang2008face}, FFHQ-babies (Babies), FFHQ-sunglasses (Sunglasses) \cite{Karras_2020_CVPR}, and face paintings by Amedeo Modigliani and Raphael Peale \cite{yaniv2019face} in correspondence to the source domain FFHQ. Besides, 10-shot Haunted houses and Landscape drawings are used as the target datasets in correspondence to LSUN Church. The model setups are consistent with the experiments on small-scale datasets in Sec. \ref{section3}. We train DDPM-PA models for $4K$-$5K$ iterations with a batch size of 24 on $\times 8$ NVIDIA RTX A6000 GPUs.
+
+%
+
+\textbf{Evaluation Metrics} We follow Ojha et al.'s work \cite{ojha2021few-shot-gan} to use Intra-LPIPS for the evaluation of generation diversity. To be more specific, we generate 1000 images and assign them to one of the training samples with the lowest LPIPS \cite{zhang2018unreasonable} distance. Intra-LPIPS is defined as the average pairwise LPIPS distance within members of the same cluster averaged over all the clusters. If a model exactly replicates the training samples, its Intra-LPIPS will have a score of zero. Larger Intra-LPIPS values correspond to greater generation diversity. We fix the noise inputs for DDPM-based approaches and GAN-based baselines, respectively, to synthesize samples for fair comparison of generation diversity in terms of Intra-LPIPS.
+
+FID \cite{heusel2017gans} is widely used to evaluate the generation quality of generative models by computing the distribution distance between generated images and training datasets. However, FID would become unstable and unreliable when it comes to datasets containing a few samples (e.g., 10-shot datasets used in this paper). Therefore, we provide visualized samples to evaluate the generation quality of DDPM-PA compared with prior works. %FID results of DDPM-PA on larger datasets are provided in Appendix \ref{appendix_adaptation}.
+
+\textbf{Baselines}
+Since few prior works realize few-shot image generation with DDPM-based models, we employ 7 GAN-based baselines sharing similar targets with us to adapt pre-trained models to target domains using only a few available samples for comparison: TGAN \cite{wang2018transferring}, TGAN+ADA \cite{ada}, FreezeD \cite{mo2020freeze}, MineGAN \cite{wang2020minegan}, EWC \cite{ewc}, CDC \cite{ojha2021few-shot-gan}, and DCL \cite{zhao2022closer}. All the methods are implemented based on the same StyleGAN2 \cite{Karras_2020_CVPR} codebase. DDPMs directly fine-tuned on limited data are included for comparison as well. The StyleGAN2 models and DDPMs trained on the large source datasets share similar generation quality and diversity (see more details in Appendix \ref{appendix_source}).
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{sunglasses.jpg}
+    \caption{10-shot image generation samples on FFHQ $\rightarrow$ Sunglasses. All the visualized samples of GAN-based approaches are synthesized from fixed noise inputs (rows 1-7). Visualized samples of the fine-tuned DDPM and DDPM-PA are synthesized from fixed noise inputs as well (rows 8-9). Our approach generates high-quality results with fewer blurs and artifacts and achieves considerable generation diversity.}
+    \label{sunglass}
+\end{figure*}
+
+\textbf{Qualitative Evaluation}
+As shown in the bottom row of Fig. \ref{result1}, we visualize the samples of DDPM-PA on 10-shot FFHQ $\rightarrow$ Babies, FFHQ $\rightarrow$ Sketches, and LSUN Church $\rightarrow$ Haunted houses. Compared with fine-tuned DDPMs, DDPM-PA produces more diverse samples different from the training samples under the guidance of $\mathcal{L}_{pair}$. For example, DDPM-PA generates babies having more diverse hairstyles and facial expressions. More visualized samples of other adaptation setups are provided in Fig. \ref{result2}. We observe that DDPM-PA generates samples containing hats that cannot be found in training samples when adapting FFHQ to Babies and Sunglasses. The adaptation from LSUN Church to Haunted houses and Landscape drawings retains all kinds of building structures. Moreover, DDPM-PA also performs better on learning target distributions. The target models are encouraged to learn common features of limited training samples instead of generating samples similar to one of them. As shown in the samples of FFHQ $\rightarrow$ Sketches, DDPM-PA generates images having a more similar style to the training samples while maintaining diversity.
+ 
+%In addition, we provide visualized samples of DDPM-PA on 10-shot FFHQ $\rightarrow$ Raphael's paintings, FFHQ $\rightarrow$ Sunglasses, and LSUN Church $\rightarrow$ Landscape drawings in Fig. \ref{result2}. 
+
+Fig. \ref{sunglass} shows the results of GAN-based baselines and DDPM-based approaches on 10-shot FFHQ $\rightarrow$ Sunglasses. For fair comparison, we fix the noise inputs for GAN-based and DDPM-based approaches, respectively. We observe that GAN-based approaches generate samples containing unnatural blurs and artifacts, while DDPM-based approaches achieve more realistic results. DDPM-PA can generate more diverse images different from the training samples than the fine-tuned DDPM, including hairstyles, the color of sunglasses, et al. Samples produced by DDPM-PA models trained for different iterations and more visualized results comparison on 10-shot FFHQ $\rightarrow$ Babies, FFHQ $\rightarrow$ Raphael's paintings, and LSUN Church $\rightarrow$ Landscape drawings can be found in Appendix \ref{appendix_results}. 
+
+
+\textbf{Quantitative Evaluation}
+We provide the Intra-LPIPS results of DDPM-PA under a series of 10-shot adaptation setups in Table \ref{intralpips}. Benefiting from the pairwise similarity loss $\mathcal{L}_{pair}$, DDPM-PA realizes a superior improvement of Intra-LPIPS compared with fine-tuned DDPMs. Besides, DDPM-PA outperforms state-of-the-art GAN-based approaches on Intra-LPIPS, indicating its strong capability of maintaining generation diversity. Additional Intra-LPIPS results of other adaptation setups are added in Appendix \ref{appendix_results}. 
+
+
+
+\subsection{Ablation Analysis}
+\label{43}
+We evaluate the generation diversity of DDPM-PA with different $\lambda_2$, the weight of the proposed $\mathcal{L}_{pair}$ using 10-shot FFHQ $\rightarrow$ Raphael's paintings as an example. The quantitative results are listed in Table \ref{ablation}. We add visualized comparison results in Appendix \ref{appendix_ablation}. DDPM-PA models with larger $\lambda_2$ values tend to produce more diverse results and achieve greater diversity. However, too large $\lambda_2$ values may cause $\mathcal{L}_{pair}$ to overwhelm $\mathcal{L}_{simple}$ and prevent the adapted DDPMs from learning the distributions of target domains, leading to negative visual effects and degraded diversity.
+
+\begin{table}[htbp]
+    \centering
+    \small
+    \begin{tabular}{c|c|c|c}
+        $\lambda_2$ & $0.01$ & $0.04$ & $0.2$  \\
+        \hline
+        Intra-LPIPS & $0.47 \pm 0.04 $ & $0.50 \pm 0.04$ & $0.51 \pm 0.04$ \\
+        \hline
+        $\lambda_2$ & $1.0$ & $5.0$ & $10.0$ \\
+        \hline
+        Intra-LPIPS & $0.52 \pm 0.03$ & $\pmb{0.58 \pm 0.03}$ &  $0.55 \pm 0.05$ \\
+    \end{tabular} 
+    \caption{Intra-LPIPS ($\uparrow$) results of DDPM-PA trained on 10-shot FFHQ $\rightarrow$ Raphael's paintings with different $\lambda_2$.}
+    \label{ablation}
+\end{table}
+
+
+
+% \section{DDPM-based Few-shot Image Generation}
+
+% Like other deep generative models including GANs and VAEs, DDPMs depend on large-scale networks for high-quality generation. Correspondingly, large amounts of training data are needed to avoid overfitting and keep the diversity of generation samples. We first use small-scale datasets ranging from 10 to 1000 images to train DDPMs from scratch. 
+
+
+% It is apparent that the diffusion model overfits seriously and cannot achieve high-quality results with great diversity when training on limited data. Therefore, we propose to adapt pre-trained models ...  (Sec \ref{fddpm})   (Sec \ref{cddpm})
+
+% \subsection{f-DDPMs}
+% \label{fddpm}
+
+
+% \subsection{c-DDPMs}
+% \label{cddpm}
+
+% \subsection{Quality and Diversity Evaluation}
+
+% quality: visual effects
+
+% diversity: Intra-LPIPS
+
+
+\section{Conclusion}
+This work focuses on DDPM-based few-shot image generation. We first evaluate the performance of DDPMs on small-scale datasets. When trained on a few samples from scratch, DDPMs need large amounts of iterations to generate reasonable results but can only replicate training samples instead of generating diverse images. Next, we fine-tune pre-trained DDPMs on target domains using limited data directly but still fail to achieve results competitive in diversity. Therefore, we present DDPM-PA using a pairwise similarity loss to preserve the relative distances between samples during domain adaptation. DDPM-PA realizes significant improvement in generation diversity and outperforms current state-of-the-art GAN-based approaches. In addition, DDPM-PA avoids generating blurs or artifacts and achieves more realistic results. We consider our work to be an important step towards more data-efficient diffusion models. The limitations are discussed in Appendix \ref{appendix_limitations}.
+
+\bibliographystyle{abbrv}
+\bibliography{refs}
+
+\clearpage
+
+\appendix
+
+\section{More Detailed Ablation Analysis}
+\label{appendix_ablation}
+We propose a DDPM-based pairwise similarity loss $\mathcal{L}_{pair}$ to preserve the relative distances between samples during domain adaptation and further relieve overfitting, leading to greater generation diversity. In Equation \ref{loss}, we set the overall optimization target of DDPM-PA as the weighted sum of $\mathcal{L}_{simple}$, $\mathcal{L}_{vlb}$ and the proposed $\mathcal{L}_{pair}$. Here we provide a detailed ablation analysis of the weight $\lambda_2$ of $\mathcal{L}_{pair}$ using 10-shot FFHQ $\rightarrow$ Raphael's paintings as an example as a supplement to Sec. \ref{43}. As shown in Fig. \ref{ablations_image}, we generate samples with models having different $\lambda_2$ values ranging from 0.0 (fine-tuned directly) to 25.0 using fixed noise inputs for comparison. In Table \ref{lambda2}, we provide the Intra-LPIPS results of models with different values of $\lambda_2$. 
+
+It can be seen that models with larger $\lambda_2$ values tend to produce more diverse results and achieve greater generation diversity. However, too large $\lambda_2$ values may cause $\mathcal{L}_{pair}$ to overwhelm $\mathcal{L}_{simple}$ and prevent the target models from learning the distributions of training samples, leading to negative visual effects and degraded diversity. For the 10-shot adaptation setups used in this paper, we recommend setting $\lambda_2$ values ranging from 0.2 to 5.0. Although the DDPM-PA model using the largest value 25.0 of $\lambda_2$ achieves good Intra-LPIPS results on 10-shot FFHQ $\rightarrow$ Raphael's paintings, it fails to synthesize high-quality results as shown in Fig. \ref{ablations_image}. Different choices of $\lambda_2$ can be tried for different datasets to pursue better generation quality and diversity.
+
+\begin{table}[htbp]
+    \centering
+    \begin{tabular}{c|c}
+        $\lambda_2$ & Intra-LPIPS  \\
+        \hline
+        $0.0$ & $0.466 \pm 0.018$ \\
+        $0.01$ & $0.471 \pm 0.037$ \\
+        $0.04$ & $0.498 \pm 0.042$ \\
+        $0.2$ & $0.514 \pm 0.041$ \\
+        $1.0$ & $0.522 \pm 0.029$ \\
+        $5.0$ & $\pmb{0.579 \pm 0.027}$ \\
+        $10.0$ & $0.548 \pm 0.054$ \\
+        $25.0$ & $0.574 \pm 0.021$ \\
+    \end{tabular} 
+    \caption{Intra-LPIPS ($\uparrow$) results of DDPM-PA trained on 10-shot FFHQ $\rightarrow$ Raphael's paintings with different $\lambda_2$.}
+    \label{lambda2}
+\end{table}
+
+\section{Limitations}
+\label{appendix_limitations}
+Despite the compelling results of our approach, it still has some limitations. All the datasets used in this paper have the resolution of $256\times 256$. The experiments of DDPM-PA are carried out on NVIDIA RTX A6000 GPUs (48 GB memory of each). However, the batch size on each GPU is still limited to 3. Therefore, it is challenging to expand our approach to higher image resolution. We will work on more lightweight DDPM-based few-shot image generation approaches. Despite that, the datasets used in this paper have larger resolution than many DDPM-based works \cite{giannone2022few,nichol2021improved,austin2021structured,chen2022analog,kingma2021variational,zhang2022gddim} which use datasets with resolution $32\times 32$ and $64\times 64$. In addition, it may be hard for DDPM-PA to fully reproduce the styles for some abstract target domains like artists' paintings. We will pursue more robust style learning approaches in future work.
+
+
+% Apart from the adaptation setups employed in our paper, we also apply the proposed DDPM-PA to abstract target domains like Van Gogh's paintings. As shown in Fig. \ref{vangoh2}, DDPM-PA adapts real churches to church paintings but fails to imitate Van Gogh's painting style thoroughly. For such abstract target domains, the proposed DDPM-PA still cannot fully reproduce styles similar to the training samples. We will work on more powerful style learning approaches for DDPMs in the future.
+
+% \begin{figure}[ht]
+%     \centering
+%     \includegraphics[width=0.9\linewidth]{images/vangoh2.jpg}
+%     \caption{Image samples produced by DDPM-PA models trained on 10-shot LSUN Church $\rightarrow$ Van Gogh's paintings.}
+%     \label{vangoh2}
+% \end{figure}
+
+
+\section{Inspiration of Pairwise Similarity Loss}
+The proposed pairwise similarity loss $\mathcal{L}_{pair}$ designed for DDPMs is mainly inspired by widely-used methods in contrastive learning \cite{oord2018representation, he2020momentum, chen2020simple} which build probability distributions based on similarities. Similar methods are applied to GAN-based approaches, including CDC \cite{ojha2021few-shot-gan} and DCL \cite{zhao2022closer} as well. GAN-based approaches depend on perceptual features in the generator and discriminator to compute similarity and probability distributions. As for the proposed DDPM-PA, the predicted input images $\tilde{x}_0$ calculated in terms of $x_t$ and $\epsilon_{\theta}(x_t,t)$ (Equation \ref{eq11}) are applied in replacement of perceptual features used for GANs. DDPM-PA directly uses image-level information to preserve the relative distances between samples during domain adaptation. 
+
+As illustrated in Sec. \ref{422}, DDPM-PA not only synthesizes more realistic images with fewer blurs and artifacts but also achieves better generation diversity than current state-of-the-art GAN-based approaches \cite{ojha2021few-shot-gan, zhao2022closer}. We try to use image-level information to replace the perceptual features for the GAN-based approach CDC but fail to avoid the generation of artifacts or achieve higher generation quality, as shown in Fig. \ref{imagecdc}. 
+
+%The proposed pairwise similarity loss guides target models to learn common features of few-shot training samples instead of imitating one of them. As a result, DDPM-PA achieves apparently better learning of target distributions than fine-tuned DDPMs under adaptation setups like FFHQ $\rightarrow$ Sketches and LSUN Church $\rightarrow$ Landscape drawings (see Fig. \ref{vangogh} in Appendix \ref{appendix_results}).
+
+
+%Other prior GAN-based approaches are mainly designed for generators \cite{wang2020minegan} and discriminators \cite{mo2020freeze,ewc} specially and cannot be expanded to DDPMs directly.
+
+%Recent GAN-based approaches \cite{ojha2021few-shot-gan,zhao2022closer} build a clear correspondence between the source and target domains. We observe that the proposed DDPM-PA leads to obvious changes in some samples during domain adaptation. Despite that, DDPM-PA is still capable of generating diverse results different from the training samples. As illustrated in Sec. \ref{42}, DDPM-PA synthesizes more realistic images with less blurs and artifacts and achieves better generation diversity than prior GAN-based baselines.
+
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=1.0\linewidth]{ablations.jpg}
+    \caption{Ablations of $\lambda_2$, the weight coefficient of the proposed pairwise similarity loss $\mathcal{L}_{pair}$ on 10-shot FFHQ $\rightarrow$ Raphael's paintings. }
+    \label{ablations_image}
+\end{figure*}
+
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=1.0\linewidth]{imagecdc.jpg}
+    \caption{Image samples synthesized by CDC \cite{ojha2021few-shot-gan} using image-level information on 10-shot FFHQ $\rightarrow$ Sunglasses and FFHQ $\rightarrow$ Babies. }
+    \label{imagecdc}
+\end{figure*}
+
+% \begin{figure}[htbp]
+%     \centering
+%     \includegraphics[width=0.9\linewidth]{images/fid.jpg}
+%     \caption{FID ($\downarrow$) of models trained from scratch on 1000-shot Babies, Sunglasses, and LSUN Church vs training iterations (K).}
+%     \label{fid_image}
+% \end{figure}
+
+\section{More Details of Implementation}
+\label{appendix_implementation}
+\subsection{More Details of DDPMs} 
+We follow the model setups of DDPMs used in prior works \cite{nichol2021improved} for LSUN $256^2$ \cite{yu2015lsun} datasets. All the DDPM-based models used in this paper are implemented based on the same codebase \cite{nichol2021improved,dhariwal2021diffusion} and share the same model structure for fair comparison under different adaptation setups and optimization targets. All the source and target datasets are modified to the resolution of $256 \times 256$. We use a max diffusion step $T$ of 1000 and a dropout rate of 0.1. The models are trained to learn the variance with $\mathcal{L}_{vlb}$. The Adam optimizer \cite{kingma2014adam} is employed to update the trainable parameters. We set the learning rate as 0.001 and apply the linear noise schedule to the noising process. Besides, we use half-precision (FP16) binary floating-point format to save memory and make it possible to use a larger batch size in our experiments (batch size 6 for fine-tuned DDPMs and batch size 3 for DDPM-PA per NVIDIA RTX A6000 GPU). All the results produced by DDPM-based models in this paper follow the sampling process proposed in Ho et al.'s work \cite{NEURIPS2020_4c5bcfec} (about 21 hours needed to generate 1000 samples on a single NVIDIA RTX A6000 GPU) without any fast sampling methods \cite{song2020denoising, zhang2022gddim, lu2022dpm, lu2022dpm2, zhang2022fast, karras2022elucidating}. The weight coefficient $\lambda_2$ of pairwise similarity loss is set as 5 for Intra-LPIPS results listed in Table \ref{intralpips} and additional results in Table \ref{intralpips2}.
+
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=1.0\linewidth]{scratch_data.jpg}
+    \caption{Examples of small-scale datasets sampled from FFHQ-babies, FFHQ-sunglasses, and LSUN Church. For datasets containing 100 or 1000 images, we randomly pick 15 examples.}
+    \label{scratch_data}
+\end{figure*}
+
+\subsection{More Details of GAN-based Baselines}
+We employ several GAN-based few-shot image generation approaches as baselines for comparison with the proposed DDPM-PA. Here we provide more details of these baselines. We implement all these approaches based on the same codebase of StyleGAN2. The source models are fine-tuned directly on the target datasets to realize TGAN \cite{wang2018transferring}. TGAN+ADA applies ADA \cite{ada} augmentation method to the TGAN baseline. For FreezeD \cite{mo2020freeze}, the first 4 high-resolution layers of the discriminator are frozen following the ablations analysis provided in their work. The results of MineGAN \cite{wang2020minegan} and CDC \cite{ojha2021few-shot-gan} are produced through their official implementation. As for EWC \cite{ewc} and DCL \cite{zhao2022closer}, we implement these approaches following formulas and parameters in their papers since there is no official implementation. These GAN-based approaches are designed for generators \cite{wang2020minegan,ewc,ojha2021few-shot-gan,zhao2022closer} and discriminators \cite{mo2020freeze,zhao2022closer} specially and cannot be expanded to DDPMs directly.
+
+The adapted GANs are trained for $1K$-$3K$ iterations. When evaluating generation diversity using Intra-LPIPS for the 10-shot adaptation tasks (Table \ref{intralpips} and \ref{intralpips2}), we apply fixed noise inputs to different approaches for fair comparison. 
+
+\section{DDPMs Trained from Scratch}
+\label{appendix_scratch}
+In Section \ref{section3}, we evaluate the performance of DDPMs trained from scratch on small-scale datasets containing 10, 100, and 1000 images. In our experiments, the smaller datasets are included in the larger datasets. For example, 1000-shot Sunglasses includes all the images in 100-shot and 10-shot Sunglasses. Similarly, all the images in 10-shot Sunglasses are included in 100-shot Sunglasses as well. We train the models for $40K$ iterations (about 20 hours on $\times 8$ NVIDIA RTX A6000 GPUs) on datasets containing 10 or 100 images. While for datasets containing 1000 images, the DDPMs are trained for $60K$ iterations (about 30 hours on $\times 8$ NVIDIA RTX A6000 GPUs). 
+
+\begin{table}[htbp]
+    \centering
+    \begin{tabular}{c|c|c|c}
+        Iterations (K) & Babies & Sunglasses & \makecell[c]{LSUN Church}  \\
+        \hline
+        $0$ & $444.35$ & $419.75$ & $424.53$ \\
+        $10$ & $444.91$ & $419.38$ & $413.68$ \\
+        $20$ & $222.81$ & $348.48$ & $385.25$ \\
+        $30$ & $\pmb{90.16}$ & $168.62$ & $388.81$ \\
+        $40$ & $124.97$ & $82.48$ & $57.68$ \\
+        $50$ & $132.33$ & $68.26$ & $\pmb{45.43}$ \\
+        $60$ & $132.32$ & $\pmb{66.09}$ & $69.18$ \\
+    \end{tabular} 
+    \caption{FID ($\downarrow$) results of DDPMs trained for different iterations from scratch on 1000-shot Babies, Sunglasses, and LSUN Church.}
+    \label{fid_table}
+\end{table}
+
+\begin{figure*}[htbp]
+    \centering
+    \includegraphics[width=1.0\linewidth]{scratch.jpg}
+    \caption{Image samples produced by DDPMs trained from scratch on small-scale datasets, including Babies, Sunglasses, and LSUN Church containing 10, 100, and 1000 images. }
+    \label{scratch2}
+\end{figure*}
+
+ \begin{figure}[ht]
+    \centering
+    \includegraphics[width=1.0\linewidth]{scratch_compare.jpg}
+    \caption{Image samples comparison between DDPMs which achieve the best FID results and DDPMs trained for $60K$ iterations on 1000-shot Babies and LSUN Church. All the samples for different models are synthesized from fixed noise inputs.}
+    \label{scratch_compare}
+\end{figure}
+
+
+
+ We provide several typical examples randomly picked from the small-scale datasets in Fig. \ref{scratch_data}. Compared with the generated images shown in Fig. \ref{scratch2}, it can be seen that DDPMs trained from scratch need enough training samples (e.g., 1000 images) to synthesize diverse results and avoid replicating the training samples. Detailed FID results of DDPMs trained from scratch on Babies, Sunglasses, and LSUN Church containing 1000 images for $60K$ iterations are shown in Table \ref{fid_table}. DDPMs trained from scratch on 1000-shot Babies, Sunglasses, and LSUN Church achieve the best FID results at $30K$, $60K$, and $50K$ iterations, respectively.
+
+ 
+ In Fig. \ref{scratch2}, we provide samples generated by DDPMs trained from scratch for $60K$ iterations on all three 1000-shot Babies and LSUN Church datasets. We add the generated samples of models trained from scratch on 1000-shot Babies and LSUN Church, which achieve the best FID results for comparison in Fig. \ref{scratch_compare}. We do not include samples for all three datasets since the model trained for $60K$ iterations on 1000-shot Sunglasses achieves the best FID results as well. For 1000-shot Babies, the model trained for $60K$ iterations achieves more smooth results containing fewer blurs despite its worse FID results. The model with the best FID results shows more diverse results. As for 1000-shot LSUN Church, the model trained for $50K$ iterations with the best FID results produces samples containing more detailed structures of churches than the model trained for $60K$ iterations. 
+ 
+ %Based on the above analysis, we can draw the conclusion that DDPMs trained from scratch on small-scale datasets need large amounts of iterations to achieve reasonable results and are still faced with unstable training processes as shown in Table \ref{fid_table} and Fig. \ref{fid_image}, even if the datasets contain relatively abundant data (e.g., 1000 images). It further proves the necessity of our research on adapting pre-trained DDPMs to target domains using limited data (see Appendix \ref{c4}).
+ 
+ 
+\begin{figure*}[htbp]
+    \centering
+    \includegraphics[width=1.0\linewidth]{result_scratch.jpg}
+    \caption{Image samples produced by DDPMs trained on FFHQ $256^2$ \cite{Karras_2020_CVPR} ($300K$ iterations) and LSUN Church $256^2$ \cite{yu2015lsun} ($250K$ iterations).}
+    \label{result_scratch}
+\end{figure*}
+
+
+\section{DDPM-based Source Models}
+\label{appendix_source}
+We train DDPMs on FFHQ \cite{Karras_2020_CVPR} and LSUN Church \cite{yu2015lsun} datasets for $300K$ iterations and $250K$ iterations as the source models for fine-tuned DDPMs and DDPM-PA, which cost 5 days and 22 hours, 4 days and 22 hours on $\times 8$ NVIDIA RTX A6000 GPUs, respectively. 
+
+
+Image samples produced by these two source models can be found in Fig. \ref{result_scratch}. We randomly sample 1000 images with these two models to evaluate their generation diversity using the average pairwise LPIPS metric as shown in Table \ref{source_lpips}. For comparison, we also evaluate the generation diversity of the source StyleGAN2 \cite{Karras_2020_CVPR} models used by GAN-based baselines \cite{wang2018transferring, ada, mo2020freeze, wang2020minegan, ewc, ojha2021few-shot-gan, zhao2022closer}. We find that DDPM-based source models trained on FFHQ and LSUN Church achieve similar generation diversity to the widely-used StyleGAN2 models. 
+
+\begin{table}[htbp]
+    \centering
+    \begin{tabular}{l|c|c}
+        Approaches & FFHQ & LSUN Church  \\
+        \hline
+        StyleGAN2 & $0.6619 \pm 0.0581$   &  $ 0.7144 \pm 0.0537$ \\
+        DDPM &   $\pmb{0.6631 \pm 0.0592}$   & $\pmb{0.7153 \pm 0.0513}$
+    \end{tabular} 
+    \caption{Average pairwise LPIPS ($\uparrow$) results of 1000 samples produced by StyleGAN2 and DDPMs trained on FFHQ and LSUN Church.}
+    \label{source_lpips}
+\end{table}
+
+
+Besides, we sample 5000 images to evaluate the generation quality of the source models using FID. As shown in Table \ref{source_fid}, DDPM-based source models achieve close FID results to StyleGAN2 (a little better) on FFHQ and LSUN Church, indicating the competitive generation quality DDPMs have achieved compared with modern GANs on FFHQ $256^2$ and LSUN Church $256^2$. 
+
+\begin{table}[htbp]
+    \centering
+    \begin{tabular}{l|c|c}
+        Approaches & FFHQ & LSUN Church  \\
+        \hline
+        StyleGAN2 &  $7.71$  & $8.09$   \\
+        DDPM &  $\pmb{7.00}$  & $\pmb{6.06}$
+    \end{tabular} 
+    \caption{FID ($\downarrow$) results of StyleGAN2 and DDPMs trained on FFHQ $256^2$ and LSUN Church $256^2$.}
+    \label{source_fid}
+\end{table}
+% \begin{figure}[htbp]
+%     \centering
+%     \includegraphics[width=0.9\linewidth]{images/fid.jpg}
+%     \caption{FID ($\downarrow$) of models trained from scratch on 1000-shot Babies, Sunglasses, and LSUN Church VS training iterations (K).}
+%     \label{fid_image2}
+% \end{figure}
+
+\begin{figure*}[htbp]
+    \centering
+    \includegraphics[width=1.0\linewidth]{amedeo.jpg}
+    \caption{Image samples produced by DDPM-PA models trained for different iterations on 10-shot FFHQ $\rightarrow$ Amedeo's paintings. All the visualized samples of different models are synthesized from fixed noise inputs. }
+    \label{amedeo}
+\end{figure*}
+
+
+\begin{table*}[htbp]
+    \centering
+    \begin{tabular}{c|c|c|c|c|c|c}
+        \hline
+        \multicolumn{7}{c}{1000-shot Sunglasses (Source Model: FFHQ)} \\
+        \hline
+        & \multicolumn{3}{c|}{FID} & \multicolumn{3}{c}{Average Pairwise LPIPS} \\
+        \hline
+        Iterations (K) & Scratch & \makecell[c]{Fine-tuned \\ DDPM} & DDPM-PA  & Scratch & \makecell[c]{Fine-tuned \\ DDPM} & DDPM-PA \\
+        \hline
+        $0$ & $419.75$ & $151.98$ & $151.98$ & $0.3428 \pm 0.0044$ & $0.6654 \pm 0.0601$ & $0.6654 \pm 0.0601$ \\
+        $10$ & $419.38$ & $74.41$& $87.29$ & $0.4554 \pm 0.0062$ & $0.6343 \pm 0.0610$ & $0.6412 \pm 0.0776$ \\
+        $20$ & $348.48$ & $65.37$& $65.14$ & $0.5909 \pm 0.0079$ & $0.6054 \pm 0.0673$ & $0.6294 \pm 0.0874$ \\
+        $30$ & $168.62$ & $65.18$ & $65.42$ & $0.6250 \pm 0.0215$ & $0.5917 \pm 0.0710$ & $0.6154 \pm 0.0943$ \\
+        $40$ & $82.48$ & $63.68$ & $64.56$ & $0.6342 \pm 0.0800$ & $0.5859 \pm 0.0730$ & $0.6172 \pm 0.0922$ \\
+        $50$ & $68.26$ & $61.30$ & $64.23$ & $0.6462 \pm 0.1017$ & $0.5867 \pm 0.0755$ & $0.6075 \pm 0.0940$\\
+        $60$ & $\pmb{66.09}$ & $\pmb{58.97}$& $\pmb{62.99}$ & $0.6193 \pm 0.0930$ & $0.5907 \pm 0.0764$ & $0.6019 \pm 0.0918$  \\
+        \hline
+        \multicolumn{7}{c}{1000-shot Babies (Source Model: FFHQ)} \\
+        \hline
+        & \multicolumn{3}{c|}{FID} & \multicolumn{3}{c}{Average Pairwise LPIPS} \\
+        \hline
+        Iterations (K) & Scratch & \makecell[c]{Fine-tuned \\ DDPM} & DDPM-PA  & Scratch & \makecell[c]{Fine-tuned \\ DDPM} & DDPM-PA \\
+        \hline
+        $0$ & $444.35$ & $171.65$ & $171.65$ & $0.3428 \pm 0.0044$ & $0.6654 \pm 0.0601$ & $0.6654 \pm 0.0601$ \\
+        $10$ & $444.91$ & $\pmb{97.79}$ & $\pmb{89.42}$ & $0.4567 \pm 0.0062$ & $0.6146 \pm 0.0604$ & $0.6320 \pm 0.0783$ \\
+        $20$ & $228.31$ & $129.62$ & $114.16$ & $0.6025 \pm 0.0210$ & $0.5780 \pm 0.0653$ & $0.6217 \pm 0.0947$  \\
+        $30$ & $\pmb{90.16}$ & $140.09$ & $130.47$ & $0.6158 \pm 0.0884$ & $0.5577 \pm 0.0682$ &  $0.6004 \pm 0.0998$\\
+        $40$ & $124.97$ & $140.02$ & $136.03$ & $0.6289 \pm 0.0110$  & $0.5526 \pm 0.0712$ & $0.5991 \pm 0.1014$ \\
+        $50$ & $132.33$ & $136.76$ & $140.26$ & $0.5959 \pm 0.0959$  & $0.5554 \pm 0.0725$ & $0.5890 \pm 0.0985$ \\
+        $60$ & $132.32$ & $123.47$ & $141.12$ & $0.5963 \pm 0.0960$ & $0.5540 \pm 0.0791$ & $0.5808 \pm 0.0954$  \\
+        \hline
+    \end{tabular} 
+    \caption{FID ($\downarrow$) and average pairwise LPIPS ($\uparrow$) results of DDPMs trained with different approaches for different iterations on 1000-shot Sunglasses and Babies. Fine-tuned DDPMs and DDPM-PA adapt the model pre-trained on FFHQ to the target domains using 1000 training samples.}
+    \label{fid_table2}
+\end{table*}
+
+
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=1.0\linewidth]{sunglass1000.jpg}
+    \caption{Image samples produced by DDPMs which achieve the best FID results during $60K$ iterations on 1000-shot Sunglasses. All the visualized samples of different models are synthesized from fixed noise inputs.}
+    \label{sunglass1000}
+\end{figure*}
+
+\begin{figure*}[ht]
+    \centering
+    \includegraphics[width=1.0\linewidth]{babies1000.jpg}
+    \caption{Image samples comparison between DDPMs which achieve the best FID results during $60K$ iterations and DDPMs trained for $60K$ iterations on 1000-shot Babies. All the visualized samples of different models are synthesized from fixed noise inputs.}
+    \label{babies1000}
+\end{figure*}
+
+
+\section{DDPM-based Adaptation Models}
+\label{appendix_adaptation}
+In this paper, we mainly concentrate on the challenging 10-shot image generation tasks. We observe that when fine-tuning pre-trained DDPMs on target domains using limited data directly, too many iterations also lead to overfitting and seriously degraded diversity, as shown in Fig. \ref{degrade}. Fine-tuned models trained for about 10K iterations almost exclusively focus on replicating the training samples. Therefore, we train the fine-tuned DDPMs for $3K$ iterations. In Fig. \ref{amedeo}, we provide samples produced by DDPM-PA models trained for different iterations on 10-shot FFHQ $\rightarrow$ Amedeo's paintings. We apply fixed noise inputs to different models for comparison. It can be seen that as the iterations increase, the styles of generated images become closer to the training samples. Images synthesized from the same noise inputs as Fig. \ref{degrade} are included in red boxes. Compared with the results of fine-tuned DDPMs shown in Fig. \ref{degrade}, DDPM-PA has a stronger ability to maintain generation diversity. Nonetheless, too many iterations still lead to the degradation of quality and diversity. Therefore, we train DDPM-PA models for $4K$-$5K$ iterations aiming to adapt the pre-trained models to target domains and guarantee the high quality and great diversity of generated samples. 
+
+
+\begin{table*}[htbp]
+\centering
+\begin{tabular}{c|c|c|c|c}
+\hline
+Datasets & \multicolumn{2}{c|}{1000-shot LSUN Church } &
+\multicolumn{2}{c}{1000-shot Sunglasses } \\
+\hline
+ Iterations (K) & {Scratch} & \makecell[c]{Fine-tuned DDPM \\ (Source Model: FFHQ)} & Scratch & \makecell[c]{Fine-tuned DDPM \\ (Source Model: LSUN Church)} \\
+ \hline
+ $0$ & $424.53$ & $262.87$ & $419.75$ & $235.21$ \\
+ $10$ & $413.68$ & $97.49$ & $419.38$ & $183.86$ \\
+ $20$ & $385.25$ & $\pmb{39.68}$ & $348.48$ & $\pmb{56.34}$\\
+ $30$ & $388.81$ & $45.74$ & $168.62$ & $60.47$\\
+ $40$ & $57.68$ & $51.45$ & $82.48$ & $63.81$\\
+ $50$ & $\pmb{45.43}$ & $55.70$ & $68.26$ & $66.45$\\
+ $60$ & $69.18$ & $58.43$ & $\pmb{66.09}$ & $66.17$\\
+ \hline
+\end{tabular}
+\caption{FID ($\downarrow$) results of fine-tuned DDPMs trained on unrelated source/target domains compared with DDPMs trained from scratch.}
+\label{unrelated}
+\end{table*}
+
+\begin{figure*}[htbp]
+    \centering
+    \includegraphics[width=1.0\linewidth]{church_sunglass.jpg}
+    \caption{Image samples synthesized from fixed noise inputs by fine-tuned DDPMs trained on 1000-shot LSUN Church $\rightarrow$ Sunglasses for different iterations. }
+    \label{church_sunglass}
+\end{figure*}
+
+\begin{figure*}[htbp]
+    \centering
+    \includegraphics[width=1.0\linewidth]{ffhq_church.jpg}
+    \caption{Image samples synthesized from fixed noise inputs by fine-tuned DDPMs trained on 1000-shot FFHQ $\rightarrow$ LSUN Church for different iterations. }
+    \label{ffhq_church}
+\end{figure*}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{datasets2.jpg}
+    \caption{All the 10-shot datasets used in this paper, including 5 target domains corresponding to FFHQ and 2 target domains corresponding to LSUN Church.}
+    \label{datasets}
+\end{figure*}
+
+ DDPMs trained from scratch are capable of generating diverse images when the training datasets contain relatively abundant data (e.g., 1000 images). The proposed DDPM-PA is mainly designed for few-shot image generation tasks using a few available samples (e.g., 10-shot datasets used in this paper). We add experiments on 1000-shot FFHQ $\rightarrow$ Sunglasses and FFHQ $\rightarrow$ Babies for fine-tuned DDPMs and the proposed DDPM-PA. FID \cite{heusel2017gans} and average pairwise LPIPS \cite{zhang2018unreasonable} are employed to evaluate the generation quality and diversity compared with DDPMs trained from scratch. Fine-tuned DDPMs and DDPM-PA models are trained for $60K$ iterations, as same as the models trained from scratch on 1000-shot datasets for comparison. Weight coefficient $\lambda_2$ of the proposed pairwise similarity loss $\mathcal{L}_{pair}$ is set as 0.05 for 1000-shot target datasets.
+
+
+We provide the FID and average pairwise LPIPS results of DDPMs trained with different approaches for different iterations in Table \ref{fid_table2}. Fine-tuned DDPMs and the proposed DDPM-PA make use of pre-trained models to achieve fast convergence. With enough iterations, the model trained from scratch achieves similar generation quality and diversity to fine-tuned DDPMs and DDPM-PA. The fine-tuned DDPMs and DDPM-PA models trained for $10K$ iterations on 1000-shot FFHQ $\rightarrow$ Babies achieve the best results in both generation quality and diversity. 
+
+In Fig. \ref{sunglass1000}, we provide the visualized samples synthesized from fixed noise inputs by different approaches, which achieve the best FID results on 1000-shot Sunglasses (trained for $60K$ iterations). As for 1000-shot FFHQ $\rightarrow$ Babies, we provide visualized comparison between models which achieve the best FID results and are trained for $60K$ iterations in Fig. \ref{babies1000}. The model trained from scratch for $60K$ iterations synthesizes images with fewer blurs and artifacts but lacks diversity and gets worse FID results. Besides, it can be seen that too many iterations for DDPM-based approaches lead to degraded diversity with worse FID results. Fine-tuned DDPMs and DDPM-PA utilize the knowledge provided by pre-trained models and need suitable iterations to achieve high-quality results with considerable diversity. Compared with the models trained from scratch, fine-tuned DDPMs and DDPM-PA generate more realistic results without blurs and artifacts.
+ 
+Different from the stable training processes shown in prior works \cite{nichol2021improved,dhariwal2021diffusion} for large datasets like ImageNet \cite{van2016conditional} and LSUN \cite{yu2015lsun}, we find some unstable training processes for datasets containing 1000 images in our experiments. More specifically, too many iterations may lead to diversity degradation and worse FID results for all kinds of training approaches of DDPMs. Similar training processes can be found in Appendix \ref{appendix_scratch} and \ref{appendix_unrelated} as well. Therefore, we recommend choosing suitable iterations empirically for such datasets containing relatively abundant data (e.g., 1000 images) to obtain models performing well in both generation quality and diversity.
+
+The time cost of fine-tuning DDPMs and the proposed DDPM-PA approach are listed in Table \ref{timecost}. DDPMs trained from scratch need about $40K$ iterations to achieve reasonable results, even if they can only replicate the training samples. As a comparison, fine-tuned DDPMs and DDPM-PA utilize pre-trained models to accelerate convergence and improve generation diversity significantly.
+
+
+%Time Cost
+\begin{table}[htbp]
+    \centering
+    \begin{tabular}{l|c}
+        Approaches & Time Cost $/\ 1K$ Iterations  \\
+        \hline
+        Fine-tuned DDPMs  &  29 min   \\
+        DDPM-PA &  34 min    
+    \end{tabular} 
+    \caption{The time cost of fine-tuned DDPMs (batch size 48) and DDPM-PA (batch size 24) models trained for $1K$ iterations on $\times 8$ NVIDIA RTX A6000 GPUs.}
+    \label{timecost}
+\end{table}
+
+% \begin{table}[htbp]
+%     \centering
+%     \begin{tabular}{l|c|c|c}
+%         Datasets & \multicolumn{3}{c}{1000-shot Sunglasses}   \\
+%         \hline
+%         Iterations (K)  & Scratch & DDPM-A & DDPM-PA \\
+%         \hline
+%         \makecell[c]{0} & 419.75 & 151.98 & 151.98 \\
+%         \makecell[c]{10} & 419.38 & 74.41& 110.56 \\
+%         \makecell[c]{20} & 348.48 & 65.37& 95.57 \\
+%         \makecell[c]{30} & 168.62 & 65.18 & 94.89 \\
+%         \makecell[c]{40} & 82.48 & 63.68& $\pmb{90.71}$ \\
+%         \makecell[c]{50} & 68.26 & 61.30& 93.73\\
+%         \makecell[c]{60} & $\pmb{66.09}$ & $\pmb{58.97}$& 100.44 \\
+%     \end{tabular} 
+%     \caption{FID ($\downarrow$) results of DDPMs trained with different approaches for different steps of iterations on 1000-shot Sunglasses. DDPM-A and DDPM-PA adapt the model pre-trained on FFHQ to the target domain using 1000 training samples.}
+%     \label{fid_table2}
+% \end{table}
+
+%We surprisingly find that DDPM-PA not only helps improve generation diversity when data is limited but also achieves fast convergence with apparently better FID results than training from scratch and DDPM-A when data is relatively abundant. The proposed pairwise similarity loss $\mathcal{L}_{pair}$ helps the adapted DDPMs realize stable learning for features of the target domains and works well for related source / target domains. Moreover, all three methods achieve similar generation diversity on 1000-shot datasets. 
+
+% \begin{table}[htbp]
+%     \centering
+%     \begin{tabular}{l|c|c|c}
+%         Approaches & Scratch & DDPM-A & DDPM-PA  \\
+%         \hline
+%         Babies  &  0.5963   &      &        \\
+%         Sunglasses & 0.6193    &   0.5907   &     
+%     \end{tabular} 
+%     \caption{Average pairwise LPIPS results of 1000 samples produced by models trained with different approaches for $60K$ iterations on 1000-shot Babies and Sunglasses.}
+%     \label{lpips1000}
+% \end{table}
+
+
+
+\section{Unrelated Source/Target Domains}
+\label{appendix_unrelated}
+We make use of related source/target domains for the few-shot image generation tasks in this paper, e.g., FFHQ $\rightarrow$ Sketches and LSUN Church $\rightarrow$ Haunted houses. Therefore, we add experiments using unrelated source/target domains, including 1000-shot FFHQ $\rightarrow$ LSUN Church and LSUN Church $\rightarrow$ Sunglasses. Here we only compare fine-tuned DDPMs with DDPMs trained from scratch. DDPM-PA is inappropriate for unrelated source/target domains since it is designed to preserve more diverse information learned from the source domain. FID \cite{zhang2018unreasonable} is employed to evaluate the convergence of models. 
+
+As shown in Table \ref{unrelated}, it can be seen that fine-tuned DDPMs using unrelated pre-trained models also accelerate convergence compared with DDPMs trained from scratch. Fine-tuned DDPMs achieve the best FID results using $20K$ iterations for the two employed adaptation setups. The models trained from scratch achieve close FID results when trained for more iterations (about $50K$-$60K$). We find that the adaptation on unrelated source/target domains is still evidently faster than DDPMs trained from scratch. In Fig. \ref{church_sunglass} and \ref{ffhq_church}, we provide visualized samples of fine-tuned DDPMs throughout training and show that DDPMs are capable of adapting unrelated source images to target domains.  
+
+%As illustrated above, fine-tuned DDPMs only need about $3K$ iterations to adapt related source domains to target domains.
+
+
+
+%TODO FFHQ --> 1000-SHOT CHURCH
+% LSUN CHURCH --> 1000-SHOT SUNGLASSES
+
+\section{Additional Results and Visualized Samples}
+\label{appendix_results}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{babies.jpg}
+    \caption{10-shot image generation samples on FFHQ $\rightarrow$ Babies. All the visualized samples of GAN-based approaches are synthesized from fixed noise inputs (rows 1-7). Visualized samples of the fine-tuned DDPM and DDPM-PA are synthesized from fixed noise inputs as well (rows 8-9).}
+    \label{babies}
+\end{figure*}
+
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{raphael.jpg}
+    \caption{10-shot image generation samples on FFHQ $\rightarrow$ Raphael's paintings. All the visualized samples of GAN-based approaches are synthesized from fixed noise inputs (rows 1-7). Visualized samples of the fine-tuned DDPM and DDPM-PA are synthesized from fixed noise inputs as well (rows 8-9).}
+    \label{raphael}
+\end{figure*}
+
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{landscape.jpg}
+    \caption{10-shot image generation samples on LSUN Church $\rightarrow$ Landscape drawings. All the visualized samples of GAN-based approaches are synthesized from fixed noise inputs (rows 1-7). Visualized samples of the fine-tuned DDPM and DDPM-PA are synthesized from fixed noise inputs as well (rows 8-9).}
+    \label{vangogh}
+\end{figure*}
+
+In Table \ref{intralpips2}, we provide additional results of Intra-LPIPS on 10-shot FFHQ $\rightarrow$ Sunglasses and FFHQ $\rightarrow$ Amedeo's paintings as supplements to Table \ref{intralpips}. The proposed DDPM-PA outperforms modern GAN-based approaches in generation diversity under these adaptation setups as well.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{l|c|c}
+ Approaches & \makecell[c]{FFHQ $\rightarrow$ \\ Sunglasses} & \makecell[c]{FFHQ $\rightarrow$ \\ Amedeo's paintings} 
+ \\
+ \hline
+ TGAN \cite{wang2018transferring} &  $0.550 \pm 0.021$ & $0.548 \pm 0.026$  \\
+ TGAN+ADA \cite{ada} & $0.571 \pm 0.034$ & $0.560 \pm 0.019$  \\
+ FreezeD \cite{mo2020freeze} & $0.558 \pm 0.024$ & $0.597 \pm 0.032$  \\
+ MineGAN \cite{wang2020minegan} & $0.570 \pm 0.020$ & $0.614 \pm 0.027$  \\
+ EWC \cite{ewc} & $0.550 \pm 0.014$ & $0.594 \pm 0.028$  \\
+ CDC \cite{ojha2021few-shot-gan} &  $0.581 \pm 0.011$ & $0.620 \pm 0.029$  \\
+ DCL \cite{zhao2022closer} & $0.574 \pm 0.007$ & $0.616 \pm 0.043$  \\
+ \hline
+ Fine-tuned DDPMs  & $0.527 \pm 0.024$ & $0.484 \pm 0.021$ \\
+ DDPM-PA (ours) &  $\pmb{0.589 \pm 0.018}$ & $\pmb{0.624 \pm 0.017}$ \\
+\end{tabular}
+\caption{Intra-LPIPS ($\uparrow$) results of DDPM-based approaches and GAN-based baselines on 10-shot FFHQ $\rightarrow$ Sunglasses and FFHQ $\rightarrow$ Amedeo's paintings. Standard deviations are computed across 10 clusters (the same number as training samples).}
+\label{intralpips2}
+\end{table}
+
+We show all the 10-shot datasets used in this paper for few-shot image generation tasks in Fig. \ref{datasets}, including 5 target domains corresponding to the source domain FFHQ and 2 target domains corresponding to LSUN Church. We provide image generation samples of GAN-based baselines and DDPM-based approaches on 10-shot FFHQ $\rightarrow$ Babies, FFHQ $\rightarrow$ Raphael's paintings, LSUN Church $\rightarrow$ Landscape drawings in Fig. \ref{babies}, \ref{raphael}, and \ref{vangogh} as supplements to Fig. \ref{sunglass}. We apply fixed noise inputs to GAN-based approaches and DDPM-based approaches, respectively. 
+
+DDPM-based approaches avoid the generation of blurs and artifacts and generate more realistic images than GAN-based approaches under all these adaptation setups. In addition, we find that DDPM-based approaches perform apparently better on not very relevant source/target domains like LSUN Church $\rightarrow$ Landscape drawings. As shown in Fig. \ref{vangogh}, GAN-based approaches fail to adapt real churches to the drawing style, while DDPM-PA produces church drawings successfully and achieves more diverse building structures than the fine-tuned DDPM. 
+
+
+\end{document}

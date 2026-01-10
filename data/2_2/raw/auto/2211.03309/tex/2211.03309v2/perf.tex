@@ -1,0 +1,144 @@
+%\input{figs/validation}
+\section{Performance Prediction Engine}\label{sec:ppe}
+%\name performance prediction engine predicts time for each node and each edge within the graph individually. 
+%Having time for each node and each edge within the compute graph, we will use an event-driven simulator 
+%that walks over the graph and triggers new event dictated by data dependency and resource mapping schedule.
+Once mapping is decided for each node and each edge in the transformed graph, performance prediction engine estimates timing for each node and each edge. 
+%The end-to-end performance estimation is conducted in a hierarchical manner. 
+%We first predict the timing for each node in the transformed graph. 
+We then use a resource-constrained scheduling algorithm to find the end-to-end timing. %We explain these steps in more details.
+
+\vspace{-0.2cm}
+\subsection{Hierarchical Roofline} 
+We use hierarchical roofline analyses~\cite{roofline} to predict the timing of each node in the transformed compute graph. 
+%Roofline analysis is an analytical approach that predicts if an application is compute-bound or memory-bound. 
+%Once this is known, our tool uses a simple throughput analysis to estimate timing.
+%: i.e. $\texttt{\#flops/compute throughput}$ if compute-bound, or $\texttt{\#memory accesses/memory bandwidth}$ if memory-bound.
+For each node, we estimate the operational intensity ($\texttt{OI$_L$ = \#flops/\#memory accesses$_L$}$) to each level in the memory hierarchy.
+%
+%For systems with multiple levels of memory hierarchy, we adopt a hierarchical roofline analysis.
+%Hierarchical roofline predicts if an application is compute-bound, L1-bound, L2-bound, memory-bound, etc.
+We search over the space of possible tiling strategies at each level of memory hierarchy and estimate the number of memory accesses to each level. We explain this in more detail next.
+%which in turn rely on accurate estimation of number accesses to each level. 
+%Operational intensity is different for different levels of memory hierarchy, determined by the number of accesses to each level. Hence, our accuracy very much depends on accurate estimation of accesses to each levels of memory hierarchy. 
+%The edge component, i.e., the inter-device communication overhead is calculated based on a simple throughput model. 
+
+\vspace{-0.2cm}
+\subsection{Memory Hierarchy Modeling} 
+%re-streaming coupled with tiling
+%As pointed out before, the success of roofline analysis very much depends on the accurate estimation of the number of accesses to each level of memory hierarchy. 
+The number of accesses to each level of memory hierarchy is a function of the underlying hardware (memory capacity at each level) and the algorithmic implementation (loop ordering and tiling strategies). 
+
+%For any given hardware configuration, at each level of memory hierarchy, 
+For any given input configuration, we explore $N^L$ random tiling strategies which meet the memory capacity requirement at each level. 
+$N$ is the number of tiling strategies at each level and $L$ is the number of levels of memory hierarchy. 
+Empirically, we found that  for $L=3$, $N \approx 20$ results in a reasonably accurate estimation. 
+
+For a given tiling strategy, it is easy to find the number of times each tile needs to be re-streamed from the next level of memory hierarchy. 
+We start from the lowest level (main memory) and walk upward to estimate the number of accesses.
+%(refer to Alg.~\ref{alg:}). .
+The number of memory accesses at each level is dictated by the tiling strategy at current level and the higher level. 
+For the highest level, the number of accesses is determined by the dataflow strategy exploited at MCU units. 
+%Note here that $T_{(i)}$ is itself a set that captures tiling along different dimensions. For example, in the case of GEMM, $T_{(i)}$ would be a triplet with one value for $t_x$, $t_y$ and $t_z$, which captures tiling along the input, output and inner dimensions. 
+
+
+%%%%%%%%
+\subsection{DataFlow Model} 
+%The number of accesses to each level of memory hierarchy, except for level 0 (i.e. register files) is dictated by the tiling parameters at the current and higher levels. 
+%For register files, the number of accesses is dictated by the architecture of the underlying execution engine and the dataflow strategy that it employs. 
+The number of accesses to the highest level of memory hierarchy (i.e. register file) will be determined by the number of instructions executed in the execution engine and the dataflow strategy governing mapping and communication between those engines (e.g. weight stationary, activation stationary and output stationary~\cite{eyeriss,timeloop}). 
+%
+The execution engine structure dictates how many times a piece of data could be reused internally before accessing the register file. We refer to this number as \textit{reuse factor (K)}.
+%For example, for a fused multiply-add (FMA), each data element will be reused only once. 
+In a 2-D systolic array with size $N_x$ and $N_y$, and an input GEMM with size $T0_x$, $T0_y$ and $T0_z$ at $L_0$, each data element could be reused $T0_x/N_x$ or $T0_y/N_y$ or $T0_z/N_z$ times, depending on which matrix is stationary. 
+%We model three different dataflow strategies, weight stationary ($WS$), activation stationary ($AS$) and output stationary ($OS$) and allow users to pick their desired strategy from one of the $\{WS$, $AS$, $OS$, best$\}$ choices. Here, the \textit{best} will selects the best strategy among the three choices.
+Given the reuse factor, we estimate the number of accesses to register files as follows:
+
+\vspace{-0.2cm}
+\small
+\begin{equation}
+\displaystyle
+     \#RegAccess = \#Flops \times \frac{N_x.N_y + K. N_x + K. N_y}{2.K.N_x. N_y}
+\end{equation}
+\normalsize
+%%%%%%%%%%
+\vspace{-0.5cm}
+\subsection{Inter/Intra-Package Communication Modeling}
+%The inter/intra-package communication timing is calculated based on a simple throughput analysis:
+%We use throughput analysis to calculate the inter/intra-package communication timing:
+%So far we discussed how performance prediction engine predicts the time for each node within the compute graph. Here, we look deeply into how to predict timing for each edge.
+%Once the transformed compute graph is mapped down to the system graph, we calculate the number of bytes that needs to be transferred through each edge ($D_e$). On the other hand, 
+As discussed in Section~\ref{sec:mapping}, compute graph to system graph mapping captures logical edge to physical link mapping.  
+The effective bandwidth for each link is downrated by the number of logical edges sharing the link.
+%Based on how many logical edges share a physical link, we find the portion of the bandwidth of the physical link that is allocated for every edge sharing that link. 
+%using equation~\ref{eqn:bandwidth_derating_factor}.
+%For edges which are allocated multi-hop paths, 
+%The physical link with minimum effective bandwidth 
+%is the bottleneck bandwidth which we use for time estimation for all edges.
+%allocation becomes the bottleneck. 
+%We use the bottleneck bandwidth for time estimation for all edges.
+%For edges which are allocated multi-hop paths, the physical link with the minimum bandwidth allocation becomes the bottleneck. 
+%We then use the bandwidth allocated in the bottleneck link (equation~\ref{eqn:bottleneck_link}) to estimate the total time ($T_e$) taken to transfer the tensors from one device node to the other using equation~\ref{eqn:transfer_time}.
+
+%\begin{equation}
+%    \label{eqn:bandwidth_derating_factor}
+%    B^l_e = \frac{B^l}{\sum_{e \in E} X^l_e} ~~~~\forall l\in L
+%\end{equation}
+%\begin{equation}
+%    \label{eqn:bottleneck_link}
+%    \displaystyle{B_e = \min_{l}(B^l_e)}
+%\end{equation}
+%\begin{equation}
+%    \label{eqn:transfer_time}
+%    T_e = \frac{D_e}{B_e}
+%\end{equation}
+%where $B^l$ is the total bandwidth of link $l$, $X^l_e$ is 1 if edge $e$ is assigned to link $l$, otherwise 0, $B^l_e$ is the bandwidth allocated in link $l$ to edge $e$, $B_e$ is the bottleneck bandwidth for edge $e$, $D_e$ is the total amount of data (tensor size) sent along edge $e$ from one device node to the other, and $T_e$ is the total transfer time.
+
+
+\input{figs/validation}
+%%%%%%%%%
+\vspace{-0.1cm}
+\subsection{End-to-End Time Estimation} 
+%%%%%%%%%%%%%%%%%%V0
+%In the prior section, we discussed how we start with the original compute graph ($G_0$) and transform it down into a more complicated compute graph ($G_4$) that captures all forms of parallelism strategies applied to the graph. This transformation is necessary to find an accurate estimation of edge timing.
+%Given the time estimation for all nodes and edges in the transformed graph, the next step is to calculate the end-to-end timing. 
+%
+%In the transformed graph ($G_4$), each blue box contains a sub-graph operating over a different data shard and kernel shard.
+%Given that all sub-graph replicas are hosted on a separate node, the computation phase for each replica can happen in parallel (once the input data is ready). 
+%
+%
+%For the forward pass, the timing for each compute node in the original graph is decided by the timing of each data shard of a kernel shard, 
+%and the total execution time can be determined by a resource-constrained scheduling algorithm (e.g. the resources being hardware nodes and physical links, and constraints being allowed to run one kernel per device at a time. For example, at any moment, one kernel can run on a GPU node). 
+%
+%In a backward pass, there is an extra reduction step after computation.
+%The reduction along different dimensions would happen sequentially. For example, we first reduce along KP1 dimension, then KP2 dimension, then data parallel dimension. The order to apply reduction is not important.
+%It starts with $G'_4$ which is same as the transformed graph ($G_4$) with timing for all the nodes and edges specified in the graph. 
+%
+%We calculate timing for each node in the initial sub-graph ($G'_1$) through step-wise computation and reduction along the kernel and data parallel dimensions. 
+%
+%At $G'_1$, the only parallelism strategy that is yet to be accounted for is pipeline parallelism. 
+%A parallel shard is a sub-graph with many nodes mapping to the same device.
+%Since there are more than one compute node mapping to a hardware node, we use a resource-constrained critical path scheduling using simulation to measure end-to-end timing. 
+%%%%%%%%%%%%%% V1
+%With no parallelism, the end-to-end time estimation would be a simple summation of compute time for all nodes in the original compute graph (assuming running on one hardware accelerator with no multi-tenancy). 
+%
+%If we implement pipeline parallelism, the end-to-end time estimation would also include communication time across pipeline stages. Besides, computation and communication across stages can be overlapped. To capture end-to-end timing while respecting resource scheduling constraints (e.g. the number of kernels that can run on parallel on the underlying hardware can not be more than $K$) and heuristics (e.g. once there is a tie, prioritize nodes that are on the path to unblock the next pipeline stage), we implement an event-driven simulator to conduct a resource-constrained critical path analysis. 
+%
+%Adding data parallelism and kernel parallelism on top of pipeline parallelism would only require updating the compute time estimation for each node:
+%For data parallelism, each node operates over a smaller subset of data (followed by the reduction of gradients across different data shards on the backward pass). Hence time estimation for each node needs to be updated to capture these changes.
+%
+
+%For kernel parallelism, each node computes a sub-kernel, followed by reduction or gathering of partial results. 
+
+
+%Figure~\ref{fig:transformation} shows an example of an end-to-end time estimation of a backward pass for a simple 3-layer feed-forward neural network, with 2-level pipeline parallelism (P2), 3-level data parallelism (3D), and 8-level kernel parallelism ($\texttt{R4-C2}$). We start with kernel parallelism and then data parallelism to resolve the compute time for each node in the graph (this can be applied in any order). Once time for all nodes in the original compute graph is resolved, we use event-driven simulator to account for pipeline parallelism and resource scheduling constraints.
+
+%%%%%%%%%%%%%% V2
+
+%As pointed before, we use heuristics to map compute nodes to hardware nodes. Since multiple compute nodes can map into the same hardware, we use an event-driven simulation to conduct critical path analysis while avoiding resource conflict/hazard. 
+We use an event-driven simulation to estimate end-to-end timing. Event-driven simulation is basically a resource-constrained critical path analysis. Since multiple compute nodes can map into the same hardware node, event-driven simulation is necessary to avoid resource conflicts and respect resource scheduling constraints (e.g. not more than $k$ kernels can run in parallel on each hardware node).
+
+We apply event-driven simulation at the original compute graph where the only parallelism to account for is pipeline parallelism: data parallelism and kernel parallelism would essentially create replicas of the original graph (where the kernel size and/or data size would be different for each node). 
+Given that all replicas by definition are hosted on separate hardware nodes, they can all start and stop at the same time (assuming a homogeneous distribution of data along model replicas and homogeneous distribution of sub-kernels across data replicas) and their timing is deterministic. Hence, there is no need for event-driven simulation at the super-graph granularity. 
+
+Figure~\ref{fig:transformation} explain an example of an end-to-end time estimation of a backward pass for a simple 3-layer feed-forward neural network, with 2-level pipeline parallelism ($p2$), 3-level data parallelism ($d3$), and 8-level kernel parallelism ($\texttt{R4-C2}$). %We start with kernel parallelism and then data parallelism to resolve the compute time for each node in the graph (this can be applied in any order). Once time for all nodes in the original compute graph is resolved, we use event-driven simulator to account for pipeline parallelism and resource scheduling constraints.

@@ -1,0 +1,699 @@
+\documentclass{article} % For LaTeX2e
+\usepackage{iclr2023_conference,times}
+
+% Optional math commands from https://github.com/goodfeli/dlbook_notation.
+\input{math_commands.tex}
+
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{cleveref}
+\usepackage{wrapfig}
+\usepackage{amsthm}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{algpseudocode}
+\usepackage{float}
+\usepackage{epsfig}
+\usepackage{booktabs}
+\usepackage{subfigure}
+\usepackage[ruled]{algorithm2e}
+\renewcommand{\algorithmicrequire}{\textbf{Input:}}  % Use Input in the format of Algorithm
+\renewcommand{\algorithmicensure}{\textbf{Output:}} % Use Output in the format of Algorithm
+
+
+\title{The Importance of Suppressing Complete Reconstruction in Autoencoders for Unsupervised Outlier Detection}
+
+% Authors must not appear in the submitted version. They should be hidden
+% as long as the \iclrfinalcopy macro remains commented out below.
+% Non-anonymous submissions will be rejected without review.
+
+\author{Yafei Shen\textsuperscript{1 2} \& Ling Yang\textsuperscript{1 2} \thanks{ Corresponding author} \\
+\textsuperscript{1}School of Mathematical Sciences, Soochow University, Suzhou 215006, China\\
+\textsuperscript{2}Center for Systems Biology, Soochow University, Suzhou 215006, China\\
+\texttt{20224007010@stu.suda.edu.cn, lyang@suda.edu.cn} \\
+%\And
+%Ji Q. Ren \& Yevgeny LeNet \\
+%Department of Computational Neuroscience \\
+%University of the Witwatersrand \\
+%Joburg, South Africa \\
+%\texttt{\{robot,net\}@wits.ac.za} \\
+%\AND
+%Coauthor \\
+%Affiliation \\
+%Address \\
+%\texttt{email}
+}
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to \LaTeX{} to determine where to break
+% the lines. Using \AND forces a linebreak at that point. So, if \LaTeX{}
+% puts 3 of 4 authors names on the first line, and the last on the second
+% line, try using \AND instead of \And before the third author name.
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+\iclrfinalcopy % Uncomment for camera-ready version, but NOT for submission.
+\begin{document}
+
+
+\maketitle
+
+\begin{abstract}
+Autoencoders are widely used in outlier detection due to their superiority in handling high-dimensional and nonlinear datasets. The reconstruction of any dataset by the autoencoder can be considered as a complex regression process. In regression analysis, outliers can usually be divided into high leverage points and influential points. Although the autoencoder has shown good results for the identification of influential points, there are still some problems when detect high leverage points. Through theoretical derivation, we found that most outliers are detected in the direction corresponding to the worst-recovered principal component, but in the direction of the well-recovered principal components, the anomalies are often ignored. We propose a new loss function which solve the above deficiencies in outlier detection. The core idea of our scheme is that in order to better detect high leverage points, we should suppress the complete reconstruction of the dataset to convert high leverage points into influential points, and it is also necessary to ensure that the differences between the eigenvalues of the covariance matrix of the original dataset and their corresponding reconstructed results in the direction of each principal component are equal. Besides, we explain the rationality of our scheme through rigorous theoretical derivation. Finally, our experiments on multiple datasets confirm that our scheme significantly improves the accuracy of outlier detection. 
+\end{abstract}
+%\newcommand*{\fullref}[1]{\namecref{#1} \nameref*{#1}}
+\section{Introduction}
+\label{Introduction}
+%\ref{app:Appendixa}, \ref{Appendixa1}, \ref{Appendixa2}, \ref{Appendixb}, \ref{Appendixb1}, \ref{Appendixb2},\ref{Appendixc},\ref{Appendixd}  % test ref of section
+Outlier detection refers to the process of identifying data points that deviate significantly from normal data point clusters. Up to now, outlier detection has been wildly applied in diverse fields of science and technology, such as credit card transactions \citep{Sivakumar2016EnhancedAD,Nami2018CostsensitivePC}, intrusion detection \citep{Aoudi2018TruthWO}, industrial control system inspection \citep{Lin2018TABORAG,Das2020AnomalyDI}, text detection \citep{Mahapatra2012ContextualAD,2017Convolutional} and outlier detection in biological data \citep{2020Robust,Tibshirani2007OutlierSF,MacDonald2006COPAC}. For multidimensional data points, there are various outliers. In the process of regression analysis, all outliers can be divided into two categories. One type of outliers is called influential points (IP), they have a huge influence on the fitting result of the model. Besides, the other type of outliers is called high leverage points (HLP), they deviate from the center of the dataset but do not necessarily have an effect on the model fit \citep{Imon2013IdentificationOM}. 
+
+According to whether the label information of the training dataset is required, outlier detection schemes can be divided into two types: supervised and unsupervised \citep{2005An}. For supervised outlier detection, the intrinsic information of the dataset is learned by training on the labeled dataset. However, in the unsupervised mode, there is no need to label the dataset in advance, and it is only necessary to assume that there are far more normal data points in the dataset than anomalies \citep{Chandola2009AnomalyDA}. Since it's difficult to obtain well-labeled datasets in practical applications or it will have huge consumption, nowadays, more and more studies have the preference to use unsupervised method. Up to now, there have been many unsupervised outlier detection schemes. PCA has been successfully used to detect outliers whose correlations between dimensions differ from normal points \citep{2003A}. But it works worse when the correlations between different dimensions are nonlinear. KNN is another unsupervised outlier detection method, which is based on the distance of each data point to its nearest neighbor \citep{2000Efficient}. LOF is proposed to find outliers based on density \citep{2000LOF}. However, these two methods are less effective when the dimensionality of the dataset is high. Currently, in order to address the constraints of dimensionality and linearity, unsupervised outlier detection based on neural networks has attracted a great deal of attention.
+
+Autoencoders are a type of neural network that has been successfully used for outlier detection in most researches \citep{Lyudchik2016OutlierDU}. The autoencoder first encodes the training dataset which are considered to be all normal into a low-dimensional space and then decodes them into the original space \citep{2020RaPP}. The difference between a reconstructed value and its corresponding input value is the reconstruction error, and a low-dimensional representation of the training dataset can be learned by minimizing the reconstruction error. Finally, the trained autoencoder can be used to reconstruct the test dataset and measure the outlier degree of each data point according to its reconstruction error.
+
+In the training process, to minimize the reconstruction error of the training dataset, most studies choose Mean Square Error (MSE) as the training loss function and force the autoencoder to completely reconstruct the training dataset \citep{antwarg2021explaining}. If a sample point cannot be reconstructed well, it will generate a large reconstruction error and finally be identified as an outlier. Besides, in the process of statistical regression analysis, IP are regarded as outliers because they have a great impact on the model fit. Since the reconstruction of any dataset by the autoencoder can be regarded as a process of regression, IP can be easily detected when using autoencoders for outlier detection. However, there are many uncertainties about the detection effect of HLP. To solve this problem, in our paper, we propose a new training loss function which properly suppress complete reconstruction of the autoencoder to convert HLP into IP to improve the detection effect of HLP.
+
+In Section \ref{Related Works and Contribution}, we introduce the existing related research results of outlier detection with autoencoders and show the contributions in our paper. In Section \ref{Method}, we highlight the importance of suppressing complete reconstruction of the autoencoder for outlier detection and conduct a theoretical analysis. Section \ref{Experiments} verifies the effectiveness of our scheme through presenting experimental results on both synthetic and real datasets. Section \ref{Conclusion and future work} summarizes the work of the paper and gives directions worthy of further study.
+
+\section{Related works and contribution}
+\label{Related Works and Contribution}
+The main idea of outlier detection schemes based on reconstruction error is that normal data points can be well reconstructed, while outliers will generate large reconstruction errors \citep{Bergman2020ClassificationBasedAD}. In practical application, distance-based outlier detection methods \citep{2000Efficient,Kamoi2020WhyIT} and density-based approaches \citep{2000LOF,Liu2008IsolationF} have problems of poor detection effect and large time cost when the dimension of the dataset is too high. Nowadays, many outlier detection schemes based on reconstruction error rely on neural network for reconstruction due to its high feature learning ability and the commonly used scheme is based on autoencoders \citep{Lyudchik2016OutlierDU}. Recently, there are also some studies use another neural network model GAN to detect outliers \citep{Schlegl2017UnsupervisedAD,Zenati2018EfficientGA}.
+
+Due to the strong representation learning and feature extraction capabilities, autoencoders are often used for outlier detection and have achieved fruitful research results. However, some studies have shown that the traditional autoencoder based outlier detection scheme still has defects, and there are some improvement can be made to significantly improve the outlier detection effect \citep{conf/kdd/ZhouP17,ning2022deep}. Existing improvement schemes mainly focus on the structure and loss function of the autoencoder. In \citet{Lai2020RobustSR}, a robust subspace recovery layer is added to the autoencoder in order to make the results of outlier detection more robust to anomalies. \citet{conf/kdd/ZhouP17} combines autoencoders with RPCA and adds an outlier regularizing penalty based on $l_{1}$ or $l_{2,1}$ norms to avoid the influence of noise on outlier detection results. Unfortunately, most existing work pursues complete reconstruction of the training dataset to improve anomaly detection effect. However, we reveal that complete reconstruction is not beneficial to identify HLP in this paper.
+
+In our work, we improve outlier detection ability by properly suppressing complete reconstruction of the autoencoder to convert HLP into IP by improving the training loss function. \citet{journals/corr/abs-2007-06731} and \citet{oftadeh2020eliminating} reveal that autoencoders will eventually focus on recovering the principal components of a dataset, which indicates that the occurrence of complete reconstruction can be suppressed by suppressing the recovery of the principal components.
+
+The main contributions of our work are as follows:
+\begin{itemize}
+	\item
+	Since the autoencoder can identify IP well but ignore the detection of HLP, we propose a new training loss function which properly suppress complete reconstruction of the training dataset and improve the detection effect of HLP while maintain the detection effect of IP. Therefore, the outliers detected by our scheme cover both HLP and IP. Besides, we also analyze how to determine the degree of reconstruction of the training dataset.
+	\item
+	Through rigorous theoretical analysis, we explain the detrimental effect of complete reconstruction on HLP detection, and show that properly suppressing complte reconstruction is beneficial for HLP detection.
+	\item
+	We test our outlier detection scheme on both synthetic and real datasets and confirm that our scheme improves the overall detection effect of outliers.
+\end{itemize}
+
+\section{Method}
+\label{Method}
+In this section, we will start describing our new method for detecting outliers based on the autoencoder and its theoretical support. Our innovative idea is to properly suppress complete reconstruction of the autoencoder to convert HLP into IP to improve the detection effect of HLP. Firstly, we will introduce the restrictions of HLP detection with MSE-trained autoencoders. Then, we theoretically demonstrate the importance of suppressing complete reconstruction of the autoencoder. Finally, we propose a new training loss function and analyze how to properly suppress reconstruction.
+
+\subsection{Deficiencies of outlier detection with MSE-trained autoencoders}
+\label{The outlier detection with autoencoder}
+As is known, an autoencoder is a neural network formed of an encoder $f$ and a decoder $g$. If we denote the input data point and the output data point as variable $X$ and $\hat{X}$ respectively, where $X=\big(X_1,X_2,\ldots,X_m\big)^{\top}$ and $\hat{X}=\big(\hat{X}_1,\hat{X}_2,\ldots,\hat{X}_m\big)^{\top}$, and the number of sample points is $n$, then we have $\hat{X}= g \circ f(X)$. Besides, $\mathcal{X}$ represents the whole input dataset and $X \in \mathcal{X}$. $x_i$ represents the $i^{th}$ sample point of the input dataset and its corresponding reconstruction result is $\hat{x}_i$. Ideally, we would like to train the autoencoder with the training dataset to minimize the training loss function, the generally used training loss function is MSE which can be represented as $$L_{MSE}(\omega,b)=\frac{1}{n} \sum_{i=1}^{n}(x_i-\hat{x}_i)^{\top}(x_i-\hat{x}_i),$$ where $\omega$ represents the weight between the input layer and the output layer and $b$ is the bias value.
+
+%Then, the trained autoencoder can be used for outlier detection on the test dataset. To be specific, the reconstruct error of each data point $X$ in test dataset is measured by $W(X)=||X-\hat{X}||$,  $||.||$ denotes the $L^2$ norm. If a data point is distributed outside the manifold learned from the training dataset, its reconstruction error will be large. Therefore, a sample data point can be regarded as an outlier if its reconstruct error exceeds the set threshold. Note that this scheme has better detection results for IP, but not good for HLP.
+
+%The main reason is that in order to better learn the nonlinear features in a dataset, we will add nonlinear activation functions to the autoencoder, such as sigmoid and tanh. Due to the saturation of nonlinear activation functions, for each dimension of the input data points, the values are more difficult to reconstruct when they are very large or very small. Otherwise, the values can be well recovered with reconstruction errors close to $0$.
+
+The purpose of training process is to guarantee that the intrinsic information of the training dataset can be learned and most of the sample data points can be well reconstructed. It should be pointed out that, although reconstructing training dataset well is beneficial for IP detection, it brings some problems to the detection of HLP:
+\begin{itemize}
+	\item
+	For each input data point, if in one dimension, its value is not in the expected range, it can be identified as an outlier. However, HLP whose values in each dimension are within the normal range can hardly be detected.
+	\item
+	If some principal components are recovered better than others, then more HLP will be detected along the direction of the poorly recovered principal components, while no HLP is even detected in the direction of the better recovered principal components.
+\end{itemize}
+
+Here, we will show the shortcomings of MSE-trained autoencoders for HLP detection with some examples. If the proportion of outliers is $5$ percent, we can see that the two deficiencies in HLP detection proposed above are prevalent in different datasets. As shown in Figure \ref{example}, we add non-Gaussian noise to the dataset to make the difference in detection efficiency of HLP in different principal component directions more obvious, and the orange line and grey line represent two principal directions. We can observe the distribution of HLP from Figure \ref{example}, most of the detected HLP lie in the direction of the principal components indicated by the grey line but few lie in the other principal direction. Besides, in Figure \ref{example2}, we find almost all of the HLP are identified due to the value anomalous in one dimension. In Figure \ref{example}, \ref{example2} and \ref{example3}, the training datasets are two dimensions and their intrinsic dimension are also two. Besides, the sample points follow two-dimensional Gaussian distribution. In Figure \ref{example3_2_loss_1000}, the dimension of the dataset is three and the intrinsic dimension is two, the values of each dimension obey a Gaussian distribution. The structure of the autoencoder and the setting of hyperparameters are described in Section \ref{Experiments}. Below we will explain that the effect of the saturation of the nonlinear activation functions on reconstruction lead to detection problems for HLP.
+\begin{wrapfigure}[29]{r}{0.5\textwidth}
+	\centering
+	\subfigure[]{
+		\label{example}
+		\includegraphics[scale=0.17]{example_main_eig.png}}
+%	\hspace{0in} % 两图片之间的距离
+	\subfigure[]{
+		\label{example2}
+		\includegraphics[scale=0.17]{example2.png}}	
+	\subfigure[]{
+		\label{example3}
+		\includegraphics[scale=0.165]{example3.png}}
+	\subfigure[]{
+		\label{example3_2_loss_1000}
+		\includegraphics[scale=0.135]{example3_2_loss_1000.png}}
+	\caption{Examples of outlier detection with autoencoder when the loss function is MSE and the outlier ratio is $0.05$. In (a)-(c), the sample points follow two-dimensional Gaussian distribution. (a) Covariance matrix diagonal and non-Gaussian distributed noise exists, the orange line and grey line represent two principal directions. (b) Covariance matrix diagonal. (c) Covariance matrix off-diagonal. (d) The intrinsic dimension of the dataset is less than the actual dimension, and the values in each dimension follow a Gaussian distribution.}
+	\label{fig:examples}
+\end{wrapfigure}
+
+Usually, The dataset is normalized before being fed into the autoencoder, so the values of each dimension of the dataset are distributed in $(0,1)$. If we denote $F= g \circ f$, $F=(F_1,F_2,\ldots,F_m)^{\top}$, since the output variable $\hat{X}$ and the input variable $X$ satisfy that $\hat{X} = F(X)$, for each dimension of the input variable, its corresponding reconstructuion result can be fomulated as $\hat{X}_k=F_k(X_1,X_2,\cdots,X_m)$, $k=1,2,\ldots,m$. Furthermore, the total reconstruction error of each dimension is $\int_{0}^{1}\big(X_k-F_k(X_1,X_2,\cdots,X_m)\big)^2dX_k$, ideally, $F_k(X_1,X_2,\cdots,X_m)=X_k$ holds for almost all data points after reconstruction. Thus, we can conclude that $(i)$ For each dimension of the input dataset, $\hat{X}_k$ increases monotonically with $X_k$ and $\hat{X}_k\approx X_k$ holds for most data points after reconstruction. Figure \ref{fig:subfig:experiment7_2_parameter1_mse_output} in Appendix \ref{Appendixb1} can typically reflect the detection defect of the MSE-trained autoencoders for HLP. $(ii)$ Due to the saturation of the nonlinear activation functions of the output layer, in each dimension, values close to $0$ or close to $1$ are more difficult to reconstruct, and $\hat{X}_k$ cannot be approximated to $X_k$ in this case. In Figure \ref{example}, data points with large or small values in the direction of Parameter1 are identified as HLP. However, since values of Parameter2 of most data points significantly larger than $0$ or significantly smaller than $1$ and most of them are between $0.15$ and $0.85$, they can be reconstructed well. This makes it difficult to detect HLP in the direction of Parameter2. We choose the dataset in Figure \ref{example} for further validation, see Appendix \ref{Appendixb1}.
+
+\subsection{The importance of suppressing complete reconstruction}
+\label{The importance of suppressing complete reconstruction}
+In this part, we will present rigorous theoretical analysis to explain why MSE-trained autoencoders are insufficient in outlier detection, and further analyze how to solve these problems. The analysis process will be based on the following assumption.
+
+\newtheorem{assumption}{Assumption}
+\begin{assumption}
+	\label{assumption1}
+	Since most datasets follow a multidimensional Gaussian distribution, we assume that the input variable $X$ follows m-dimensional Gaussian distribution.
+\end{assumption}
+
+As we know, autoencoders will focus on recovering the principal components of a dataset eventually \citep{journals/corr/abs-2007-06731,oftadeh2020eliminating}, it is necessary to use the unit orthogonal eigenvectors as the basis vectors to further study the influence of the loss function on the outlier detection results of the autoencoder. Under Assumption \ref{assumption1}, if the eigenvalues of the covariance matrix $\Sigma_x$ are $\lambda_1$, $\lambda_2$, $\ldots$, $\lambda_m$, the corresponding unit orthogonal eigenvectors (i.e., principal directions) are $\eta_1$, $\eta_2$, $\ldots$, $\eta_m$, and the new coordinate of the variable $X$ is $Y=\big(Y_1,Y_2,\ldots,Y_m\big)^{\top}$  when the unit orthogonal eigenvectors are the basis vectors, then we can denote an orthogonal matrix $P$, where the $i^{th}$ column of $P$ is unit eigenvector $\eta_i$. It's obvious that $Y=P^{-1}X=P^{\top}X$ and $Y_k=\eta_k^{\top}X$, $k=1,2,\ldots,m$. Thus, in the new coordinate system, the variable of input data $X$ is converted to variable $Y$. Then we can get the formulation for the covariance matrix of variable $Y$ which will be proved in detail in Appendix \ref{Appendixa1}.
+
+\newtheorem{theorem}{Result}
+\begin{theorem}
+	\label{Result1}
+	The covariance matrix of variable $Y$ can be derived as $$\Sigma_Y={\rm diag}(\lambda_1,\lambda_2,\ldots,\lambda_m).$$
+\end{theorem}
+
+If we denote $\nu=(\nu_1,\nu_2,\ldots,\nu_m)^{\top}$ as the mean vector of variable $Y$, since $X$ follows m-dimensional Gaussian distribution, we can conclude that $Y$ also follows m-dimensional Gaussian distribution, i.e., $Y$ $\sim$ $\mathcal{N} (\nu,\Sigma_Y)$. What's more, it's easy to get that $Y_k$ $\sim$ $\mathcal{N} (\nu_k,\lambda_k)$, $k=1,2,\ldots,m$. Then, we denote $\hat{Y}$ as the output variable of $Y$ and its mean vector and eigenvalues of the covariance matrix are $\hat{\nu}=\big(\hat{\nu}_1,\hat{\nu}_2,\ldots,\hat{\nu}_m\big)^{\top}$ and $\hat{\lambda}_k$, $k=1,2,\ldots,m$, respectively. As is mentioned above, autoencoders will mainly recover the principal components of any datasets, it's reasonable for us to make the following assumption.
+
+\begin{assumption}
+	\label{assumption2}
+For each element $\hat{Y}_k$ of the output variable $\hat{Y}$, its data distribution is the same as the corresponding input element $Y_k$. Since $Y_k$ $\sim$ $\mathcal{N} (\nu_k,\lambda_k)$, then $\hat{Y}_k$ $\sim$ $\mathcal{N} (\hat{\nu}_k,\hat{\lambda}_k)$, $k=1,2,\ldots,m$. Besides, whether each eigenvalue after reconstruction is close to 0 is the same as its corresponding original eigenvalue.
+\end{assumption}
+
+%Up to now, MSE has been wildly used as the loss function when using autoencoder for outlier detection (\citep{antwarg2021explaining}). Some researchers have pointed out that the effect of outlier detection can be improved through improving the loss function MSE (\citep{conf/kdd/ZhouP17,ning2022deep}). However, most of these works ignore the detection effect of autoencoder for HLP. 
+In the following, we will theoretically analyze the restrictions of MSE in detecting HLP. First, we can get the relationship between the difference between the reconstructed data and its mean and the difference between the original data and its mean in each principal component direction. The following result can be obtained and we will prove it in Appendix \ref{Appendixa2}
+
+\begin{theorem}
+	\label{Result2}
+	Under Assumptions \ref{assumption1} and \ref{assumption2}, the difference between the reconstructed data and its mean is proportional to the difference between the original data and its mean in each principal component direction. The specific relationship is 
+	\begin{equation}
+		\label{equation:R_k(Y)}
+		\begin{split}
+			\hat{R}_k(Y)=\frac{\sqrt{\hat{\lambda}_k}}{\sqrt{\lambda_k}}R_k(Y).
+		\end{split}
+	\end{equation}
+\end{theorem}
+Where $R_k(Y)=Y_k-\nu_k$ and $\hat{R}_k(Y)=\hat{Y}-\hat{\nu}_k$. Based on equation (\ref{equation:R_k(Y)}), we can further determine the specific reconstruct error of each input data point. 
+
+\begin{theorem}
+	\label{Result3}
+	The reconstruction error of each input data point measured by MSE can be formulated as
+	\begin{equation}
+		\label{equation:reconstruct error}
+		\begin{split}
+			W(Y) &=\big(Y-\hat{Y}\big)^{\top}\big(Y-\hat{Y}\big)=\sum_{i=1}^m\Bigg(\sqrt{\lambda_i}-\sqrt{\hat{\lambda}_i}\Bigg)^2\frac{R_i^2(Y)}{\lambda_i}.\\
+		\end{split}
+	\end{equation}
+\end{theorem}
+
+Ideally, we hope each principal component contributes equally to the reconstruction error of any input data point. Recall the definition of $R(Y)$, it's easy to know that $\frac{R_k(Y)}{\lambda_k}$ $\sim$ $\mathcal{N} (0,1)$, so equation (\ref{equation:reconstruct error}) indicates that the reconstruction degree of each principal component by the autoencoder will affect the proportion of this principal component in the reconstruction error. This brings a lot of uncertainty for HLP detection.
+
+\begin{theorem}
+	\label{Result4}
+	HLP are difficult to identify as outliers if the input dataset is completely reconstructed.
+\end{theorem}
+
+When the input dataset is well reconstructed, in equation (\ref{equation:reconstruct error}), it means that $\sqrt{\lambda_k}-\sqrt{\hat{\lambda}_k}=0$, $k$ $=$ $1,2,\ldots,m$. Then, the reconstruction error of each data point in training dataset is $0$. As the result, each data point in the training dataset is considered normal. However, HLP exist in any dataset follows m-dimensional Gaussian distribution. Generally, the larger the Mahalanobis distance is, the more abnormal the data point is. Therefore, although completely reconstructing the training dataset is beneficial for IP detection, but it ignores the detection of HLP.
+
+\begin{theorem}
+	\label{Result5}
+	HLP whose values in each dimension are within the normal range can not be identified as outliers. Besides, most HLP will be detected in the direction corresponding to the worst-recovered principal component, but in the direction of the well-recovered principal components, the anomalies are often ignored.
+\end{theorem}
+
+%In practical applications, we will add a nonlinear activation function to the autoencoder to learn nonlinear features in the input data. If we add a nonlinear activation function in the output layer of the autoencoder, due to the saturation of the commonly used activation functions sigmoid and tanh, the larger or smaller each dimension of the data point is, the more difficult it is to reconstruct. This makes completely reconstructing the data practically impossible. However, in this case, the HLP detected by the autoencoder are all anomalous in one dimension. Thus, HLP that are normal in each one dimension but anomalous in two or more dimensions are ignored. In addition, Since $\frac{R_k(Y)}{\lambda_k}$ $\sim$ $\mathcal{N} (0,1)$, 
+From equation (\ref{equation:reconstruct error}), we know $\sqrt{\lambda_k}-\sqrt{\hat{\lambda}_k}$ is equivalent to the weight of the reconstruction error of the $k^{th}$ principal component direction of each data point to the total reconstruction error. Therefore, if the data reconstruction in the $i^{th}$ principal component direction is better than that in the $j^{th}$ principal component direction, then $\sqrt{\lambda_i}-\sqrt{\hat{\lambda}_i}<\sqrt{\lambda_j}-\sqrt{\hat{\lambda}_j}$, $i \neq j$. As the result,  the detected outliers are more distributed in the $j^{th}$ principal component direction.
+
+\begin{theorem}
+	\label{Result6}
+	If we ensure the differences between the eigenvalues of the covariance matrix of the original dataset and their corresponding reconstructed results in the direction of each principal component are equal, the value of the reconstruction error for each data point will be proportional to its Mahalanobis distance.
+\end{theorem}
+If we suppress complete reconstruction of the autoencoder, then $\sqrt{\lambda_k}-\sqrt{\hat{\lambda}_k}>0$, $k=1,2,\ldots,m$. Based on equation (\ref{equation:R_k(Y)}), we can obtain
+\begin{equation}
+	\label{equation:reconstruct_error_Y_k}
+	\begin{split}
+	(Y_k-\hat{Y}_k)^2=\frac{\Big(\sqrt{\lambda_k}-\sqrt{\hat{\lambda}_k}\Big)^2}{\lambda_k}(Y_k-\nu_k)^2,\quad\quad k=1,2,\ldots,m.
+	\end{split}
+\end{equation}
+It means that for each principal component direction of the input data, there is a reconstruction error. Specifically, the further away the values are from the mean, the larger the reconstruction error. Therefore, in each principal component direction, the outliers detected by the reconstruction error are the same as the outliers defined by the Gaussian distributed data. Besides, if $\sqrt{\lambda_k}-\sqrt{\hat{\lambda}_k}=\beta>0$, $k=1,2,\ldots,m$, according to equation (\ref{equation:reconstruct error}), the reconstruction error of each input data point is
+\begin{equation}
+	\label{equation:reconstruct error control eig}
+	\begin{split}
+		W(Y) &=\big(Y-\hat{Y}\big)^{\top}\big(Y-\hat{Y}\big)=\beta^2\sum_{i=1}^m\frac{R_i^2(Y)}{\lambda_i}.\\
+	\end{split}
+\end{equation}
+Since $\Sigma_Y={\rm diag}(\lambda_1,\lambda_2,\ldots,\lambda_m)$, it's easy to obtain $\Sigma_Y^{-1}={\rm diag}\Big(\frac{1}{\lambda_1},\frac{1}{\lambda_2},\ldots,\frac{1}{\lambda_m}\Big)$. So the Mahalanobis distance of the input variable $Y$ is
+\begin{equation}
+	\label{equation:Mahalanobis distance}
+	\begin{split}
+		M(Y) &=\big(Y-\nu\big)^{\top}\Sigma_Y^{-1}\big(Y-\nu\big)=\sum_{i=1}^m\frac{R_i^2(Y)}{\lambda_i}.
+	\end{split}
+\end{equation}
+%Combining equation (\ref{equation:reconstruct error control eig}) and (\ref{equation:Mahalanobis distance}), we can obtain
+%\begin{equation}
+%	\label{equation:W(Y) Mahalanobis distance}
+%	\begin{split}
+%		W(Y) &=\beta^2M(Y).
+%	\end{split}
+%\end{equation}
+It indicates that the reconstruction error of each data point is proportional to its Mahalanobis distance. Therefore, if we control $\sqrt{\lambda_k}-\sqrt{\hat{\lambda}_k}=\beta>0$, $k=1,2,\ldots,m$, almost all HLP will be converted to IP and cannot be well reconstructed. As the result, the detected HLP will evenly distributed in each principal component direction.
+
+\subsection{Improvement of loss function}
+\label{Hyperparameter setting}
+Based on the above discussion, in this part we will propose a new loss function that adds an appropriate penalty term based on MSE to properly suppress complete reconstruction of the autoencoder.
+
+In fact, if the intrinsic dimension of the dataset is $l$, then there will be $l$ eigenvalues that are not close to $0$. We denote the $l$ eigenvalues that are not close to $0$ as $\lambda_k^{'}$ and their corresponding reconstruction results are $\hat{\lambda}_k^{'}$,  $k=1,2,\ldots,l$. According to Assumption \ref{assumption2}, $\hat{\lambda}_k^{'}$ is also not close to $0$. Then, we consider two losses in our training loss function. One of them is $L_{MSE}(\omega,b)$, which aims to reconstruct the input dataset well. In addition, we define the other loss $L_{EIG}(\omega,b)=\sum_{i=1}^l\big(\sqrt{\lambda_i^{'}}-\sqrt{\hat{\lambda}_i^{'}}-\beta\big)^2$ which can avoid the autoencoder from completely reconstructing the input dataset. $\beta$ $>$ $0$ is a hyperparameter that can adjust the degree of data reconstruction. The final training loss function is a combination of the two, we refer to it as MSE-eig, $$L_{MSE-eig}(\omega,b)=\theta_1L_{MSE}(\omega,b)+\theta_2L_{EIG}(\omega,b).$$ Here, $\theta_1$, $\theta_2$ $>$ $0$ are hyperparameters that need to be predetermined.
+
+Although hyperparameter $\beta>0$ is beneficial for HLP detection, as the value of $\beta$ increases, the data reconstruction ability of the autoencoder will become worse and worse, which is similar to the model not being well fitted during regression analysis. This adversely affects the detection of IP. Therefore, in the following, it's important for us to determine how to choose the appropriate value of $\beta$.
+
+It should be pointed out that the determination of $\beta$ depends on the structure of the network and the settings of other hyperparameters. For example, in this paper, the structure of the autoencoder and the setting of hyperparameters are described in Section \ref{Experiments} and all outlier detection experiments are based on this criterion. After analysis and estimation, when $\mathop{\max}_{1 \leq i \leq m}(0.3\sqrt{\lambda_i})\leq \mathop{\min}_{1 \leq i \leq m}(\sqrt{\lambda_i})$, we can set $\beta=\mathop{\max}_{1 \leq i \leq m}(0.3\sqrt{\lambda_i})$. Otherwise, we set $\beta=\mathop{\min}_{1 \leq i \leq m}(\sqrt{\lambda_i})$. Besides, if the intrinsic dimension of the dataset is $l$, we choose to control the $l$ eigenvalues that are not close to $0$. Then, the detection effect of HLP in each dataset is significantly improved. We offer a more specific analysis process in Appendix \ref{Appendixc} and summarize the training process of our anomaly detection scheme in Appendix \ref{Appendixd}.
+\begin{wrapfigure}[14]{r}{0.5\textwidth}
+	\centering
+	\subfigure[Reconstruction result]{
+		\label{fig:subfig:experiment7_2_mse_eig_input_output}
+		\includegraphics[scale=0.17]{experiment7_2_mse_eig_input_output.png}}
+	\subfigure[Outlier detection result]{
+		\label{fig:subfig:experiment7_2_mse_eig_loss_1000}
+		\includegraphics[scale=0.17]{experiment7_2_mse_eig_loss_1000.png}}
+	\caption{Reconstruction result and outlier detection result for the dataset in Figure \ref{example} when the loss function of the autoencoder is MSE-eig.}
+	\label{fig:Reconstruction result and error of MSE-eig}
+\end{wrapfigure}
+
+% By calculation, we get $\max(0.3\sqrt{\lambda_1},0.3\sqrt{\lambda_2})=0.05$, $\min(\sqrt{\lambda_1},\sqrt{\lambda_2})=0.13$ and the mean vector of this dataset is $(0.51,0.58)^{\top}$. So we set the hyperparameter $\beta=0.05$ in our loss function. 
+Similar to Section \ref{The outlier detection with autoencoder}, we perform outlier detection on the same dataset in Figure \ref{example} with our loss function. The reconstruction result and reconstruction error of any input value in each dimension is shown in Appendix \ref{Appendixb2}, which is consistent with our theoretical result of equation (\ref{equation:reconstruct_error_Y_k}). Figure \ref{fig:subfig:experiment7_2_mse_eig_input_output} shows the reconstruction result of the whole dataset. If the ratio of outliers is $0.05$, the HLP detected by the autoencoder are shown in Figure \ref{fig:subfig:experiment7_2_mse_eig_loss_1000}, we can intuitively see that all points with large Mahalanobis distance are detected as HLP, therefore, this result is consistent with the conclusion in Result \ref{Result6}. Besides, we also test the detection effect of our scheme for HLP with the dataset in Figure \ref{example2}, see Appendix \ref{Appendixb3}. In particular, it can be seen clearly from Figure \ref{fig:subfig:reconstruction_error_MSE} in Appendix \ref{Appendixb3} that MSE-trained autoencoders can't detect HLP whose values in each dimension are within the normal range, and Figure \ref{fig:subfig:reconstruction_error_MSE-eig} can reflect that most HLP with large Mahalanobis distance can be identified using our loss function.
+
+\section{Experiments}
+\label{Experiments}
+In this section, we will evaluate loss function MSE-eig on different datasets, low-dimensional synthetic datasets, high-dimensional synthetic datasets and a real dataset from International Mouse Phenotyping Consortium (IMPC). AUC (Area Under Curve) score is used to evaluate the accuracy of outlier detection results. Specifically, for the detection results of HLP, we compare our training loss function MSE-eig with MSE, and compute their AUC scores by regarding the HLP as positive. In addition, in order to reflect the detection effect of MSE-eig on IP, we compare the detection results of the autoencoder with the loss function MSE-eig, the autoencoder with the loss function MSE and the Mahalanobis distance for IP. In this case, IP are regarded as positive.
+
+For each experiment, the structure of the autoencoder is as follows. The dimension of the hidden layer is the intrinsic dimension of the input dataset, and its activation function is RELU. Besieds, the activation function of the output layer is sigmoid. All datasets are normalized before outlier detection. During the autoencoder training process, Adam is used to optimize the loss function and the learning rate is $10^{-3}$. For our new training loss MSE-eig, we always set $\theta_1=0.008$ and $\theta_2=1$.
+
+\subsection{Synthetic data experiments}
+\label{Synthetic data experiments}
+In this part, we test our method on both low-dimensional and high-dimensional datasets. Firstly, we generate a $3$D dataset whose intrinsic dimension is two. The dimensions represented by Parameter1 and Parameter3 follow 2-dimensional Gaussian distribution and the correlation coefficient between them is almost $0$. The value on the dimension represented by Parameter2 is equal to the square of the corresponding value on the dimension represented by Parameter1. We use this dataset as the training dataset (as shown in Figure \ref{fig:subfig:experiment2_1_train_data}). It can be seen that the data points of the training dataset form a 2-dimensional manifold. Then, we generate the corresponding test set. The specific generation scheme is that based on the training set, we additionally generate some points that are not on the manifold of the training set, and these points are IP (as shown in Figure \ref{fig:subfig:experiment2_1_test_data}). If the ratio of IP is $\delta_1$ and the number of sample points of the training dataset is $n$, we generate $\lfloor \delta_1 n \rfloor$ data points that fall out of the manifold and consider these data points as positive. The corresponding AUC score of IP detection result is shown in Figure \ref{fig:subfig:experiment2_auc_score_distribution}. We can see that although the detection effect of MSE-eig for IP is slightly worse than that of MSE, it is still significantly better than the detection effect based on Mahalanobis distance.
+\begin{wrapfigure}[19]{r}{0.5\textwidth}
+	\centering
+	\subfigure[Training dataset]{
+		\label{fig:subfig:experiment2_1_train_data}
+		\includegraphics[scale=0.15]{experiment2_1_train_data.png}}
+	%	\hspace{0.4in} % 两图片之间的距离
+	\subfigure[Test dataset]{
+		\label{fig:subfig:experiment2_1_test_data}
+		\includegraphics[scale=0.17]{experiment2_1_test_data.png}}
+	\caption{Low-dimensional synthetic datasets, their actual dimension is 3 and intrinsic dimension is 2. (a) Training dataset, the value of Parameter2 is equal to the square of the value of Parameter1. (b) Test dataset, the correlation between the dimensions of the blue sample points is the same as the training dataset, while the correlation between the dimensions of the orange sample points is different from the training dataset.}
+	\label{fig:Synthetic data experiments data2}
+\end{wrapfigure}
+
+As is known, in the $3$D training dataset generated above, HLP still exists. We also test the detection effect of MSE-eig on HLP in this training dataset. Since the dimensions represented by Parameter1 and Parameter3 obey 2-dimensional Gaussian distribution and the correlation coefficient between them is almost $0$, the values of the dimension represented by Parameter2 can be generated from the values of the dimension represented by Parameter1, for each data point, we only calculate its Mahalanobis distance based on parameter1 and parameter3. If the number of sample points of training dataset is $n$ and the ratio of HLP is $\delta_2$, we treat the top $\lfloor \delta_2 n \rfloor$ points in Mahalanobis distance as positive. Figure \ref{fig:subfig:experiment2_auc_score_mashi} indicates that the detection effect of MSE-eig for HLP is comparable to that of Mahalanobis distance, but significantly better than that of MSE.
+
+In addition, we treat both HLP and IP as positive to test outlier detection effect of MSE-eig. In our experiment, we assume that the ratio of HLP and the ratio of IP are equal, i.e., $\delta_1=\delta_2$. Figure \ref{fig:subfig:experiment2_auc_score_combine} shows that MSE-eig works best for anomaly detection. In conclusion, MSE has the best detection effect for IP, but the detection effect for HLP is very poor. Conversely, Mahalanobis distance has the best detection results for HLP, but the detection effect for IP is the worst. However, MSE-eig can detect both very well.
+\begin{figure}[h]
+	\centering
+	\subfigure[]{
+		\label{fig:subfig:experiment2_auc_score_distribution}
+		\includegraphics[scale=0.20]{experiment2_auc_score_distribution.png}}
+	\hspace{0.3in} % 两图片之间的距离
+	\subfigure[]{
+		\label{fig:subfig:experiment2_auc_score_mashi}
+		\includegraphics[scale=0.20]{experiment2_auc_score_mashi.png}}
+	\hspace{0.3in} % 两图片之间的距离
+	\subfigure[]{
+		\label{fig:subfig:experiment2_auc_score_combine}
+		\includegraphics[scale=0.20]{experiment2_auc_score_combine.png}}
+	\caption{AUC scores for outlier detection results for the datasets in Figure \ref{fig:Synthetic data experiments data2} when the loss function of the autoencoder is MSE, MSE-eig or directly based on Mahalanobis distance. (a) Comparison result when IP present in the test dataset and only IP are considered as positive. (b) Comparison result when IP are not present in the test dataset and only HLP are considered as positive. (c) Comparison result when IP exist in the test dataset and both IP and HLP are considered as positive. We assume the same ratio of IP and HLP.}
+	\label{fig:Synthetic data experiments result2}
+\end{figure}
+
+Then, we generate three different datasets with $2$D Gaussian distribution whose intrinsic dimension are also $2$ to evaluate our scheme. We find that MSE-eig outperforms MSE in detecting HLP in all three datasets at any outlier ratio. The specific results can be found in Appendix \ref{Appendixe1}. Besides, since autoencoders are often used for outlier detection in high-dimensional datasets, we also analyse the outlier detection results of MSE-eig on two high-dimensional synthetic datasets. MSE-eig is still better than MSE for HLP detection, see Appendix \ref{Appendixe2} for details.
+
+%\subsubsection{High-dimensional data experiments}
+%\label{High-dimensional data experiments}
+
+%\begin{wrapfigure}[14]{r}{0.5\textwidth}
+%	\centering
+%	\subfigure[50-dimensional]{
+%		\label{fig:subfig:experiment3_auc_score_50dim}
+%		\includegraphics[scale=0.16]{experiment3_auc_score_50dim.png}}
+%	\hspace{0.in} % 两图片之间的距离
+%	\subfigure[100-dimensional]{
+%		\label{fig:subfig:experiment3_auc_score_100dim}
+%		\includegraphics[scale=0.16]{experiment3_auc_score_100dim.png}}
+%	\caption{AUC scores for outlier detection result for high-dimensional datasets when the loss function of the autoencoder is MSE or MSE-eig. Both datasets synthesized follow a multidimensional Gaussian distribution, and their covariance matrices are diagonal.}
+%	\label{fig:High-dimensional data experiment results}
+%\end{wrapfigure}
+%Autoencoders are often used for outlier detection in high-dimensional datasets. In our experiment, we also analyse the outlier detection result of MSE-eig on two high-dimensional synthetic datasets. Both datasets follow multidimensional Gaussian distribution and their covariance matrices are both diagonal matrices. So the intrinsic dimension of these two datasets are equal to their actual dimension. One of the datasets is $50$ dimensional and the other dataset is $100$ dimensional. It's obvious that outliers in these two datasets are all HLP. Similar to Section \ref{Low-dimensional data experiments}, we evaluate the outlier detection results of these two datasets by the AUC score, which are shown in Figure \ref{fig:subfig:experiment3_auc_score_50dim} and Figure \ref{fig:subfig:experiment3_auc_score_100dim} respectively. We can see that on high-dimensional datasets, MSE-eig is still better than MSE for HLP detection.
+
+\subsection{Real data experiments}
+\label{Real data experiments}
+IMPC\footnote{https://www.mousephenotype.org} is committed to phenotypic analysis of $20000$ mouse mutants, so that we can further predict the causative genes of various human genetic diseases. We download the experimental data from the official website of IMPC, which record the data of various physiological indicators of each gene knockout mouse. In our experiment, we select the data of $2$ physiological indicators for outlier detection and the joint distribution of this $2$-dimensional dataset approximates a $2$-dimensional Gaussian distribution. Besides, the training dataset has $6640$ sample points, and the test dataset has $15699$ sample points (as shown in Figures \ref{fig:subfig:experiment6_control_data} and \ref{fig:subfig:experiment6_test_data} respectively). The two physiological indicators we observe are Calcium and Total protein. It's easy to see that outliers in these datasets are all HLP. Then we test the effectiveness of MSE-eig on the selected IMPC datasets and the corresponding result is presented in Figure \ref{AUC scores for autoencoder using IMPC dataset}. In real datasets, MSE-eig also outperforms MSE in outlier detection. This shows that our solution has extremely high application value.
+
+\begin{figure}[h]
+	\centering
+	\subfigure[Training dataset]{
+		\label{fig:subfig:experiment6_control_data}
+		\includegraphics[scale=0.20]{experiment6_control_data.png}}
+	\hspace{0.3in} % 两图片之间的距离
+	\subfigure[Test dataset]{
+		\label{fig:subfig:experiment6_test_data}
+		\includegraphics[scale=0.20]{experiment6_test_data.png}}
+	\hspace{0.3in} % 两图片之间的距离
+	\subfigure[Comparison result]{
+		\label{AUC scores for autoencoder using IMPC dataset}
+		\includegraphics[scale=0.20]{experiment6_auc_score.png}}
+	\caption{IMPC datasets for outlier detection and AUC scores that reflect the outlier detection efficiency of MSE and MSE-eig.}
+	\label{fig:Real data experiments data}
+\end{figure}
+
+%\begin{figure}[h]
+%	\begin{center}
+%		%\framebox[4.0in]{$\;$}
+%		%\fbox{\rule[-.5cm]{0cm}{4cm} \rule[-.5cm]{4cm}{0cm}}
+%		\includegraphics[scale=0.28]{experiment6_auc_score.png}
+%	\end{center}
+%	\caption{AUC scores for outlier detection result for IMPC datasets when the loss function of the autoencoder is MSE or MSE-eig.}
+%	\label{AUC scores for autoencoder using IMPC dataset}
+%\end{figure}
+
+\section{Conclusion and future work}
+\label{Conclusion and future work}
+In this paper, we analyze the deficiencies of MSE-trained autoencoders for HLP detection. Through theoretical analysis, we demonstrate that properly suppressing complete reconstruction of the autoencoder is beneficial to improve the detection effect of HLP. Besides, we propose a new training loss function which can suppress complete reconstruction of the autoencoder during the training process to convert HLP into IP. Therefore, the outliers detected by our scheme cover both HLP and IP. Finally, we test our outlier detection scheme on both synthetic and real datasets and confirm the superiority of our approach.
+
+It should be pointed out that there are still some interesting reseach directions that deserve further study. In the process of theoretical analysis, we assume that the dataset follows a multidimensional Gaussian distribution. However, for datasets that do not conform to a multidimensional Gaussian distribution, we would like to know how to obtain a scheme that controls their complete reconstruction through theoretical analysis. Besides, we are also curious about how to get the most reasonable value of $\beta$ through rigorous theoretical derivation.
+
+\subsubsection*{Acknowledgments}
+This study is supported by the National Key Research and Development Program of China
+(2018YFA0801103), the National Natural Science Foundation of China (12071330) to Prof. Ling Yang. 
+The authors would like to thank Professor Yu Tang (School of Mathematical Sciences, Soochow University) and Professor Huanfei Ma (School of Mathematical Sciences, Soochow University) for their valuable suggestions.
+
+\bibliography{iclr2023_conference}
+\bibliographystyle{iclr2023_conference}
+
+
+
+
+
+
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  appendix
+
+
+\newpage
+\appendix
+
+\section{More theoretical analysis for the importance of suppressing complete reconstruction}
+\label{Appendixa}
+In this section, we will offer more detailed proofs for Result \ref{Result1} and Result \ref{Result2}.
+\subsection{Proof of Result \ref{Result1}}
+\label{Appendixa1}
+\begin{proof}
+	Let $\nu=\big(\nu_1,\nu_2,\ldots,\nu_m\big)^{\top}$ and $\Sigma_Y$ represent the mean vector and covariance matrix of variable $Y$ respectively, we have $\nu$ $=$ $P^{\top}\mu$ and $\nu_k$ $=$ $E(Y_k)$ $=$ $\eta_k^{\top}\mu$, $k$ $=$ $1,2,\ldots,m$. Furthermore, we can gain the variance of the $k^{th}$ element of variable $Y$ is
+	%\begin{eqnarray}
+	%	\label{equation:D(Y)}
+	%	&&D(Y_k)=COV\big(Y_k,Y_k\big)  \nonumber\\
+	%	&&=E\Big(\big(Y_k-\nu_k\big)\big(Y_k-\nu_k\big)\Big) \nonumber\\
+	%	&&=E\Big(\eta_k^{\top}\big(X-E(X)\big)\eta_k^{\top}\big(X-E(X)\big)\Big)  \nonumber\\
+	%	&&=\eta_k^{\top}E\Big(\big(X-E(X)\big)\big(X-E(X)\big)^{\top}\Big)\eta_k \nonumber\\
+	%	&&=\eta_k^{\top}\Sigma_x\eta_k \nonumber\\
+	%	&&=\eta_k^{\top}\lambda_k\eta_k  \nonumber\\
+	%	&&=\lambda_k, \nonumber\\
+	%\end{eqnarray}
+	\begin{equation}
+		\label{equation:D(Y)}
+		\begin{split}
+			D(Y_k) &= COV\big(Y_k,Y_k\big)\\
+			&= E\Big(\big(Y_k-\nu_k\big)\big(Y_k-\nu_k\big)\Big) \\
+			&= E\Big(\eta_k^{\top}\big(X-E(X)\big)\eta_k^{\top}\big(X-E(X)\big)\Big) \\
+			&= \eta_k^{\top}E\Big(\big(X-E(X)\big)\big(X-E(X)\big)^{\top}\Big)\eta_k \\
+			&= \eta_k^{\top}\Sigma_x\eta_k \\
+			&= \eta_k^{\top}\lambda_k\eta_k \\
+			&= \lambda_k,
+		\end{split}
+	\end{equation}
+	and the covariance of $Y_i$ and $Y_j$ ($i$ $\neq$ $j$) is
+	\begin{equation}
+		\label{equation:COV(Yi,Yj)}
+		\begin{split}
+			COV(Y_i,Y_j) &= E\Big(\big(Y_i-E(Y_i)\big)\big(Y_j-E(Y_j)\big)\Big)\\
+			&= E\Big(\eta_i^{\top}\big(X-E(X)\big)\eta_j^{\top}\big(X-E(X)\big)\Big) \\
+			&= \eta_i^{\top}E\Big(\big(X-E(X)\big)\big(X-E(X)\big)^{\top}\Big)\eta_j \\
+			&= \eta_i^{\top}\Sigma_x\eta_j \\
+			&= \eta_i^{\top}\lambda_j\eta_j \\
+			&= 0.
+		\end{split}
+	\end{equation}
+Thus, the covariance matrix of variable $Y$ is $\Sigma_Y={\rm diag}(\lambda_1,\lambda_2,\ldots,\lambda_m)$.
+\end{proof}
+
+\subsection{Proof of Result \ref{Result2}}
+\label{Appendixa2}
+\begin{proof}
+	As we know, the loss functhion of MSE can be formulated as
+	\begin{equation}
+		\label{equation:MSE}
+		\begin{split}
+			L_{MSE}(\omega,b) &= \frac{1}{n}\sum_{i=1}^{n} (y_i-\hat{y}_i)^{\top}(y_i-\hat{y}_i)\\
+			&= E\big(Y^{\top}Y-2Y^{\top}\hat{Y}+\hat{Y}^{\top}\hat{Y}\big)\\
+			&= E\big(Y^{\top}Y\big)-2E\big(Y^{\top}\hat{Y}\big)+E\big(\hat{Y}^{\top}\hat{Y}\big) \\
+			&= \sum_{i=1}^m E\big(Y_i^2\big)-2\sum_{i=1}^m E\big(Y_i\hat{Y}_i\big)+\sum_{i=1}^m E\big(\hat{Y}_i^2\big), \\
+		\end{split}
+	\end{equation}
+	where $y_i$ and $\hat{y}_i$ represent the $i^{th}$ sample point of the input and output dataset in the new coordinate system respectively.
+	
+	First, if the autoencoder can properly reconstruct the input dataset, we will analyse the mean vector of the output variable $\hat{Y}$. Based on Assumption \ref{assumption2} and  equation (\ref{equation:MSE}), we have
+	\begin{equation}
+		\label{equation:MSE case 2}
+		\begin{split}
+			L_{MSE}(\omega,b) &= \sum_{i=1}^m \lambda_i+\sum_{i=1}^m \hat{\lambda}_i+\sum_{i=1}^m \nu_i^2+\sum_{i=1}^m \hat{\nu}_i^2-2\sum_{i=1}^m \nu_i\hat{\nu}_i-2\sum_{i=1} ^m COV\big(Y_i,\hat{Y}_i\big)\\
+			&\geq \sum_{i=1}^m \big(\nu_i-\hat{\nu}_i\big)^2+\sum_{i=1}^m \Bigg(\sqrt{\lambda_i}-\sqrt{\hat{\lambda}_i}\Bigg)^2. \\
+		\end{split}
+	\end{equation}
+	In order to reach the minima of $L_{MSE}(\omega,b)$, the mean vector of output variable $\hat{\nu}$ must satisfy $\hat{\nu}_k=\nu_k$, $k$ $=$ $1,2,\ldots,m$. That is to say, the mean vector of output data is the same as input data.
+	
+	Next, we will specifically analyze the reconstruction error of each data point. According to Assumptions \ref{assumption1} and \ref{assumption2}, the input and output variable satisfy $Y_k$ $\sim$ $\mathcal{N} (\nu_k,\lambda_k)$ and $\hat{Y}_k$ $\sim$ $\mathcal{N} (\nu_k,\hat{\lambda}_k)$, $k=1,2,\ldots,m$. Denote $R(Y)=\big(R_1(Y),R_2(Y),\ldots,R_m(Y)\big)^{\top}$ \big($\hat{R}(Y)=\big(\hat{R}_1(Y),\hat{R}_2(Y),\ldots,\hat{R}_m(Y)\big)^{\top}$\big) as the difference between variable $Y$ \big($\hat{Y}$\big) and its mean vector $\nu$, i.e., $R(Y)=Y-\nu$ and $\hat{R}(Y)=\hat{Y}-\nu$. It's easy to see that $R_k(Y)$ $\sim$ $\mathcal{N} (0,\lambda_k)$ and $\hat{R}_k(Y)$ $\sim$ $\mathcal{N} (0,\hat{\lambda}_k)$. Then the following equation can be obtained.
+	\begin{equation}
+		\label{equation:MSE case 3}
+		\begin{split}
+			L_{MSE}(\omega,b) &=E\Big(\big(Y-\hat{Y}\big)^{\top}\big(Y-\hat{Y}\big)\Big)\\
+			&=E\Big(\big(R(Y)-\hat{R}(Y)\big)^{\top}\big(R(Y)-\hat{R}(Y)\big)\Big) \\
+			&=E\Big(R^{\top}(Y)R(Y)\Big)-2E\Big(R^{\top}(Y)\hat{R}(Y)\Big)+E\Big(\hat{R}^{\top}(Y)\hat{R}(Y)\Big) \\
+			&=\sum_{i=1}^mE\Big(R_i^2(Y)\Big)+\sum_{i=1}^mE\Big(\hat{R}_i^2(Y)\Big)-2\sum_{i=1}^mE\Big(R_i(Y)\Big)E\Big(\hat{R}_i(Y)\Big)\\
+			&\hskip 0.5cm -2\sum_{i=1}^mCOV\Big(R_i(Y),\hat{R}_i(Y)\Big) \\
+			&=\sum_{i=1}^m\lambda_i+\sum_{i=1}^m \hat{\lambda}_i-2\sum_{i=1}^m \rho_i\sqrt{\lambda_i}\sqrt{\hat{\lambda}_i},
+		\end{split}
+	\end{equation}
+	where $\rho_k$ represents the correlation coefficient of $R_k(Y)$ and $\hat{R}_k(Y)$, and $-1 \leq \rho_k \leq 1$, $k=1,2,\ldots,m$. In equation (\ref{equation:MSE case 3}), only when $\rho_k=1$, can $L_{MSE}(\omega,b)$ reach its minima. In this case, there is a positive linear correlation between $R_k(Y)$ and $\hat{R}_k(Y)$, specifically, there exist constants $a_k$ and $c_k$ such that $\hat{R}_k(Y)=a_kR_k(Y)+c_k$, then $E\big(\hat{R}_k(Y)\big)=a_kE\big(R_k(Y)\big)+c_k$ and $D\big(\hat{R}_k(Y)\big)=a_k^2D\big(R_k(Y)\big)$. Since $E\big(\hat{R}_k(Y)\big)=E\big(R_k(Y)\big)=0$, $D\big(R_k(Y)\big)=\lambda_k$ and $D\big(\hat{R}_k(Y)\big)=\hat{\lambda}_k$, we can obtain $c_k=0$ and $a_k=\frac{\sqrt{\hat{\lambda}_k}}{\sqrt{\lambda_k}}$. Therefore, equation (\ref{equation:R_k(Y)}) is proved.
+\end{proof}
+\newpage
+\section{Reconstruction and outlier detection results}
+\label{Appendixb}
+In this section, we provide more material showing the reconstruction results of MSE and MSE-eig for the datasets in Figures \ref{example} and \ref{example2}.
+\subsection{Reconstruction results of the MSE-trained autoencoder for the dataset in Figure  \ref{example}}
+\label{Appendixb1}
+Figures \ref{fig:subfig:experiment7_2_parameter1_mse_output} and \ref{fig:subfig:experiment7_2_parameter2_mse_output} show the relationship between the reconstruction values and the corresponding input values in each dimension. For Parameter1 and Parameter2, we can see that reconstruction value increases monotonically with its corresponding input value. When the input values are between $0.15$ and $0.85$, they can be reconstructed well and the reconstructed values are approximately equal to the corresponding input values. Otherwise, if the values are very large or very small, the differences between the reconstructed values and the input values will be large and the corresponding reconstructed errors are large (as shown in Figures \ref{fig:subfig:experiment7_2_parameter1_mse_loss} and \ref{fig:subfig:experiment7_2_parameter2_mse_loss}). This confirms the correctness of our conclusions in Section \ref{The outlier detection with autoencoder}.
+\begin{figure}[H]
+	\centering
+	\subfigure[Reconstruction result of parameter1]{
+			\label{fig:subfig:experiment7_2_parameter1_mse_output}
+			\includegraphics[scale=0.23]{experiment7_2_parameter1_mse_output.png}}
+	\hspace{0.5in} % 两图片之间的距离
+	\subfigure[Reconstruction result of parameter2]{
+			\label{fig:subfig:experiment7_2_parameter2_mse_output}
+			\includegraphics[scale=0.23]{experiment7_2_parameter2_mse_output.png}}	
+	
+	\subfigure[Reconstruction error of parameter1]{
+			\label{fig:subfig:experiment7_2_parameter1_mse_loss}
+			\includegraphics[scale=0.23]{experiment7_2_parameter1_mse_loss.png}}
+	\hspace{0.5in} % 两图片之间的距离
+	\subfigure[Reconstruction error of parameter2]{
+			\label{fig:subfig:experiment7_2_parameter2_mse_loss}
+			\includegraphics[scale=0.23]{experiment7_2_parameter2_mse_loss.png}}
+	\caption{Reconstruction errors and reconstruction results for the dataset in Figure \ref{example} when the loss function of the autoencoder is MSE. (a) and (b) present the reconstruction results of the values in each dimension. (c) and (d) show the reconstruction errors of the values in each dimension.}
+	\label{fig:Appendixb1}
+\end{figure}
+
+
+\subsection{Reconstruction results of MSE-eig for the dataset in Figure  \ref{example}}
+\label{Appendixb2}
+We perform outlier detection on the same dataset in Figure \ref{example} with MSE-eig. By calculation, we get $\max(0.3\sqrt{\lambda_1},0.3\sqrt{\lambda_2})=0.05$, $\min(\sqrt{\lambda_1},\sqrt{\lambda_2})=0.13$ and the mean vector of this dataset is $(0.51,0.58)^{\top}$. So we set the hyperparameter $\beta=0.05$ in our loss function. Figures \ref{fig:subfig:experiment7_2_parameter1_mse_eig_output} and \ref{fig:subfig:experiment7_2_parameter2_mse_eig_output} show that for each dimension, all the input values can't be well reconstructed. Figures \ref{fig:subfig:experiment7_2_parameter1_mse_eig_loss} and \ref{fig:subfig:experiment7_2_parameter2_mse_eig_loss} specifically show that the reconstruction error of any input value in each dimension is proportional to the square of the distance of the value from the mean, which is consistent with our theoretical analysis in Result \ref{Result6}.
+\begin{figure}[H]
+	\centering
+	\subfigure[Reconstruction result of parameter1]{
+		\label{fig:subfig:experiment7_2_parameter1_mse_eig_output}
+		\includegraphics[scale=0.21]{experiment7_2_parameter1_mse_eig_output.png}}
+	\hspace{0.5in} % 两图片之间的距离
+	\subfigure[Reconstruction result of parameter2]{
+		\label{fig:subfig:experiment7_2_parameter2_mse_eig_output}
+		\includegraphics[scale=0.21]{experiment7_2_parameter2_mse_eig_output.png}}
+
+	
+	\subfigure[Reconstruction error of parameter1]{
+		\label{fig:subfig:experiment7_2_parameter1_mse_eig_loss}
+		\includegraphics[scale=0.21]{experiment7_2_parameter1_mse_eig_loss.png}}
+	\hspace{0.5in} % 两图片之间的距离
+	\subfigure[Reconstruction error of parameter2]{
+		\label{fig:subfig:experiment7_2_parameter2_mse_eig_loss}
+		\includegraphics[scale=0.21]{experiment7_2_parameter2_mse_eig_loss.png}}
+	\caption{Reconstruction results and reconstruction errors for the dataset in Figure \ref{example} when the loss function of the autoencoder is MSE-eig. (a) and (b) present the reconstruction results of the values in each dimension. (c) and (d) show the reconstruction errors of the values in each dimension.}
+	\label{fig:Appendixb2}
+\end{figure}
+% By calculation, we get $\max(0.3\sqrt{\lambda_1},0.3\sqrt{\lambda_2})=0.05$, $\min(\sqrt{\lambda_1},\sqrt{\lambda_2})=0.13$ and the mean vector of this dataset is $(0.51,0.58)^{\top}$. So we set the hyperparameter $\beta=0.05$ in our loss function.
+
+\subsection{Reconstruction results for the dataset in Figure  \ref{example2}}
+\label{Appendixb3}
+By calculation, for dataset in Figure \ref{example2}, we get $\max(0.3\sqrt{\lambda_1},0.3\sqrt{\lambda_2})=0.04$ and $\min(\sqrt{\lambda_1},\sqrt{\lambda_2})=0.12$. Therefore, when using MSE-eig, we set $\beta=0.04$. Figures \ref{fig:Appendixb3_1} and \ref{fig:Appendixb3_2} present the reconstruction results of MSE and MSE-eig respectively, and Figure \ref{fig:Appendixb3_3} show the reconstruction result of MSE-eig for the whole dataset and the corresponding outlier detection result. Figure \ref{fig:Appendixb3_4} show the distribution of reconstruction errors for the whole dataset.
+\begin{figure}[H]
+	\centering
+	\subfigure[Reconstruction result of parameter1]{
+		\label{fig:subfig:experiment2_parameter1_mse_output}
+		\includegraphics[scale=0.21]{experiment2_parameter1_mse_output.png}}
+	\hspace{0.5in} % 两图片之间的距离
+	\subfigure[Reconstruction result of parameter2]{
+		\label{fig:subfig:experiment2_parameter2_mse_output}
+		\includegraphics[scale=0.21]{experiment2_parameter2_mse_output.png}}
+%	\hspace{0.3in} % 两图片之间的距离
+
+		\subfigure[Reconstruction error of parameter1]{
+		\label{fig:subfig:experiment2_parameter1_mse_loss}
+		\includegraphics[scale=0.21]{experiment2_parameter1_mse_loss.png}}
+	\hspace{0.5in} % 两图片之间的距离
+	\subfigure[Reconstruction error of parameter2]{
+		\label{fig:subfig:experiment2_parameter2_mse_loss}
+		\includegraphics[scale=0.21]{experiment2_parameter2_mse_loss.png}}
+	\caption{Reconstruction results and reconstruction errors for the dataset in Figure \ref{example2} when the loss function of the autoencoder is MSE. (a) and (b) present the reconstruction results of the values in each dimension. (c) and (d) show the reconstruction errors of the values in each dimension.}
+	\label{fig:Appendixb3_1}
+\end{figure}
+
+\begin{figure}[H]
+	\centering
+		\subfigure[Reconstruction result of parameter1]{
+		\label{fig:subfig:experiment2_parameter1_mse_eig_output}
+		\includegraphics[scale=0.22]{experiment2_parameter1_mse_eig_output.png}}
+	\hspace{0.5in} % 两图片之间的距离
+	\subfigure[Reconstruction result of parameter2]{
+		\label{fig:subfig:experiment2_parameter2_mse_eig_output}
+		\includegraphics[scale=0.22]{experiment2_parameter2_mse_eig_output.png}}
+%	\hspace{0.3in} % 两图片之间的距离
+
+	\subfigure[Reconstruction error of parameter1]{
+		\label{fig:subfig:experiment2_parameter1_mse_eig_loss}
+		\includegraphics[scale=0.22]{experiment2_parameter1_mse_eig_loss.png}}
+	\hspace{0.5in} % 两图片之间的距离
+	\subfigure[Reconstruction error of parameter2]{
+		\label{fig:subfig:experiment2_parameter2_mse_eig_loss}
+		\includegraphics[scale=0.22]{experiment2_parameter2_mse_eig_loss.png}}
+%	\hspace{0.3in} % 两图片之间的距离
+	\caption{Reconstruction results and reconstruction errors for the dataset in Figure \ref{example2} when the loss function of the autoencoder is MSE-eig. (a) and (b) present the reconstruction results of the values in each dimension. (c) and (d) show the reconstruction errors of the values in each dimension.}
+	\label{fig:Appendixb3_2}
+\end{figure}
+
+\begin{figure}[H]
+	\centering
+	\subfigure[Reconstruction result]{
+		\label{fig:subfig:example2_MSE_eig_input_output}
+		\includegraphics[scale=0.28]{example2_MSE_eig_input_output.png}}
+	\hspace{0.3in} % 两图片之间的距离
+	\subfigure[Outlier detection result]{
+		\label{fig:subfig:example_2_MSE_eig_loss1000}
+		\includegraphics[scale=0.28]{example_2_MSE_eig_loss1000.png}}
+	\hspace{0.3in} % 两图片之间的距离
+	\caption{Reconstruction result and outlier detection result for the dataset in Figure \ref{example2} when the loss function of the autoencoder is MSE-eig.}
+	\label{fig:Appendixb3_3}
+\end{figure}
+
+\newpage
+\begin{figure}[H]
+	\centering
+	\subfigure[]{
+		\label{fig:subfig:reconstruction_error_MSE}
+		\includegraphics[scale=0.55]{reconstruction_error_MSE.png}}
+	
+		\subfigure[]{
+		\label{fig:subfig:reconstruction_error_MSE-eig}
+		\includegraphics[scale=0.55]{reconstruction_error_MSE-eig.png}}
+	\caption{Reconstruction errors for the whole dataset in Figure \ref{example2} when the loss function of the autoencoder is MSE or MSE-eig. (a) When the loss function is MSE. (b) When the loss function is MSE-eig.}
+	\label{fig:Appendixb3_4}
+\end{figure}
+
+\newpage
+\section{Determination of hyperparameter $\beta$}
+\label{Appendixc}
+If the intrinsic and actual dimensions of the dataset are equal, i.e., $l=m$, then most of the outliers in the dataset are HLP. In this case, considering that $\sqrt{\lambda_k}-\sqrt{\hat{\lambda}_k}>0$ and $\hat{\lambda}_k>0$, $k$ $=$ $1,2,\ldots,m$, Therefore, the value of the hyperparameter $\beta$ should satisfy $0<\beta<\mathop{\min}_{1 \leq i \leq m}(\sqrt{\lambda_i})$. According to the previous analysis, as long as $\beta>0$, the detection effect of HLP can be improved. Meanwhile, in order to maintain the detection effect of IP, the value of $\beta$ must be small enough.
+
+According to equation (\ref{equation:R_k(Y)}), if $\beta=0$, then $\hat{R}_k(Y)=R_k(Y)$, i.e., $\hat{Y}_k=Y_k$, $k$ $=$ $1,2,\ldots,m$. However, we will add nonlinear activation functions to the autoencoder to learn nonlinear features in the input dataset. For example, in our work, we add sigmoid activation function to the output layer. Since commonly used nonlinear activation functions are saturated, When the input values are very large or very small, the corresponding output values hardly change with the change of the input values. As the result, for each dimension of the input data, when the values are very large or very small, their reconstruction results are poor. Otherwise, the values can be reconstructed well. Then, most HLP detected by the autoencoder are anomalous in one dimension, but HLP whose values in each dimension are within the normal range are ignored. It can be seen from this that when $\beta$ is small enough, it not only adversely affects the detection effect of HLP, but also rarely improves the detection effect of IP. That is to say, there exists $\xi>0$, when $\beta<\xi$, there is not much improvement in the detection effect of IP.
+
+If we determine the value of $\xi$ and let $\beta=\xi$, on the one hand, the detection effect of the autoencoder for IP can be maintained. On the other hand, we can suppress complete reconstruction of the autoencoder and avoid the influence of the saturation of the activation function on the data reconstruction at the same time, which can improve the detection effect for HLP.
+
+In our work, the structure of the autoencoder and the setting of hyperparameters are described in Section \ref{Experiments}. For each dimension of any dataset, input values between $0.15$ and $0.85$ are hardly affected by the saturation of the nonlinear activation function. Therefore, we hope that the value of $\beta$ selected can make the output value of each dimension between $0.15$ and $0.85$. As the result, for each dimension, the interval length of the output value is $0.7$ times the interval length of the input value. Before outlier detection, the input dataset is normalized, so the input value of each dimension is between $0$ and $1$. Recall that $Y_k$ $\sim$ $\mathcal{N} (\nu_k,\lambda_k)$ and $\hat{Y}_k$ $\sim$ $\mathcal{N} (\nu_k,\hat{\lambda}_k)$, $k=1,2,\ldots,m$, The probability that $Y_k$ is distributed in $(\nu_k-3\sqrt{\lambda_k}, \nu_k+3\sqrt{\lambda_k})$ is $0.9974$, so its distribution interval length is approximately $6\sqrt{\lambda_k}$. Similarly, the distribution interval length of $\hat{Y}_k$ is approximately $6\sqrt{\hat{\lambda}_k}$. So we can control $\sqrt{\hat{\lambda}_k}=0.7\sqrt{\lambda_k}$, then $\sqrt{\lambda_k}-\sqrt{\hat{\lambda}_k}=0.3\sqrt{\lambda_k}$, $k=1,2,\ldots,m$.
+
+Based on the above discussion, we can summarize how to determine the value of the hyperparameter $\beta$ when $l=m$. If $\mathop{\max}_{1 \leq i \leq m}(0.3\sqrt{\lambda_i})\leq \mathop{\min}_{1 \leq i \leq m}(\sqrt{\lambda_i})$, we can set $\beta=\mathop{\max}_{1 \leq i \leq m}(0.3\sqrt{\lambda_i})$. Otherwise, we set $\beta=\mathop{\min}_{1 \leq i \leq m}(\sqrt{\lambda_i})$.
+
+In practical applications, we usually encounter this type of dataset whose intrinsic dimension $l$ is smaller than the actual dimension $m$. In this case, there are only $l$ eigenvalues of the covariance matrix of the dataset that are not close to $0$, we denote them as $\lambda^{'}_k$, $k=1,2,\ldots,l$. In the training process, we only need to control such $l$ eigenvalues and make $\sqrt{\lambda^{'}_k}-\sqrt{\hat{\lambda}^{'}_k}=0.3\sqrt{\lambda^{'}_k}$, $k=1,2,\ldots,l$. Besides, since $\lambda^{'}_k>0$, $\beta$ should satisfy $0 \leq \beta \leq \mathop{\min}_{1 \leq i \leq l}(\sqrt{\lambda^{'}_i})$. Actually, if $l<m$, there will be some data points that have a large impact on the reconstruction ability of the autoencoder (i.e., IP), it is very important to not only improve the detection effect of HLP, but also maintain the detection effect of IP. Therefore, we have to make sure that the value of $\beta$ is small enough but not equal to $0$. For convenience, we also set $0<\beta<\mathop{\min}_{1 \leq i \leq m}(\sqrt{\lambda_i})$ in this case. Finally, the determination scheme for the value of $\beta$ is the same as when $l=m$.
+\newpage
+\section{Training process of our outlier detection scheme}
+\label{Appendixd}
+Algorithm \ref{Training process with MSE-eig} specifically describes the process of training the autoencoder with the improved loss function.
+
+\begin{algorithm}[H]
+	\caption{Training process with MSE-eig}%算法名字
+	\label{Training process with MSE-eig}
+	\KwIn{Training dataset $\mathcal{D}$, hyperparameters $\theta_1$, $\theta_2$, $\beta$, and intrinsic dimension of training dataset $l$}%输入参数
+	\KwOut{Outlier detection autoencoder with parameters $\omega$, $b$}%输出
+	\ForEach{Epoch}{
+		\ForEach{Batch $\mathcal{A}$}{
+			\If{The dimension of the training dataset $m=l$}{
+				Calculate $\lambda_i$, $\hat{\lambda}_i$, $\i=1,\ldots,m$\\
+				Get $L_{MSE(\omega,b)}$ and $L_{EIG}(\omega,b)$\\
+				Updata the parameters $\omega$ and $b$ by minimizing $L_{MSE-eig}(\omega,b)$
+			}
+			\If{The dimension of the training dataset $m>l$}{
+				Calculate $\lambda_i$, $\hat{\lambda}_i$, $\i=1,\ldots,m$\\
+				Select the $l$ eigenvalues $\lambda_i^{'}$ that are not close to $0$ in the eigenvalues of the input dataset and their corresponding eigenvalues of the reconstruction result $\hat{\lambda}_i^{'}$, $i=1,2,\ldots,l$\\
+				Get $L_{MSE(\omega,b)}$ and $L_{EIG}(\omega,b)$\\
+				Updata the parameters $\omega$ and $b$ by minimizing $L_{MSE-eig}(\omega,b)$
+			}
+		}
+	}
+\end{algorithm}
+\newpage
+\section{More synthetic data experiments}
+\label{Appendixe}
+In this section, we test the detection effect of MSE-eig on HLP on more synthetic datasets. In Section \ref{Appendixe1}, we conduct experiments on $3$ low-dimensional datasets. In Section \ref{Appendixe2}, experiments on $2$ high-dimensional datasets are provided.
+\subsection{Low-dimensional data experiments}
+\label{Appendixe1}
+We generate three datasets with $2$D Gaussian distribution, and their intrinsic dimension are also $2$. In one of the datasets, the correlation between the two dimensions is small (as shown in Figure \ref{fig:subfig:experiment1_1_data}); the correlation between the two dimensions in another dataset is relatively large (as shown in Figure \ref{fig:subfig:experiment1_2_data}); in the last dataset, the correlation between the two dimensions is also small and non-Gaussian distributed noise exist (as shown in Figure \ref{fig:subfig:experiment1_3_data}). Obviously, the outliers in these three datasets are all HLP. Then we set different outlier ratios and calculate the corresponding AUC scores of the outlier detection results when the autoencoder uses MSE-eig and MSE as the loss function, respectively. To be specific, if the outlier ratio is $\delta$ and the number of sample points is $n$. Then the input data is sorted according to their Mahalanobis distance, and the first $\lfloor \delta n \rfloor$ sample points are regarded as positive. Figures \ref{fig:subfig:experiment1_auc_score}, \ref{fig:subfig:experiment1_2_auc_score} and \ref{fig:subfig:experiment1_3_auc_score}  show the test results on these three datasets. It's easy to see that MSE-eig outperforms MSE in detecting HLP in all three datasets at any outlier ratio.
+\begin{figure}[h]
+	\centering
+	\subfigure[Dataset1]{
+		\label{fig:subfig:experiment1_1_data}
+		\includegraphics[scale=0.23]{experiment1_1_data.png}}
+	\hspace{0.4in} % 两图片之间的距离
+	\subfigure[Dataset2]{
+		\label{fig:subfig:experiment1_2_data}
+		\includegraphics[scale=0.23]{experiment1_2_data.png}}
+	\hspace{0.4in} % 两图片之间的距离
+	\subfigure[Dataset3]{
+		\label{fig:subfig:experiment1_3_data}
+		\includegraphics[scale=0.23]{experiment1_3_data.png}}
+	\hspace{0.4in} % 两图片之间的距离	
+
+	\subfigure[AUC scores for Dataset1]{
+		\label{fig:subfig:experiment1_auc_score}
+		\includegraphics[scale=0.23]{experiment1_auc_score.png}}
+	%	\hspace{0in} % 两图片之间的距离
+	\subfigure[AUC scores for Dataset2]{
+		\label{fig:subfig:experiment1_2_auc_score}
+		\includegraphics[scale=0.23]{experiment1_2_auc_score.png}}
+	\subfigure[AUC scores for Dataset3]{
+		\label{fig:subfig:experiment1_3_auc_score}
+		\includegraphics[scale=0.23]{experiment1_3_auc_score.png}}
+	\caption{Low-dimensional synthetic datasets and their outlier detection results. All datasets follow a two-dimensional Gaussian distribution. (a), (b) and (c) are data point distribution plots for each dataset. (a) Covariance matrix diagonal. (b) Covariance matrix off-diagonal. (c) Covariance matrix diagonal and non-Gaussian distributed noise exist. (d), (e) and (f) are AUC scores for outlier detection results for each dataset when the loss function of the autoencoder is MSE or MSE-eig. (d) Comparison result of Dataset1. (e) Comparison result of Dataset2. (f) Comparison result of Dataset3.}
+	\label{fig:Synthetic data experiments data1}
+\end{figure}
+
+\subsection{High-dimensional data experiments}
+\label{Appendixe2}
+Since autoencoders are often used for outlier detection in high-dimensional datasets, we also analyse the outlier detection result of MSE-eig on two high-dimensional synthetic datasets. Both datasets follow multidimensional Gaussian distribution and their covariance matrices are both diagonal matrices. So the intrinsic dimension of these two datasets are equal to their actual dimension. One of the datasets is $50$ dimensional and the other dataset is $100$ dimensional. It's obvious that outliers in these two datasets are all HLP. Similar to Section \ref{Appendixe1}, we evaluate the outlier detection results of these two datasets by the AUC score, which are shown in Figure \ref{fig:subfig:experiment3_auc_score_50dim} and Figure \ref{fig:subfig:experiment3_auc_score_100dim} respectively. We can see that on high-dimensional datasets, MSE-eig is still better than MSE for HLP detection.
+\begin{figure}[h]
+	\centering
+	\subfigure[50-dimensional]{
+		\label{fig:subfig:experiment3_auc_score_50dim}
+		\includegraphics[scale=0.28]{experiment3_auc_score_50dim.png}}
+	\hspace{0.in} % 两图片之间的距离
+	\subfigure[100-dimensional]{
+		\label{fig:subfig:experiment3_auc_score_100dim}
+		\includegraphics[scale=0.28]{experiment3_auc_score_100dim.png}}
+	\caption{AUC scores for outlier detection result for high-dimensional datasets when the loss function of the autoencoder is MSE or MSE-eig. Both datasets synthesized follow a multidimensional Gaussian distribution, and their covariance matrices are diagonal.}
+	\label{fig:High-dimensional data experiment results}
+\end{figure}
+
+
+
+
+
+\end{document}

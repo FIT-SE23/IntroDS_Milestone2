@@ -1,0 +1,334 @@
+\newpage
+\clearpage
+\section{The HipoRank Algorithm}\label{sec:hiporank}
+In this section, we provide a detailed recap  of the HipoRank algorithm \cite{dong-etal-2021-discourse}. Our approach mainly modifies the obtained document graphs by building a \textit{section-section} graph and changes the final summary selection algorithms.  
+\subsection{Hierarchical Document Graph Creation}
+The document is first split into its sections, then into sentences. Two levels of connections are allowed in the built hierarchical graph: intra-sectional connections and inter-sectional connections. Following the original paper, we display a toy example of these two types of connections in Figure \ref{fig:hiporank_example}.
+ \begin{figure}[h]
+\centering
+ \includegraphics[width=\linewidth]{Figs/hiporank_demonstration.jpg}
+  \caption{ (Reproduced from \cite{dong-etal-2021-discourse}) An example of a hierarchical document graph 
+constructed by HipoRank approach on a toy document, which
+contains two sections \{T1, T2\}, each containing three
+sentences for a total of six sentences \{s1, . . . , s6\}. In the graph, 
+each double-headed arrow represents two edges with
+opposite directions. The solid and dashed arrows indicate intra-section and inter-section connections respectively.}
+  \label{fig:hiporank_example}
+\end{figure}
+
+\paragraph{Intra-sectional connections} are designed to measure a sentence's importance score inside its section. The authors built a fully-connected subgraph over all sentences in the same section, allowing for \textit{sentence-sentence} edges, which are measured by a weighted version of the similarities of sentence embeddings.  
+\paragraph{Inter-sectional connections} ``aim to model the
+global importance of a sentence with respect to
+other topics/sections in the document'', according to \citet{dong-etal-2021-discourse}. To reduce the expensive computation of all sentence-sentence connections spanning across a document, HipoRank's authors introduce section nodes on top of sentence nodes, and only allow for \textit{sentence-section} edges to model the global information. 
+\subsection{Asymmetric Edge Weighting by
+Boundary Functions}
+In order to compute the weight of an edge, HipoRank measures the similarity of sentence-sentence pairs by computing the cosine similarity of encoded sentence embeddings. Similarly, for sentence-section pairs, it averages the sentences' representations in the same section, uses it as the section vector, and further computes the cosine similarity. Taking two discourse hypotheses of long scientific documents into account ((1) important sentences are near the
+boundaries (start or end) of a text \cite{5392648} and (2) sections near the text boundaries (start or end) are more important \cite{teufel-1997-sentence}), the authors of HipoRank capture this asymmetry by making their hierarchical graph directed and inject asymmetric edge
+weighting over intra-section and inter-section connections. We refer to the original paper for more detailed setups and algorithm details.
+\subsection{Importance Computation and Summary Generation}
+We talk about the importance computation approach and summary generation details in \S \ref{sec:main_paper_hiporank}. 
+%in a document, the centrality score of each sentence as 
+% \begin{equation}
+%     c(s_i^{I}) = \mu_1 c_{inter} (s_i^{I}) + c_{intra}(s_i^{I})
+% \end{equation} where $s_i^{I}$ refers to the $i$-th sentence in $I$-th section. $\mu_1$ is a tunable hyper-paramter, $c_{inter}(s_i^{I})$ computes the sentence's similarity to other section representations and  $c_{intra}(s_i^{I})$ computes the average similarity of the current sentence with all others in the same section. the algorithm greedily selects the sentence based on the ranked scores, adding it into the summary set until a pre-defined  word-limit L is passed. 
+
+
+\section{Training Details and Hyperparameters}\label{appendix:detail}
+All of our experiments are conducted on Quadro RTX 5000 GPUs, each of which has 16 GB RAM. For the extractive oracle baseline, we use the python package of rouge\footnote{\url{ https://pypi.org/project/rouge/}} to compute the ROUGE-L scores for sentence scoring. \paragraph{Document Segmentation}
+We provide details of segmentation methods mentioned in \S \ref{sec:views} below. For sentence encoding, we use the sentence\_transformer library\footnote{\url{https://www.sbert.net/}}, and the checkpoint of ``bert-base-nli-stsb-mean-tokens'' for sentence representations. For the HMM stage segmentation, we train a GaussianHMM model with hmmlearn\footnote{\url{https://hmmlearn.readthedocs.io/en/latest/}}, setting the number of the components at 5 and train the model for 50 iterations on the validation set. For C99 algorithm, we use an implementation\footnote{\url{https://github.com/GT-SALT/Multi-View-Seq2Seq/blob/master/data/C99.py}} shared from \citet{chen-yang-2020-multi} in their original paper. We set the window size of 4 and std\_coefficient as 1. All data processing scripts are publicly available in a combined package in \url{https://github.com/cs329yangzhong/DocumentStructureLegalSum}. 
+
+\paragraph{Supervised Model} We build our BERT\_EXT, the extractive model, on top of the official code base of the work of \citet{liu-lapata-2019-text}\footnote{\url{https://github.com/nlpyang/PreSumm}}. Since many original documents' lengths  go beyond the 512 token limits, we break the full document into different chunks and train the model to extract the top-3 sentences. For hyperparameters, we use 4 GPUs, set the learning rate of 2e-3, and save the best checkpoints at every 5,000 steps. We set the batch size as 3,000, the maximum training step at 100,000, and warm-up steps at 10,000.
+
+\paragraph{Unsupervised Models} 
+We use off-the-shelf packages for most traditional models. We use LSA\footnote{\url{https://github.com/luisfredgs/LSA-Text-Summarization}}, TextRank\footnote{\url{https://github.com/summanlp/textrank}}, and LexRank\footnote{\url{https://github.com/crabcamp/lexrank}} accordingly.
+
+For PACSUM model, we follow the re-implementation\footnote{\url{https://github.com/mirandrom/HipoRank}} of \cite{dong-etal-2021-discourse} and keep the hyperparameters fixed with the original setup. BERT-based sentence embeddings are extracted using the fine-tuned BERT model released from the original paper \cite{zheng-lapata-2019-sentence}. We also experimented with LEGAL-BERT \cite{chalkidis-etal-2020-legal} in the early stages of our research but found it degraded performance on the baselines. 
+
+For HipoRank, we use the publicly available code base\footnote{\url{https://github.com/mirandrom/HipoRank}}.  We experimented with various hyperparameter settings on the validation set but we find that
+the original hyperparamters used in the original paper for PubMed dataset seem to be the most
+stable and produce the best results. ($\lambda_1 = 0.0$, $\lambda_2 = 1.0$, $\alpha = 1.0 $, with $\mu_1 = 0.5$.)
+
+We build our reweighting model on top of the HipoRank dataset. We search the threshold g (for phase transition between phases 1 and 2) between [0.3, 0.5, and 0.7], finding that 0.5 is the best for the CanLII dataset. 
+
+
+% \section{BillSum Sent Location}
+% Figure \ref{fig:billsum_position} demonstrates that the summaries in the billsum dataset has a messy distribution. We compute the extractive labels using the oracle summarizer based on the human-written abstractive summary.
+% \begin{figure}
+% \centering
+%  \includegraphics[width=\linewidth]{Figs/positions_test_billsum.png}
+
+%   \caption{BillSum selected sentence positions with extractive oracle, Documents on the x-axis are ordered by increasing article length from shortest to longest.}
+%   \label{fig:billsum_position_sorted}
+% \end{figure}
+
+% \begin{figure}
+% \centering
+%  \includegraphics[width=\linewidth]{Figs/positions_test_1049_extractive.png}
+
+%   \caption{CanLII selected sentence positions with extractive oracle, Documents on the x-axis are ordered by increasing article length from shortest to longest.}
+%   \label{fig:canlii_position_sorted}
+% \end{figure}
+
+%\section{Quantitative Views Analysis}
+\section{The Effects of Reweighting Algorithm}\label{appendix:reweight_effects}
+We  study the effects of our reweighting algorithm by comparing different models' performances on the input documents with original structures. As shown in Table \ref{tab:original_structure_p_r_f1}, with a minor sacrifice of precision, the recall values are greatly improved with the reweighting algorithm, thus resulting in the final improvements of F1 scores.
+
+\begin{table*}[]
+    \centering
+    \begin{tabular}{c|ccc|ccc|ccc}
+    \toprule
+   Document Structures & \multicolumn{3}{c}{ROUGE-1} & \multicolumn{3}{c}{ROUGE-2} & \multicolumn{3}{c}{ROUGE-L} \\
+    \midrule 
+       & P & R & F1 & P & R & F1 &P & R & F1  \\
+    %   \midrule .
+       \midrule
+       w/o header  &  45.24 & 47.39 & 42.58 & 19.23 & 20.12 & 18.01 & 42.25 & 43.95 & 39.63 \\
+       \midrule 
+       w/o header + Reweighting & 44.13 & 49.80 & 43.14 & 18.97 & 21.35 & 18.46 & 41.29 & 46.26 & 40.23 \\
+      \bottomrule 
+    \end{tabular}
+    \caption{The Precision (P), Recall (R) and F1 of ROUGE-1/2/L scores for the inputs with original document structures, with and without reweighting algorithm. We find that the reweighting algorithm improves the recall, suggesting that more argumentative sentences in the references are covered. }
+    \label{tab:original_structure_p_r_f1}
+\end{table*}
+
+% \subsection{Different Views Effects on Our Approach}\label{appendix:viewFullResults}
+% We look at the Precision, Recall and F1 values of the best reweighting models trained with different document structures. As shown in Table \ref{tab:three_view_p_r_f1}, the C99-topic segmented structure leads to higher Recall values of all three metrics, which suggests that models trained on topic segmented documents produced higher coverage of n-grams that have appeared in reference summaries. It also brings improvements on Precision values, suggesting a more accurate selection of sentences regarding the overlapped n-grams between candidates and references. 
+% \begin{table*}[]
+%     \centering
+%     \begin{tabular}{c|ccc|ccc|ccc}
+%     \toprule
+%   Document Structures & \multicolumn{3}{c}{ROUGE-1} & \multicolumn{3}{c}{ROUGE-2} & \multicolumn{3}{c}{ROUGE-L} \\
+%     \midrule 
+%       & P & R & F1 & P & R & F1 &P & R & F1  \\
+%     %   \midrule .
+%       \midrule
+%       Original Structure & 44.13 & 49.80 & 43.14 & 18.97 & 21.35 & 18.46 & 41.29 & 46.26 & 40.23 \\
+%       \midrule
+%       C99-topic  & 44.81 & 50.71 & 43.90 & 19.06 & 21.63 & 18.67 & 41.97 & 47.18 & 41.00\\
+%       \midrule 
+%       HMM-stage & 44.33 & 49.88 & 43.28 & 18.28 & 20.06 & 17.80 & 41.52 & 46.37 & 40.40\\
+%       \bottomrule 
+%     \end{tabular}
+%     \caption{The Precision (P), Recall (R) and F1 of ROUGE-1/2/L scores for the best reweighting model with different document segmentation methods. }
+%     \label{tab:three_view_p_r_f1}
+% \end{table*}
+
+\section{Examples}\label{appendix:1}
+
+\subsection{Summary Generation Results}\label{appendix:output}
+We show the reference, best baseline, and our model's output on the C99-topic view of the without header version of documents in Table \ref{tab:canlii_example}.
+\begin{table*}
+\small
+\begin{tabular}{l|l}
+\toprule
+    Model &  Summary \\
+    \midrule
+    \multirow{10}{*}{Reference} & FIAT: The defendants, Sims, Garbriel and Dumurs, bring separate motions, pursuant to \\
+    & Queen's Bench Rule 41(a), for severance of the claims against them or for an order \\
+    & staying the claims against them until the plaintiffs' claim against the primary defendant,  \\
+    & Walbaum have been heard and decided. || HELD: 1) || The Court will look at all of the \\
+    & circumstances in deciding whether to grant an application for severance. || In this case \\
+    & the plaintiffs should not be precluded from adducing evidence related to Walbaum's \\
+    & dealings with each of the applicants or required to segregate the evidence into two, \\
+    & three or four separate trials. || Given the likelihood that the applicants will be required \\
+    & to attend portions of the trial in respect of the Walbaum Group in any event, severance \\
+    & would not necessarily result in a significant saving of time and expense. || 2) The plain- \\
+    &-tiffs acknowledge that only relatively small portion of trial time (perhaps less than 1 \\
+    & day) will pertain to the claims against any one of the Sims, Gabriel or Dumurs. || It wou-  \\
+    & -ld be unfair to require all of the applicants to participate in all of the trial when very little \\
+    & of it will be relevant to them. || Specific dates and times should be set aside for the \\
+    & plaintiff to call evidence with respect to its claims against each applicant group. || The \\
+    & applicants should be relieved from attending the trial at any other time. \\
+    \midrule
+    \multirow{13}{*}{HipoRank} & QUEEN’S BENCH FOR SASKATCHEWAN ||
+2007 SKQB 296 || Judicial Centre: Regina \\
+&|| DUN-RITE PLUMBING \& HEATING LTD. || (d) Robert Dumur || 593340 Saskatchewan \\
+& Ltd., carrying on || business as Dumur Industries (herein “the Dumurs”) || [2] The Sims, Gab-\\
+& -riel and the Dumurs bring separate motions, pursuant to Queen’s Bench Rule 41(a) for \\
+& severance of the claims against them or for orders staying the claims until the plaintiffs’ claims \\ 
+& against the Walbaum Group have
+been heard and decided. || ANALYSIS || [12] T applications \\
+& are brought pursuant to Queen’s Bench Rule 41 which states: || 41 (1) Where the joinder of \\
+& multiple claims or parties in the same action may unduly complicate or delay the trial, or cause \\
+& undue prejudice to a party, the court may: || (a) order separate trials; || [21] It will also be left to \\
+& the trial judge (or the pre-trial management judge) to designate specific days on which defence \\
+& evidence may be adduced during the trial and argument presented with respect to each claim. || \\
+& All defendants other than those comprising the Walbaum Group shall be relieved from attending \\
+& the trial on any date not designated by counsel for the plaintiffs or designated by the trial judge \\
+& for adducing defence evidence and presenting argument. || [22] Costs will be in the cause.
+|| D.P. \\
+& Ball \\
+    \midrule
+    \multirow{10}{*}{Ours} & FIAT BALL J. || August 14, 2007 || [1] The plaintiff brings this action against nine  defendants \\
+    & (the claim against the defendant Albert Fazakas has been discontinued) who can be separated \\
+    & into four groups: 
+    || All-Rite Plumbing Heating Ltd. || [18] Although choeunsel for the plaintiffs \\
+    & asserts that the evidence against all of the defendants can be adduced in no more than two and \\
+    & one-half days, given the number and complexity of the claims against the Walbaum Group this \\
+    & estimate seems very unrealistic. || [19] The plaintiffs acknowledge that only relatively small \\
+    & portion of trial time (perhaps less than one day) will pertain to the claims against any one of the \\
+    & Sims, Gabriel or the Dumurs. || It would be unfair to require all of the applicants to participate \\
+    & in all of the trial when very little of it will be relevant to them. || The applicants should be \\
+    & relieved from attending the trial at any other time. || The plaintiffs shall not call evidence in  \\
+    & respect of those claims on any other date without leave of the court. || All defendants other than \\
+    & those comprising the Walbaum Group shall be relieved from attending the trial on any date not \\
+    & designated by counsel for the plaintiffs or designated by the trial judge for adducing defence \\
+    & evidence and presenting argument. \\
+\bottomrule
+\end{tabular}
+\caption{Generated summaries for a CanLII case decision (ID: 2\_2007skqb296), we use special symbol ``||'' to mark the sentence boundaries.}
+\label{tab:canlii_example}
+\end{table*}
+
+% \begin{table*}
+% \begin{tabular}{l|l}
+% \toprule
+% Model & Summary \\
+% \midrule
+%      \multirow{5}{*}{Reference} &  The amendments made by this section shall apply to taxable years beginning after \\ 
+%     &  the date of the enactment of this Act.')","National Science Education Tax Incentive  for  \\
+%     &  Businesses Act of 2007 - Amends the Internal Revenue Code to allow a general business   \\
+%     & tax credit for contributions of property or services to elementary and secondary schools   \\
+%     & and for teacher training to promote instruction in science, technology, engineering,  \\
+%     & or mathematics .\\
+%     \midrule
+%     \multirow{10}{*}{HipoRank}  & <SECTION-HEADER> SHORT TITLE.
+% This Act may be cited as the ""National Sc-  \\
+% & 
+% -ience Education Tax Incentive for Businesses Act of 2007"". CREDITS FOR CERTAIN \\
+% & CONTRIBUTIONS BENEFITING  SCIENCE, TECHNOLOGY, ENGINEERING, \\
+% & AND MATHEMATICS EDUCATION AT THE ELEMENTARY AND SECONDARY \\
+% & SCHOOL LEVEL.
+% In General.
+% Subpart D of part IV of subchapter A of chapter 1 \\
+% & of the Internal Revenue Code of 1986 is amended by adding at the end the following \\
+% & new section: ""Section 45O.
+% CONTRIBUTIONS BENEFITING SCIENCE, \\
+% & TECHNOLOGY, ENGINEERING, AND MATHEMATICS EDUCATION AT THE \\
+% & ELEMENTARY AND SECONDARY SCHOOL LEVEL.
+% In General.
+% For purposes of \\
+% & section 38, the elementary and secondary science, technology, engineering, \\
+% & and mathematics (STEM) contributions credit determined under this section for the \\
+% & taxable year is an amount equal to 100 percent of the qualified STEM contributions of \\
+% & the taxpayer for such taxable year.
+% Qualified STEM Contributions.
+% Conforming \\
+% & Amendments. The table of sections for subpart D of part IV of subchapter A of chapter 1\\
+% & of such Code is amended by adding at the end the following new item: \\
+% & ""Section 45O.
+% Contributions benefiting science, technology, engineering, and \\
+% & mathematics education at the elementary and secondary school level.\\
+% \midrule 
+% \multirow{5}{*}{HipoRank}
+% & Section 38(b) of such Code is amended by striking ""plus"" at the end of paragraph (30),\\
+% \multirow{5}{*}{Themantic} & by striking the period at the end of paragraph (31), and inserting "", plus"", and by adding \\
+% & at the end the following new paragraph: the elementary and secondary science, technology, \\
+% & engineering, and mathematics (STEM) contributions credit determined under section 45O."".\\
+
+% & Conforming Amendments.
+% The term `STEM school contributions' means STEM property \\
+% & contributions, and STEM service contributions.
+% For purposes of this section In general.\\
+% & The table of sections for subpart D of part IV of subchapter A of chapter 1 of such Code is \\
+% & amended by adding at the end the following new item: ""Section 45O.
+% For purposes of \\
+% & section 38, the elementary and secondary science, technology, engineering, and mathematics \\
+% & (STEM) contributions credit determined under this section for the taxable year is an amount  \\
+% & equal to 100 percent of the qualified STEM contributions of the taxpayer for such taxable year. \\
+% & Qualified STEM Contributions.
+% For purposes of this section, the term `qualified STEM \\
+% & contributions' means STEM school contributions, STEM teacher externship expenses, and\\
+% &  STEM teacher training expenses.
+% STEM School Contributions.
+% Contributions benefiting \\
+% & science, technology, engineering, and mathematics education at the elementary and \\
+% & secondary school level."".
+% Effective Date.
+% The amendments made by this section shall apply to \\
+% & taxable years beginning after the date of the enactment of this Act.\\
+
+%      \bottomrule
+% \end{tabular}
+% \caption{Generation results of BillSum dataset.}
+% \label{tab:billsum_example}
+% \end{table*}
+
+
+%\subsection{Document Example of different views}\label{apendix:three_views}
+
+ \subsection{IRC Annotation}\label{appendix:irc}
+We show the IRC annotation of both a case and its human summary in Figure \ref{fig:IRC_example}.
+
+\subsection{Document Cleaning Heuristics}\label{sec:appendix_heuristics}
+The heuristics for filtering the headers from cases are provided below for replication purposes; we also provide the code\footnote{\url{https://github.com/cs329yangzhong/DocumentStructureLegalSum}} to process the CanLII data (although it requires that the data must first be obtained through an agreement with the Canadian Legal Information Institute). 
+
+\begin{enumerate}
+    \item Cut the document until the sentence begins with ``Introduction''. 
+    \item Cut the document until the sentence starts with an ordered number such as (1), [1].
+    \item Remove rows until the judge's name or case date appeared.
+\end{enumerate}
+
+\subsection{Comparing to Abstractive Summarization}\label{sec:appendix_abstractive}
+For supervised abstractive baselines, we experiment with BART \cite{lewis-etal-2020-bart} and  Longformer-Encoder-Decoder (LED) \cite{Beltagy2020Longformer}. The latter model can process longer input documents up to 16k tokens. The results  in Table \ref{tab:unsupervised_results_abstractive} show that there still exists a gap between the extractive and abstractive models.
+
+\begin{figure*}
+\centering
+ \includegraphics[width=\linewidth]{Figs/example.jpeg}
+
+  \caption{An example of the annotated \textcolor{red}{Issue}, \textcolor{cyan}{Reason}, and \textcolor{teal}{Conclusion} sentences in CanLII dataset's case and summary pair (ID: 1991canlii4370). A portion of the beginning sentences in the case are not as important as the main document, including the meta-data of the case such as the participants' names, time, locations, etc. Thus, we treated them as headers and filtered them out using a heuristic introduced in Appendix \ref{sec:appendix_heuristics}. }
+  \label{fig:IRC_example}
+\end{figure*}
+
+\begin{table*}[h!]
+\small
+% \scriptsize 
+    \centering
+    % \setlength\tabcolsep{2.1pt}
+    \renewcommand{\arraystretch}{1}%Tighter
+    \begin{tabular}{c|l|cc}
+    %\begin{tabular}{l|lllc|lllc|p{0.9cm}ll}
+    \toprule
+        & & \multicolumn{2}{c}{\textbf{CanLII}}\\
+      ID & Model  &  R1/R2/RL  & BS\\
+         \midrule
+         \multicolumn{3}{c}{{Oracles}} \\
+         \midrule
+          1 & IRC & 58.04/36.02/55.28 & 87.94 \\
+        2 &  EXT & 59.38/38.77/56.94 & 87.85 \\
+        
+   
+          
+    \midrule 
+    \multicolumn{3}{c}{{Supervised Extractive }} \\
+    \midrule
+    % 3 & BERT\textsubscript{EXT} - selection & 40.78 & 17.63 & 37.75 & 84.05 \\
+    3 & BERT\_extractor & {43.44}/{17.84}/{40.36} & {84.47} \\
+    \midrule
+    \multicolumn{3}{c}{{Supervised Abtractive }} \\
+    \midrule
+    %  5 & SentCLR & & & & \\
+    % \midrule
+    % \multicolumn{6}{c}{{Supervised Abstractive}} \\
+    % \midrule
+   
+    4 & BART & 50.50/25.58/46.82 &  87.25\\
+    5 & LED & 53.72/28.75/ 50.17 & 87.55\\
+    % \midrule
+    % \multicolumn{6}{c}{{Unsupervised Extractive }} \\
+    % \midrule
+    %   4 & LSA & 37.22/17.82/34.87 & {84.48} & 40.44/18.07/36.31 &  83.70 \\
+    %       5 & LexRank & 37.90/{18.17}/35.62 &  84.32 &  41.26/\textit{21.19}/37.43 & 84.02\\
+    %         6 & TextRank  & 36.70/16.19/34.00 & 83.51 & 36.38/16.93/30.84 & \textit{84.49}\\
+    %         7 & PACSUM & 40.01/15.68/37.37 & 83.52  & 40.71/18.23/37.00 & 83.08  \\
+    %         8 & HipoRank &  {41.61}/17.13/{38.73}  & 83.55  & \textit{42.41}/19.48/\textit{38.65} & 83.24 \\
+    
+    %     \midrule
+    \bottomrule
+    \end{tabular}
+    \caption{The automatic evaluation results on the CanLII  test set with supervised abstractive models.}
+    \label{tab:unsupervised_results_abstractive}
+\end{table*}
+
+
+

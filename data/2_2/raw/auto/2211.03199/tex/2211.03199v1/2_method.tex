@@ -1,0 +1,126 @@
+\section{Method}
+\label{sec:method} 
+This section explains the details of KGTN-ens.
+The method extends the KGTN architecture proposed by \cite{chen2020knowledge}, which relies on graph-based knowledge transfer to yield state-of-the-art results on few-show image classification.
+The most important difference relies on the usage of multiple graphs instead of a single one, which enables the usage of different knowledge sources.
+Each of these graphs generates different prototypes, which are later combined and compared against the output of the feature extractor.
+It might be not immediately obvious why the approach with multiple knowledge graphs is used, as they may be merged into one using \texttt{owl:sameAs} or similar property.
+Notice that this method does not require knowledge graphs in a strict sense -- KGTM processes only distances between classes, which are later used for scoring prototypes.
+Therefore, integrating different sources of knowledge is fairly easy and requires a minimum amount of effort -- the KGTN-ens architecture seamlessly handles different types of distances derived from embeddings. 
+
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\textbf{Problem formulation.}
+Following \cite{chen2020knowledge}, the classification task is formulated as learning the prototypes of considered classes.
+In the typical approach to classification, the model prediction $\hat{y}$ based on the input $x$ is obtained in the following way:
+\begin{equation}
+    \hat{y} = \underset{k}{\arg\max} p(y = k | x)
+\end{equation}
+where $p$ is calculated using the standard softmax function:
+\begin{equation}
+    p(y = k | x) = \frac{\exp\left( f_{k}(\mathbf{x}) \right)}{\sum_{i=1}^{K} \exp\left( f_{i}(\mathbf{x}) \right)},
+\end{equation}
+where $K$ is the number of considered classes and $f_{k}$ is the linear classifier.
+Since 
+\begin{equation}
+    \underset{k}{\arg\max} p(y = k | \mathbf{x}) = \underset{k}{\arg\max} f_{k}(\mathbf{x}),    
+\end{equation}
+the $f_{k}(\mathbf{x})$ can be formulated as follows:
+\begin{align}
+    f_{k}(\mathbf{x}) &= \mathbf{w}^T_k \mathbf{x} + b_k \\
+    &= - \frac{1}{2} \norm{\mathbf{w}_k - \mathbf{x} }^2_2 + \frac{1}{2} \norm{\mathbf{w}_k}^2_2 + \frac{1}{2} \norm{\mathbf{x} }^2_2 + b_k \nonumber
+\end{align}
+setting $b_k = 0$ and $ \norm{ \mathbf{w}_i }_2 = \lVert \mathbf{w}_j \rVert_2$ for each $i,j$, the classifier $f_k{\mathbf{x}}$ can be perceived as a similarity measure between the extracted features and prototypes:
+\begin{align}
+    \hat{y} = \underset{k}{\arg\max} p(y = k | \mathbf{x}) = \underset{k}{\arg\min} \norm{\mathbf{w}_k - \mathbf{x} }^2_2.
+\end{align}
+As a result, $\mathbf{w}_k$ can be interpreted as a prototype for class $k$, and these prototypes are learned during the training process.
+
+% \textbf{KGTN-ens.}
+The overall architecture of KGTN-ens is presented in Figure \ref{fig:architecture} and it consists of three main parts: \emph{Feature Extractor}, \emph{KGTMs}, and \emph{Prediction with ensembling}.
+Feature Extractor is a convolutional neural network that extracts features from the input image, such as ResNet \citep{he2016deep}.
+KGTMs refer to the list of knowledge graph transfer modules (each one handles a different knowledge graph) that are used to generate prototypes.
+Finally, prediction with ensembling a module that scores extracted features against obtained prototypes in order to make the final classification.
+\begin{figure*}
+    \input{figures/architecture.tikz}
+    \caption{Architecture of KGTN-ens.}
+    \label{fig:architecture}
+\end{figure*}
+
+\textbf{KGTMs.}
+Since we use the plain ResNet50 for the feature extractor part, we start the description with the KGTMs part.
+Consider a dataset of images, where each of them is associated with either a base class or a novel class.
+There are $K_{\texttt{base}}$ base classes and $K_{\texttt{novel}}$ novel classes ($K=K_{\texttt{base}}+K_{\texttt{novel}}$).
+In the original KGTN approach, the correlations between categories are encoded in a graph $\mathcal{G}=\{ \mathbf{V}, \mathbf{A} \}$, where $\mathbf{V} = \{ v_1, v_2, \dots, v_{K_{\texttt{base}}} \dots, v_K \}$ represents classes and $\mathbf{A}$ denotes an adjacency matrix, in which $A_{i,j}$ is the \emph{correlation} between classes $v_i$ and $v_j$.
+Our approach extends this concept in a way in which there are multiple graphs $\mathcal{G}_1, \dots, \mathcal{G}_M$.
+Specifically, each of them shares the same classes $\mathbf{V}$ but has different correlation values stored in $\mathbf{A}$ matrices.
+
+% GGNN
+Just as KGTN, KGTN-ens is based on Gated Graph Neural Network \citep{li2016gated}, in which each class is represented by a node $v_k$ is associated with a hidden state $h^t_k$ at time $t$.
+It is initialised with $\mathbf{h}_k^0=\mathbf{w}_{k}^{\text{init}}$, where $\mathbf{w}_{k}^{\text{init}}$ are chosen at random.
+The parameter vector $\mathbf{a}_k^t$ for node $k$ at time $t \in \{1, \ldots, T\}$ is defined as:
+\begin{equation}
+    \mathbf{a}_k^t=\left[\sum_{k'=1}^K{a_{kk'}\mathbf{h}_{k'}^{t-1}}, \sum_{k'=1}^K{a_{k'k}\mathbf{h}_{k'}^{t-1}}\right],
+ \end{equation}
+where $a_{kk'}$ denotes the correlation between nodes $k$ and $k'$.
+The hidden states $\mathbf{h}_{k}^{t}$ for weight $k$ at time $t$ are determined with a gating mechanism inspired by GRU (abbr. from gated recurrent unit), which was introduced by \cite{cho2014properties}:
+\begin{equation}
+    \begin{split}
+     \mathbf{z}_k^t=&{}\sigma(\mathbf{W}^z{\mathbf{a}_k^t}+\mathbf{U}^z{\mathbf{h}_k^{t-1}}), \\
+     \mathbf{r}_k^t=&{}\sigma(\mathbf{W}^r{\mathbf{a}_k^t}+\mathbf{U}^r{\mathbf{h}_k^{t-1}}), \\
+     \widetilde{\mathbf{h}_k^t}=&{}\tanh\left(\mathbf{W}{\mathbf{a}_k^t}+\mathbf{U}({\mathbf{r}_k^t}\odot{\mathbf{h}_k^{t-1}})\right), \\
+     \mathbf{h}_k^t=&{}(1-{\mathbf{z}_k^t}) \odot{\mathbf{h}_k^{t-1}}+{\mathbf{z}_k^t}\odot{\widetilde{\mathbf{h}_k^t}}.
+    \end{split}
+ \end{equation}
+Here, $\mathbf{W}^z$ and $\mathbf{U}^z$ are the weights for the update gate, and $\mathbf{W}^r$ and $\mathbf{U}^r$ are the weights for the reset gate.
+The hyperbolic tangent function is given by tanh, whereas $\sigma$ is the sigmoid function.
+The final weight $\mathbf{w}_k^{*}$ for class $k$ is defined as:
+\begin{equation}
+    \mathbf{w}_k^{*} = o ( \mathbf{h}_k^{T}, \mathbf{h}_k^{0} ),
+\end{equation}
+where $o$ is the fully connected layer.
+
+\textbf{Prediction and ensembling.}
+The classifier $f({\mathbf{x}})$ is treated as a similarity metric between the output of the feature extractor and the most similar class prototypes learned by the knowledge graph transfer module.
+In the original KGTN approach, the relationship between these two was calculated using the inner product, cosine similarity or Person's correlation coefficient.
+For the inner product, which was the most effective, the classifier was defined as $f_{k}(\mathbf{x}) = \mathbf{x} \cdot \mathbf{w}_{k}^{*}$, where $x$ is the feature vector of an image and $\mathbf{w}_{k}^{*}$ denotes the learned weight for class $k$.
+Conventionally, $f({\mathbf{x}}) = \underset{k}{\arg \max} f_{k}(\mathbf{x})$.
+However, in our approach, we use the ensembling-inspired technique to improve the performance of the classifier.
+
+In KGTN-ens, we calculate similarity for each of the $m$ available graphs.
+Using a similar inner product approach, this is done the following way: $f_{k,m}(\mathbf{x}) = \mathbf{x} \cdot \mathbf{w}_{k,m}^{*}$, where $\mathbf{w}_{k,m}^{*}$ is the learned weight for the $m$-th graph.
+Then, the final result for class $k$ has to be chosen.
+Such an approach is inspired by ensemble learning strategies, though we do not use \emph{weak learners} in a strict sense.
+One of the main drawbacks of ensemble learning -- the linear memory complexity with the proportional computational burden -- is partially avoided, as only the part of the network is multiplied.
+Most importantly, the feature extractor, which often can be the largest component of modern architectures, is used only once.
+This enables us to fit several knowledge sources on proprietary GPUs (we used a single NVIDIA RTX 2080 Ti in our experiments).
+We propose two simple approaches for selecting the final result: mean and maximum.
+For the former, the result for class $k$ is the mean of the $m$ products:
+\begin{equation}
+    f_{k}(\mathbf{x}) = \frac{1}{M} \sum_{m=1}^{M} f_{k,m}(\mathbf{x}).
+\end{equation}
+In ensemble learning literature, this would be called \emph{soft voting}.
+The maximum approach is very similar:
+\begin{equation}
+    f_{k}(\mathbf{x}) = \max_{m=1}^{M} \left( f_{k,m}(\mathbf{x}) \right),
+\end{equation}
+In other words, we take the maximum of the similarities for each of the $m$ available graphs.
+
+\textbf{Optimisation.}
+To enable fair comparison, we use a two-step training regime similar to \cite{hariharan2017low} and \cite{chen2020knowledge} -- the first is devoted to the feature extractor, whereas the second one fine-tunes the graph-related part of the network.
+In the first stage, we train the feature extractor $\phi(\cdot)$ using the base classes from $\mathcal{D}_{base}$.
+The loss $\mathcal{L}_1$ calculated in this step consists of the standard cross-entropy loss and squared gradient magnitude loss \citep{hariharan2017low}, which acts as a regularisation term:
+\begin{equation}
+    \mathcal{L}_1 = \mathcal{L}_c + \lambda \mathcal{L}_s,
+\end{equation}
+where:
+\begin{align}
+    \mathcal{L}_c &= - \frac{1}{N_\text{base}} \sum_{i=1}^{N_\text{base}} \sum_{i=1}^{K_\text{base}} \mathbb{1}_{k = y_i} \log p_i^k,\\
+    \mathcal{L}_s &= \frac{1}{N_\text{base}} \sum_{i=1}^{N_\text{base}} \sum_{i=1}^{K_\text{base}} \left( p_i^k - \mathbb{1}_{k = y_i} \right)  \norm{\mathbf{x}_i }^2_2,
+\end{align}
+where $\mathbb{1}$ is the indicator function and $\lambda$ is a loss balance parameter.
+In the second stage, the weights of the feature extractor are frozen.
+Other parts of the architecture are trained using base and novel samples with the following loss:
+\begin{equation}
+    \mathcal{L}_2 = - \frac{1}{N} \sum_{i=1}^{N} \sum_{i=1}^{K} \mathbb{1}_{k = y_i} \log p_i^k + \eta \sum_{k=1}^{K} \norm{\mathbf{w}_k^{*} }^2_2,
+\end{equation}
+where $\eta$ balances the loss components.

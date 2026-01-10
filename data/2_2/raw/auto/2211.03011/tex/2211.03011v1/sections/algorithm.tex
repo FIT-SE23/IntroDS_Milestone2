@@ -1,0 +1,131 @@
+\section{Algorithm}\label{sec:algorithm}
+    \begin{figure}[thb]
+      \centerline{\includegraphics[width=\columnwidth]{Results/schematic.png}}
+      \caption{Algorithm/Agent architecture} \label{fig:blk-diag}
+    \end{figure}
+    lalal
+    The previous section helps us establish two results, the first result tells that a history-based representation can be called an AIS if it is able to evolve like a state and approximately predict the instantaneous reward and state transition. The second result tells us that if a policy is obtained using an AIS, then its performance loss is bounded in terms of the approximation error as in \eqref{eq:ais-bound}. 
+    In this section we will show how one can design a theoretically grounded computational framework that uses an RL algorithm to simultaneously learn an AIS and a policy. The key idea is to represent the AIS generator and the policy using a parametric family of functions/distributions and training them using a multi-timescale optimisation algorithm. 
+    
+    According to \Cref{def:ais}, the AIS generator consists of four components, a compression function $\aisfunction_\timestep$, the update function $\hat f$, an approximate reward predictor $\hat \cost$, and transition kernel $\hat \transition$. We can represent the history compression function using any time series approximators such as LSTMs or GRUs. An advantage of such memory based neural networks is that their internal layers are updated in a state-like manner. Therefore, we can satisfy \Cref{def:state-update} since $\Ais_\timestep$ evolves according to the RNN's state update function such that $\hat{f} \colon \aisspace \times \statespace \times \actionspace \to \aisspace$.
+     
+    The main function of $\hat \cost$ and $\hat \transition$ is ensure that $\Feature_\timestep$ satisfies properties P1 and P2 (in \Cref{def:ais}), ~\ie, prediction of the instantaneous reward with a bounded error $\epsilon$ and approximation of the ground MDP's transition function with a bounded error $\delta$. One way in which the computational framework can satisfy these is conditions is by explicitly optimising the AIS generator for the constants $\epsilon$ and $\delta$. We can achieve this by modelling the reward predictor $\hat \cost$ using a multilayered perception (MLP) layer which uses the representation $\Feature_\timestep$ and action $\Action_\timestep$ to predict the approximate reward. In the same way, we can model the approximate transition kernel $\hat \transition$ using an appropriate class of stochastic kernel approximators \eg, a softmax function or a mixture of Gaussian's to learn a parametric approximation of $\transition$. We can then train the AIS generator by minimising an appropriate objective function.
+     
+     To make things more concrete, let us denote the AIS generator as the following collection: $\{\aisfunction_\timestep(\cdot;\aisparams), \hat{f}(\cdot;\aisparams), f_{\hat{\cost}}(\cdot;\aisparams), f_{\hat{\transition}}(\cdot:\aisparams)\}$ where $f_{\hat \cost}(\cdot;\aisparams):
+     \aisspace \times \actionspace \to \real$ and $f_{\hat \transition}(\cdot;\aisparams):\aisspace \times \actionspace \to \Delta(\statespace)$ are the reward and transition approximators, and $\aisparams$ are the parameters of the respective sub-components. Instead of separately optimising the reward prediction loss $\vert \cost(\State_\timestep, \Action_\timestep) - \hat\cost (\Ais_\timestep, \Action_\timestep)\vert$, and the transition loss $\ipm(\transition, \hat \transition)$ we can combine them in a single objective function objective function as: 
+     
+      \begin{align}
+                \aisloss(\aisparams) &= \frac{1}{\Timestep}\sum_{t = 0}^{\Timestep}\bigg( \lambda \underbrace{(f_{\hat{\cost}}(\Ais_{\timestep}, \Action_\timestep; \aisparams)  - \cost(\State_\timestep, \Action_\timestep))^{2}}_{\loss_{\hat{\Cost}} \approx \epsilon} 
+                + (1-\lambda)\cdot \underbrace{\ipm(f_{\hat\transition}(\Ais_\timestep, \Action_\timestep\ ;\aisparams),\transition)^{2}}_{\loss_{\hat\transition} \approx \delta}\bigg),\label{eq:ais-loss}
+    \end{align}
+    where, $\Timestep$ is the length of the episode or the rollout length, $\lambda \in [0,1]$ is a hyper-parameter, reward prediction loss $\loss_{\hat{\Cost}}(;\aisparams)$ is simply the mean-squared error between the predicted and the observed reward, whereas the transition prediction loss $\loss_{\hat{\transition}}(\cdot; \aisparams)$ is the distance between predicted and observed transition distributions $\hat\transition$ and $\transition$. To compute $\loss_{\hat{\transition}}(\cdot; \aisparams)$, we need to choose an IPM. In principle we can pick any IPM, but we would want to use an IPM using which the distance $d_{\mathfrak{F}}$ can be efficiently computed.
+     
+    %  Besides the AIS generator the system also consists of a parametric representation of the decision policy $\mu{}(\cdot \ ; \actorparams)$, where $\actorparams$ represent the policy parameters. The schematic of our system architecture is given in \Cref{fig:blk-diag}. 
+    
+    \subsection{Choice of an IPM} \label{sec:ipm-choice}
+    
+        To compute the IPM $d_\mathfrak{F}$ we need to know the probability density functions $\hat \transition$ and $\transition$. As we assume $\hat \transition$ to belongs to a parametric family, we know its density function closed form. However, since we are in the learning setup, we can only access samples from $\transition $. 
+    
+        For a function a $f\in \mathfrak{F}$, and probability density functions $\transition$ and $\hat \transition$ such that, $\nu_1 = \transition$, and $\nu_2 =\hat \transition$, we can estimate the IPM $d_\mathfrak{F}$ between a distribution and samples using the duality $|\int_\aisspace f d\nu_1 - \int_\aisspace f d\nu_2|$.
+        
+        In this paper, we use two from of IPMs, the MMD distance and the Wasserstein/Kantorovich–Rubinstein distance. 
+        \vspace{-10pt}
+        \paragraph{MMD Distance:} Of the two alternatives, MMD distance is the easier compute as we can use some of its properties to simply its computation. Towards that end, when $\hat \transition$ is a real-valued distribution that can be characterised by its mean $m_\aisparams$, the MMD-based AIS loss can be given as:
+        \begin{align}
+            \aisloss(\aisparams) &= \frac{1}{\Timestep}\sum_{t = 0}^{\Timestep}\bigg( \lambda (f_{\hat{\cost}}(\Ais_{\timestep}, \Action_\timestep; \aisparams)  - \cost(\State_\timestep, \Action_\timestep))^{2} 
+            + (1-\lambda)(m^{\State_\timestep}_{\aisparams} - 2\State_\timestep)^{\top}m^{\State_\timestep}_{\aisparams}  \bigg),\label{eq:mmd-ais-loss}
+        \end{align}
+        where $m^{\State_\timestep}_{\aisparams}$ is obtained using the from the transition approximator, ~\ie, the mapping $f_{\hat\transition}(\aisparams): \aisspace \times \actionspace \to \real$. For the detailed derivation of the above loss see \Cref{sec:mmd-details}
+        \vspace{-5pt}
+        \paragraph{Wasserstein/Kantorovich–Rubinstein distance:}
+        When $\ipm$ is the Wasserstein/Kantorovich–Rubinstein distance, we can compute it by solving a linear program~\citep{Sriperumbudur}. In some settings, it might be computationally expensive to solve a linear program at each time step before updating the parameters $\aisparams$. Therefore, we propose to approximate the Wasserstein distance using a KL-divergence~\citep{kl} based upper-bound. The KL divergence based AIS loss is given as:
+          \begin{align}
+                \aisloss(\aisparams) &= \frac{1}{\Timestep}\sum_{t = 0}^{\Timestep}\bigg( \lambda (f_{\hat{\cost}}(\Ais_{\timestep}, \Action_\timestep; \aisparams)  - \cost(\State_\timestep, \Action_\timestep))^{2}
+                + (1-\lambda)\log(\hat \transition(\State_\timestep;\aisparams))  \bigg),\label{eq:w-ais-loss}
+            \end{align}
+        where, $d_{\mathfrak{F}^{\text{W}}}^{2}(\transition, \hat \transition)\leq \log(\hat \transition(\State_\timestep;\aisparams))$ is the KL-divergence based upper bound. For the details of this derivation see \Cref{sec:wass-details}. 
+  
+  
+        
+        % When $\ipm$ is the Wasserstein/Kantorovich–Rubinstein distance, we can compute it by solving a linear program~\citep{Sriperumbudur}. In some settings, it might be computationally expensive to solve a linear program at each time step before updating the parameters $\aisparams$. 
+        % Therefore, we propose to use the a Sinkhorn divergence~\citep{Sinkhorn1967DiagonalET} based estimator to compute the Wasserstein distance. For a detailed discussion on this topic we refer the reader to the large body of work in the field of optimal transport~\citep{Cuturi13, Knight08, RamdasTC17, GenevayPC18}. As these technicalities are not relevant to the scope of this paper, we will define the Sinkhorn divergence based estimator as follows:
+        % \begin{align}
+        %     \nu_1 = \sum_{i=1}^{N} \nu_{1_{i}}\delta_{X_{i}} && \nu_2 = \sum_{i=1}^{N} \nu_{2_{i}}\delta_{W_{i}},
+        % \end{align}
+        % where $\nu_1, \nu_2 \in \real^{N}$ and $X, W \in \real^{N \times D}$
+        % \begin{align}\label{eq:OT}
+        %     S_{\epsilon}(\nu_1, X, \nu_2, W) &= \sum_{i=1}^{N} \nu_{1_{i}}(j_{i} - k_{i}) + \sum_{i=1}^{N} \nu_{2_{i}}(y_{i} - g_{i})
+        % \end{align}
+        % where
+        % \begin{align}
+        %     j_i &= - \epsilon \log \bigg(\sum_{i'=1}^{N} \exp(\log(\nu_{2_{i'}} + \frac{1}{\epsilon}y_{i'} - \frac{1}{\epsilon}C(X_i, W_{i'}))\bigg)\\
+        %     y_i &= - \epsilon \log \bigg(\sum_{i'=1}^{N} \exp(\log(\nu_{1_{i'}} + \frac{1}{\epsilon}j_{i'} - \frac{1}{\epsilon}C(X_{i'}, W_i))\bigg)\\
+        %     k_i &= - \epsilon \log \bigg(\sum_{i'=1}^{N} \exp(\log(\nu_{1_{i'}} + \frac{1}{\epsilon}k_{i'} - \frac{1}{\epsilon}C(X_i, X_{i'}) )\bigg)\\
+        %     g_i &= - \epsilon \log \bigg(\sum_{i'=1}^{N} \exp(\log(\nu_{2_{i'}} + \frac{1}{\epsilon}g_{i'} - \frac{1}{\epsilon}C(W_i, W_{i'}) )\bigg)
+        % \end{align}
+    
+   \subsection{Policy gradient algorithm}\label{sec:pgt}
+        Following the design of the auxiliary algorithmic modules, we now provide a policy-gradient algorithm to learning both the AIS and policy. The schematic of our agent architecture is given in \Cref{fig:blk-diag}, and pseudo-code is given in \Cref{alg:ciac-a}.
+        
+        Given an AIS $\Ais$, we can simultaneously learn the AIS-generator and the policy using a multi-timescale stochastic gradient ascent algorithm~\citep{borkar2008stochastic}. Let $\mu(\cdot;\actorparams):\aisspace \to \Delta(\actionspace)$ be a parameterised stochastic policy with parameters $\actorparams$. Let $\performance(\actorparams,\aisparams)$ denote the performance of the policy $\mu(\cdot ;\ \actorparams)$. The policy gradient theorem~\citep{pgt,Williams2004SimpleSG,baxter-bartlett} states that: 
+        % \begin{align*}
+        %     \grad_{\actorparams}\performance(\actorparams_\timestep,\aisparams_\timestep) &= \expecun{}\bigg[\sum_{\timestep=1}^{\infty}\discount^{\timestep-1}\cost_{\timestep}\bigg(\sum_{\tau =1}^{\timestep}\grad_{\actorparams}\log(\mu(\Action_\timestep|\Ais_\timestep ;\ \actorparams_\timestep))\bigg)\bigg].\label{eq:pg}
+        % \end{align*}
+        For a rollout horizon $\Timestep$, we can estimate $\grad_\actorparams \performance$ as:
+        \begin{align*}
+            \hat \grad_{\actorparams}\performance(\actorparams_\timestep,\aisparams_\timestep) &= \sum_{\timestep=1}^{\Timestep}\discount^{\timestep-1}\cost_{\timestep}\bigg(\sum_{\tau =1}^{\timestep}\grad_{\actorparams}\log(\mu(\Action_\timestep|\Ais_\timestep ;\ \actorparams_\timestep))\bigg).
+        \end{align*}
+        Following a rollout of length $\Timestep$, we can then update the parameters $\{(\aisparams_i, \actorparams_i  )\}_{i \geq 1}$ as follows:
+        \begin{subequations}\label{eq:pgt-update}
+             \begin{align}
+                \aisparams_{i+1} &= \aisparams_i + \aislr_i \grad_\aisparams\aisloss(\aisparams_i)\label{eq:ais-update},\\
+                \actorparams_{i+1} &= \actorparams_i + \actorlr_i \hat\grad_{\actorparams}\performance(\actorparams_{i},\aisparams_{i})\label{eq:actor-update},
+            \end{align}
+        \end{subequations}
+       
+         where the step-size $\{\aislr_{i}\}_{i \geq 0}$ and $\{\actorlr_{i}\}_{i \geq 0}$ satisfy the standard conditions $\sum_{i} \aislr_{i} = \infty$, $\sum_{i}\aislr_{i}^{2}< \infty$, $\sum_{i} \actorlr_{i} = \infty$ and $\sum_{i}\actorlr_{i}^{2}< \infty$ respectively. Moreover, one can ensure that the AIS generator converges faster by choosing an appropriate $\actorlr$ such that, $\lim_{i \to \infty} \frac{\actorlr_{i}}{\aislr_{i}} = 0$.
+         
+         Note that we can use similar ideas to develop an Actor-Critic algorithm. As such, in addition to a parameterised policy $\policy(\cdot; \actorparams)$ and AIS generator $(\aisfunction_\timestep(\cdot;\aisparams), \hat f, \hat r, \hat\transition)$ we can also a parameterised critic $\hat\valuefunction(\cdot;\criticparams):\featurespace \to \real$, where $\criticparams$ are the parameters for the critic. The details of the Actor Critic Algorithm can be found in \Cref{sec:AC}, and the convergence analysis of both algorithms can be found in \Cref{sec:convergence}.
+        
+     
+        \begin{algorithm}[t]
+            \SetKwData{Left}{left}\SetKwData{This}{this}\SetKwData{Up}{up}
+            \SetKwFunction{Union}{Union}\SetKwFunction{FindCompress}{FindCompress}
+            \SetKwInOut{Input}{Input}\SetKwInOut{Output}{Output}
+            \SetAlgoLined
+            \Input{$\iota_{0}$: Initial state distribution,\\
+                  $\aisparams_{0}$: Ais parameters,\\
+                  $\actorparams_{0}$: Actor parameters,\\ 
+                %   $\criticparams_{0}$: Critic parameters,
+                %   $\ais_{0}$: Initial Ais, 
+                  $\action_{0}$: Initial action,\\
+                  $\mathcal{D} = \emptyset$: Replay buffer,\\
+                  $N_{\text{comp}}$: Computation budget,\\
+                  $N_{\text{ep}}$: Episode length,\\
+                  $N_{\text{grad}}$: Gradient steps}
+            % \KwResult{Write here the result }
+             \For{iterations $i = 0:N_{\text{comp}}$ }{
+                  Sample start state $\sts_{0}\sim \iota_{0}$\;
+                  \For{iterations $j = 0:N_{\text{ep}}$ }
+                  {
+                    
+                  $\ais_{j} = \aisfunction_{\aisparams}(\sts_{1:j},\action_{1:j-1})$\ \tcp*{\tiny{final layer of a GRU cell.}}
+                  $\action_{j} = \mu_{\actorparams}(\ais_{j})$\;
+                  $\sts_{j+1} = \transition(\sts_{j},\action_{j})$\ \tcp{\tiny{sample next state from the MDP.}}
+                  $\mathcal{D} \subseteq \{\ais_{j},\action_{j},\sts_{j},\sts_{j+1}\}$\;
+                  $\action_{j-1} = \action_{j}$\;
+                  $\sts_{j} = \sts_{j+1}$\;
+                  }
+                  \For{every batch $b \in \mathcal{D}$}
+                  {
+                        \For {gradient step $t=0:N_{\text{grad}}$}
+                        {
+                        %  $\aisparams_{\timestep+1,b,\valuefunction} = \aisparams_{\timestep,b,\valuefunction} + \aislr  \grad_{\aisparams_{\valuefunction}}\aisloss(\aisparams_{\timestep,b,\valuefunction})$\;
+                        %  $\criticparams_{\timestep+1,b} = \criticparams_{\timestep,b} + \criticlr\grad_{\criticparams}\criticloss(\criticparams_{\timestep,b})$\;
+                         $\aisparams_{\timestep+1,b} = \aisparams_{\timestep,b} + \aislr \grad_{\aisparams}\aisloss(\aisparams_{\timestep,b})$\;
+                         $\actorparams_{\timestep+1,b} = \actorparams_{\timestep,b} +\actorlr \hat\grad_{\actorparams}\performance(\actorparams_{\timestep,b},\aisparams_{\timestep,b})$
+                        }
+                  }
+             }
+          \caption{Policy Search with AIS }\label{alg:ciac-a}
+      \end{algorithm}

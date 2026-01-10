@@ -1,0 +1,90 @@
+\begin{centering}
+\section*{\Large{Supplementary:  Integrating Language Guidance into Vision-based Deep Metric Learning}}
+\end{centering}
+\vspace{12pt}
+
+\setcounter{equation}{0}
+\setcounter{figure}{0}
+\setcounter{table}{0}
+\setcounter{page}{1}
+\makeatletter
+\renewcommand{\theequation}{S\arabic{equation}}
+\renewcommand{\thefigure}{S\arabic{figure}}
+\renewcommand{\thetable}{S\arabic{table}}
+
+
+\appendix
+\section{Experimental Details}
+\label{supp:sec:exp_details}
+For all our experiments, we utilize PyTorch \cite{pytorch}. Underlying backbones and training protocols are adapted from previous research (e.g. \cite{roth2020revisiting,musgrave2020metric,softriple,multisimilarity,milbich2020diva,s2sd}) including the codebase provided through \cite{roth2020revisiting}. More specifically, our experiments utilize either a ResNet50 \cite{resnet} with embedding dimensionality of 128 or 512 as well as an Inception-BN \cite{inceptionv1} with dimensionality 512. The ImageNet-pretrained network weights were taken from \texttt{timm} \cite{rw2019timm} as well as \texttt{torchvision} \cite{pytorch}.
+
+Both for studies of relative improvements as well as state-of-the-art performance comparisons, optimization is done using Adam \cite{adam} with a base learning rate of $10^{-5}$, consistent weight decay \cite{weight_decay} of $3\cdot 10^{-4}$ and batchsizes between 80 and 112. Our relative evaluation follows the protocol proposed in \cite{roth2020revisiting}, while for our state-of-the-art comparison, we provide a thorough evaluation against different literature methods separated by the utilized underlying backbone. For our language backbone, we chose the language-part of CLIP \cite{clip} (specifically the ``ViT-B/32'' variant) and the provided tokenizer, but show in section \ref{subsec:arch_ablations} that essentially any big language model can be used for this task. This shows that improvements are not based on potential minor dataset overlap in the image-part of the CLIP training protocol and potential implicit information bleeding into the language model. We also note that the authors of \cite{clip} themselves highlight that even with data overlap, performance is not impacted in a relevant fashion. Applying language-guidance to S2SD \cite{s2sd}, we found placing more emphasis on the feature distillation part instead of the dimensionality distillation worked better in conjunction with both \textit{ELG} and \textit{PLG}. To avoid large-scale hyperparameter grid searches, we thus simply set the weights for dimensionality matching to zero and only adjust the feature distillation weight.
+
+For the scaling $\omega$ of our language-guidance (see Eq. \ref{eq:final_eq}), we found $\omega\in[1, 10]$ to work consistently for our experiments on CARS196 and CUB200-2011 and $\omega\in[0.1, 1]$ on Stanford Online Products, which accounts for the magnitude of the base loss function $\mathcal{L}_\text{DML}$. For the state-of-the-art study in \S\ref{subsec:sota}, we found these parameter values to transfer well to the other backbones and embedding dimensionalities.
+
+\section{Additional Experimental Results}
+\label{supp:sec:experiments}
+\subsection{Additional language models}
+\label{supp:subsec:languagemodels}
+To study the impact of language guidance provided with different pretrained language models, Table \ref{supp:tab:choice_of_language_models} provides an extensive evaluation of different language model architectures and pretrainings. As can be seen, performance boosts are consistent, regardless of the exact choice of language model, supporting the general benefit of language as an auxiliary, performance-facilitating modality for finegrained visual similarity tasks.
+
+\subsection{Conceptual approaches to language inclusion}
+\label{supp:subsec:concepts}
+\input{tables/relative_improvements}
+\input{tables/all_lang_models}
+\input{figures/conv_comp}
+To directly incorporate language context into a discriminative DML objective, we utilize the language similarities to either adjust the mining mask or the loss scale in the multisimilarity loss \cite{multisimilarity}. To adjust the mining mask, given an anchor sample $x_a$, positives $x_p$ and negatives $x_n$ are selected if, respectively,
+\begin{equation}
+\begin{split}
+    f\left(S^\text{lang}_{a, p}, s(\psi, \psi_p)\right) &< \min_{\psi_k \in \mathcal{B}, y_k \neq y_a} s(\psi_a, \psi_k) + \epsilon\\
+    f\left(S^\text{lang}_{a, n}, s(\psi_a, \psi_n)\right) &< \min_{\psi_k \in \mathcal{B}, y_k = y_a} s(\psi_a, \psi_k) - \epsilon
+\end{split}
+\end{equation}
+with similarity function $s(\bullet, \bullet)$ and language similarity scaling $f(\bullet, \bullet)$. For $f(\bullet, \bullet)$, we investigate different orders of interpolation 
+\begin{equation}
+f(S^\text{lang}_{ij}, S^\text{img}_{ij})_{\nu_1, \nu_2} = \left[(1 - \nu_1) \cdot {S^\text{lang}_{ij}}^{\nu_2} + \nu_1 \cdot {S^\text{img}_{ij}}^{\nu_2}\right]^{1/{\nu_2}}
+\end{equation}
+to adjust between sole visual similarity and language similarity.
+To re-weight loss components (with positive and negative pairs for anchor $x_a$, $\mathcal{P}^+_a$ and $\mathcal{P}^-_a$), we instead compute
+\begin{equation}
+\begin{split}
+    \mathcal{L}^\textit{ELG}_\text{MSIM} &= \frac{1}{|\mathcal{B}|}\sum_{i=1}^{|\mathcal{B}|} \frac{1}{\alpha}\log\left( 1 + \sum_{k\in\mathcal{P}^+_i} e^{-\alpha\left(\frac{S^\text{lang}_{ik}}{S^\text{img}_{ik}}\right)^{\nu_3}(S^\text{img}_{ik} - \lambda)} \right)\\  
+    &+ \frac{1}{\beta} \log\left( 1 + \sum_{k\in\mathcal{P}^-_i} e^{\beta\left(\frac{S^\text{lang}_{ik}}{S^\text{img}_{ik}}\right)^{\nu_4}(S^\text{img}_{ik}-\lambda)} \right)
+\end{split}
+\end{equation}
+thus providing a scaling to the utilized visual similarity $S^\text{img}_{ik}$ based on the (relative) similarity to the respective language similarity.
+In all cases, a grid search both over newly introduced hyperparameters ($\nu_1$, $\nu_2$, $\nu_3$ and $\nu_4$) as well as the default multisimilarity loss parameters ($\alpha, \beta, \lambda$) is performed.
+For the language similarity scaling $f(\bullet, \bullet)$, we found linear interpolation ($\nu_1 = \nu_2 = 1$) to work best. For $\mathcal{L}^\textit{ELG}_\text{MSIM}$, we found $\nu_3 = \nu_4 = 0.75$ to work well, but had to readjust $\alpha=1.5$ and $\beta=45$ slightly to account for the change in magnitude.
+
+For our matching objective, in which we incorporate language context by training either a MLP over embeddings or a transformer (ViT, \cite{vit}) over a sequence of network features to predict language embeddings $\psi_\text{lang}$, the respective networks are trained following  
+\begin{equation}
+    \mathcal{L}_\text{Match}(\psi_i, \phi_i, \psi_{\text{lang}, i}) = g_\rho^\text{match}(\psi_i, \phi_i)^T\psi_{\text{lang}, i}
+\end{equation}
+with $g_\rho^\text{match}(\psi_i, \phi_i)$ denoting the unit-normalized mapping from embedding/feature space to (normalized) language space using either the MLP or ViT with parameters $\rho$.
+
+Finally, as a base reference, we also investigate CLIP-style training in which we utilize direct contrastive training between image and language embeddings following \cite{clip} as regularizer against $\mathcal{L}_\text{DML}$:
+\begin{equation}
+\begin{split}
+    \mathcal{L}_\text{CLIP}(S^\text{mixed}) &= \frac{1}{|\mathcal{B}|}\sum_{i}^{|\mathcal{B}|}-\frac{1}{2}\log\left(\sigma\left(S^\text{mixed}_{i,:}\cdot e^T\right)_i\right)\\ &-\frac{1}{2}\log\left(\sigma\left(S^\text{mixed}_{:,i}\cdot e^T\right)_i\right)
+\end{split}
+\end{equation}
+with similarity matrix between minibatch image and language embeddings $S^\text{mixed}$.
+
+%%%%%%%%%%%%%%
+\subsection{Language guidance from pseudolabels}
+\label{supp:subsec:plangg_ablations}
+\input{tables/plangg}
+% To motivate our proposed state-of-the-art pseudolabel guidance (\S\ref{subsec:language_guided}, 
+% Table \ref{tab:sota}), 
+For \textit{PLG}, we investigate performance dependence on the number of top-$k$ pseudolabels assigned to every class and their inclusion into training (\S\ref{subsec:language_guided}.
+Table \ref{tab:plangg_ablations} highlights that more pseudolabels benefit generalization (optimum for $k\in[5, 10]$), that distillation from a single averaged similarity matrix (see Eq. \ref{eq:multi_match}) performs better than (or comparable to) joint distillation from each pseudolabel similarity matrix (``\textit{Multi (Top-5)}''), and that is does not matter if pseudolabels are computed for classes or individual samples (``\textit{Sample}''). 
+
+In addition, we study whether computing a pseudolabel similarity matrix for each pseudolabel pairing, disregarding the ordering\footnote{E.g. for $k=5$, ``\textit{Dense}'' introduces $k^2 = 25$ target matrices.}, benefits overall performance (``\textit{Dense (Top-5)}'' and ``\textit{Dense + Multi}''), but found no notable benefit. Furthermore, Table \ref{tab:plangg_ablations} shows that leveraging hierarchies as described in \S\ref{subsec:arch_ablations} also performs notable worse in the pseudolabel domain.
+%%%%%
+Finally, we find impact on overall training time of \textit{PLG} to be negligible, while convergence are in parts even improved (see Supp.-Fig. \ref{fig:convergence}). 
+
+
+
+\subsection{Convergence of \textit{PLG} models}
+Figure \ref{fig:convergence} shows that \textit{PLG (Top-5)} allows underlying objectives to reach similar performance after significantly less training, with much higher overall performance after full training. With \textit{PLG} only requiring an initial forward pass of training samples through the ImageNet-pretrained backbone and of all unique classnames through the language model, impact on overall training time is also negligible.
+

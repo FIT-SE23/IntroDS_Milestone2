@@ -1,0 +1,108 @@
+
+% \heng{\sout{I added the section title back, and your current section 4 logical parsing and reasoning is empty}}
+\label{sec:approach}
+
+Explanation-based classification 
+% \heng{\sout{maybe call it as 'explanations based classification'}}
+is, in essence, a bilateral matching problem between inputs and explanations. Instead of simply using similarity or entailment scores, in this work we aim at better utilizing the logical structure of natural language explanations. A detailed illustration of our proposed model, \model{}, is shown in Figure~\ref{fig:approach}. At the core of the approach is a 2-stage logical matching process: logical parsing of the explanation (Figure~\ref{fig:approach}(d)) and logical reasoning on explanation and inputs to obtain the classification scores (Figure~\ref{fig:approach}(e)).
+Rather than using sentence embeddings, our approach focuses more on the logical structure of language explanations, setting it apart from logic-agnostic baselines such as ExEnt and RoBERTa-sim (which is based on sentence embedding similarity). To the best of our knowledge, ours is the first attempt to utilize logical structure in zero-shot classification benchmarks, and it also serves as a proof of concept for the importance of language compositionality.
+In the following part of this section we will describe these two stages. More implementation details including input representation can be found at Section~\ref{sec:clues} and \ref{sec:other_modalities}.
+
+% \subsection{Input Representation}
+% \paragraph{Modality-Specific Input Encoder} $E_\Phi$ is a learnable module which converts inputs $I_i$ into a uniform representation $X=E_\Phi(I_i)=(x_1, x_2, \cdots, x_K)$. On structured and textual data inputs, $E_\Phi$ uses pre-trained language models such as BERT~\citep{kenton2019bert} as model backbone. The structured data needs to be first re-written as a textual sequence before being encoded, which will be detailed in the Experiments section. On image data, we use pre-trained image networks such as ResNet-101~\citep{he2016deep} and CLIP~\citep{radford2021learning} for encoding. In order to obtain a sequence representation $X$, we abandon the final linear and pooler layers of ResNet-101 and CLIP, and flatten the last hidden outputs into a sequence.
+
+\subsection{Logical Parsing}
+
+This stage is responsible for detecting attributes mentioned in an explanation as well as recovering the logical structure on top of these attributes. (Figure~\ref{fig:approach}(b) to Figure~\ref{fig:approach}(d)). A more detailed illustration is given in Figure~\ref{fig:parsing}. We divide this parsing into 2 steps:
+
+\paragraph{Step 1: Selecting attribute Candidates}
+We deploy a attribute detector to mark a list of attribute candidates in the explanations. Each attribute candidate is associated with an attention map as in Figure~\ref{fig:parsing}. \heng{\sout{show this representation in figure 2?}} First we encode the explanation sentence with a pre-trained language encoder, such as RoBERTa~\citep{liu2019roberta}. This outputs a sentence embedding vector and a sequence of token embedding vectors. Then we apply an attention-based Gated Recurrent Unit (GRU) network ~\citep{qiang2017hierarchical}. Besides the output vector at each recurrent step, attention-based GRU also outputs an attention map over the inputs that is used to produce the output vector. In this work, we use the sentence embedding vector as the initialization vector $h^0$ for GRU, and word embeddings as the inputs. We run GRU for a maximum of $T$ (a hyper-parameter) steps, and get $T$ attention weight maps.
+Finally we adopt these attention maps to acquire weighted sums of token features $\{w_t | t\in[1..T]\}$ as attribute embeddings. \heng{\sout{any relation between t and T? it's confusing}}
+
+\paragraph{Step 2: Parsing Logical Structure} The goal of this step is to generate a logical structure over the attribute candidates in the previous step. As shown in Figure~\ref{fig:approach}(d), the logical structure is a binary directed tree with nodes being logical operators \texttt{AND} or \texttt{OR}. Each leaf node corresponds to an attribute candidate. In this work, we need to deal with the problem of undetermined number of attributes, and also allow for differentiable optimization. To this end, we define a fixed list of tree structures within maximum number of $T$ leaf nodes, each resembling the example in Figure~\ref{fig:parsing}. \heng{\sout{need to write clearly what you mean by templates, clarify with examples}} A complete list is shown in Appendix~\ref{appsec:templates}. We compute a distribution on templates by applying an multi-layer perceptron (MLP) with soft-max onto the explanation sentence embedding. This provides a non-negative vector $\boldsymbol{p}$ with sum 1, which we interpret as a distribution over the logical structure templates. If the number of attributes involved in the template is fewer than $T$, we discard the excessive candidates in following logical reasoning steps.
+\zhenhailong{\sout{question: how do you fit the candidate attributes into the templates? what if the number of candidate attributes is different with the number of leaf nodes? and how do you decide which candidate attribute go into which leaf node?}}
+
+
+\subsection{Logical Reasoning}
+After getting attribute candidates and a distribution over logical structures, we conduct logical reasoning on the input to get the classification score. An illustration is provided in Figure~\ref{fig:approach}(e).
+\paragraph{Step 1: Matching attributes with Inputs}
+ We assume that the input is represented as a sequence of feature vectors $X=(x_1,x_2,\cdots,x_K)$. First we define a matching score between attribute embedding $w_t$ and input $X$ as the maximum cosine similarity:
+\[
+    \text{sim}(X,w_t) \colon= \max_k \cos(x_k,w_t).
+\]
+
+\paragraph{Step 2: Probabilisitc Logical Reasoning} This step tackles the novel problem of reasoning over logical structures of explanations. \heng{\sout{is this logical tree based reasoning new? if so emphasize the novelty}} During reasoning, we iterate over each logical tree template  and 
+% \textit{assume} that this is the correct logical structure, and 
+walk along the tree bottom-up to get the intermediate reasoning scores node by node. First, for leaf nodes in the logical tree (which are associated with attributes), we use the attribute-input matching scores in the previous step as their intermediate scores. Then, for a non-leaf node, if it is associated with an \texttt{AND} operator, we define its intermediate score as $\min(s_1,s_2)$ with $s_1$ and $s_2$ following common practice~\citep{mao2019neuro}. If the non-leaf node is associated with an \texttt{OR} operator instead, we use $\max(s_1,s_2)$ as the intermediate score. The intermediate score of the root node $s_{root}$ serves as  the output reasoning score.
+Note that we generated a \textit{distribution over logical structures} rather than a deterministic structure. Therefore, after acquiring the reasoning scores on each structure, we use the probability distribution weight $\boldsymbol{p}$ to sum up the scores $\boldsymbol{s}$ of all structures. The resulting score is then equivalent to probabilistically logical reasoning over a distribution of logical structures.
+\[
+    s_{expl} = \boldsymbol{p}^\top \boldsymbol{s}
+\]
+
+We also consider that some explanations might be more or less certain than others. When using words like ``maybe'', the explanation is less certain than another explanation using word ``always''. We model this effect by associating each explanation with a certainty value $c_{certainty}$, which is produced by another MLP on the explanation sentence embedding. So we scale the score $s_{expl}$ with $c_{certainty}$ in logit scale: 
+\[
+    s_{scaled} = \sigma(c_{certainty} \cdot \text{logit}(s_{expl}))
+\]
+Intuitively, the training phase will encourage the model to learn to assign each explanation a certainty value that best fits the classification tasks.
+\heng{\sout{unclear how the certainty is computed}}
+
+\paragraph{Step 3: Reasoning over Multiple Explanations} There are usually multiple explanations associated with a category. In this case, we take the maximum $s_{scaled}$ over the set of explanations as the classification score for this category.
+
+% We design our model to better leverage the compositionality in natural language definitions. A language definition often describes multiple attributes of a category, and compose them with a logical structure, such as the example in Figure~\ref{fig:teaser}. To utilize this property, \model{}-model interprets each definition as a probabilistic logical program $\Lambda$, which is executable on the input to produce a classification score. We illustrate the workflow of \model{} in Figure~\ref{fig:approach}.
+% % Given an input $I_i$ (which can be structured, textual or image), and a natural language definition $J_j$ (corresponding to class/label $C$), \model{} outputs a value $p^{i, j}\in[0, 1]$ indicating whether $I$ satisfies the definition $J$. We design it to work by interpreting each definition as an executable probabilistic logical program, which runs on the input data and outputs $p^{i, j}$. 
+% \model{} is composed of three major parts: a modality-specific encoder $E_\Phi$, a program generator $G_\Psi$, and a program executor $E_{exec}$. The learnable parameters include $\Phi$ and $\Psi$. The general workflow of \model{} is as follows: First, the encoder $E_\Phi$ encodes the input into a sequence of vectors $X=(x_1, x_2, \cdots, x_K)$. Second, the generator $G_\Psi$ converts the definition $J_j$ into a probabilistic logical program $\Lambda$. Finally, $E_{exec}$ executes the program on $X$ to output the final classification score $p^{i,j}\in(0,1)$.
+% The workflow is end-to-end differentiable and allows for gradient-based optimization methods.
+
+% This working paradigm encourages the model to utilize the compositional structure of language definition. As we will demonstrate in later experiments, this helps \model{} generalize better to unseen classes, be more robust against linguistic biases, and provide explainable evidence of its reasoning process.
+
+% \subsection{Model Details}
+
+
+% \paragraph{Program and the Program Generator} The probabilistic logical program $\Lambda$ is represented as a distribution over a set of logical sub-programs.
+% We first manually write $M$ sub-program templates within maximal length of $L$ like:
+% \begin{equation*}
+% \begin{split}
+%     & \text{function}_1(X) = \textit{Exist}(\cdot; X) \\
+%     & \text{function}_2(X) = \textit{Exist}(\cdot; X) \\
+%     & \text{function}_3(X) = \textit{And}(\text{function}_1,  \text{function}_2; X) \\
+%     & \textbf{return  } \text{function}_3(X)
+% \end{split}
+% \end{equation*}
+% where $\cdot$ are function argument placeholders to be filled in.
+% The sub-program templates are composed of three types of logical functions: \textit{Exist}($a$, X) where $a$ is a to-be-filled-in function argument vector, \textit{And}($f_u$, $f_v$) and \textit{Or}($f_u$, $f_v$), where $f_*$ are other preceding logical functions in the same sub-program. $\Lambda$ is then determined by three components: a sequence of function argument vectors $A=(a_1, a_2, \cdots, a_L)$; a distribution vector over the sub-program templates $Q=(q_1, q_2, \cdots, q_M)$ and a scalar $c_{certainty}$ representing the certainty degree of this definition. Here $a_l$'s and $x_k$'s are of the same dimensions. Given arguments $A$ and a template-$m$, the $m$-th sub-program can be composed by filling each $a_l$ into \textit{Exist} functions as illustrated in Figure~\ref{fig:approach}(d).
+
+% The program generator $G_\Psi$ is responsible for generating the components $A, Q, c_{certainty}$ given the definition $J_j$.
+% First, it uses a pre-trained language encoder, such as BERT (independent of the one used in $E_\Phi$ if any), to get the contextual word embeddings of the definition $J_j$. Then it applies an attention-based GRU ~\citep{qiang2017hierarchical} to generate $A$, so that each $a_l$ is a weighted sum of word embeddings of $J_j$. Two MLPs (multi-layer perceptrons) are also applied on the encoded definition to generate $Q$ and $c_{certainty}$.
+
+% \paragraph{Program Executor} $E_{exec}$ executes $\Lambda$ on the features $X$ to get the score $p^{i, j}$. $E_{exec}$ does not involve trainable parameters. It iterates over and executes all the $M$ sub-programs. Each sub-program is recursively executed by sequentially running the functions. Each type of function is executed as follows:
+% \begin{equation*}
+% \begin{split}
+%     & \textit{Exist}(a_l; X) = \sigma(\max_{1\leq k\leq K} a_l^T x_k)\\
+%     & \textit{And}(f_u, f_v; X) = \min(f_u(X), f_v(X)) \\
+%     & \textit{Or}(f_u, f_v; X) = \max(f_u(X), f_v(X)) \\
+% \end{split}
+% \end{equation*}
+% where $f_u, f_v$ are other preceding functions in the same sub-program, $a_l$ is argument for the $l$-th function, and $\sigma$ is the sigmoid function.
+% % $\sigma(z)=\frac{1}{1+e^{-z}}$\xd{equ for sigmoid is not needed}.
+% The output of the final function is used as sub-program score $p_m$. We finally aggregate scores according to the distribution $Q$ as follows:
+% \[
+% p^{i,j}=\sigma(c_{certainty}\textit{logit}(\sum_{m=1}^Mq_mp_m))
+% \]
+% % where \textit{logit} is the logit function. 
+% % $\textit{logit}(z)=\ln\frac{z}{1-z}$.
+
+% \paragraph{Multiple Definitions} There are cases where multiple definitions are associated with one class $C$. In this situation, we use the maximum over scores
+% \[
+% p^{i, C} = \max_{J_j\in J(C)} p^{i,j}
+% \]
+% as the classification score for this class. $J(C)$ denotes the definition set of $C$. Otherwise, the score from only definition is used as the classification score $p^{i, C}$.
+
+% \subsection{Training}
+% \model{} is end-to-end differentiable regarding the final score $p^{i,C}$. We simply use the standard Binary/Multi-class Cross Entropy between $p^{i,C}$ and labels $Y_i$ as optimization objective
+% % \footnote{this equations is for binary or multi-label classification. In the case of multi-class classification, we simply switch $CE$ with multi-class cross-entropy function.}
+% \[
+% \mathcal{L}(\Phi, \Psi; \mathcal{D})
+% =\mathbb{E}_{I_i, Y_i \sim \mathcal{D}}
+% CE(Y_i, \{p^{i,C}\}_{C\in\mathcal{C}})
+% \]
+% where $\mathcal{D}$ denotes the dataset and $\mathcal{C}$ is the label set. We use AdamW~\citep{loshchilov2017decoupled} with default hyper-parameters as the optimizer, and optimize \model{} according to the gradient $\nabla_{\Phi, \Psi} \mathcal{L}(\Phi, \Psi; \mathcal{D})$.

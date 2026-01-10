@@ -1,0 +1,175 @@
+\onecolumn
+\setcounter{secnumdepth}{3}
+% \def\@cite#1{({#1})} %square to rounded - PS
+\clearpage
+\begin{center}
+\textbf{\LARGE Supplementary Material for\\ \ltitle}
+\end{center}
+%%%%%%%%%% Merge with supplemental materials %%%%%%%%%%
+%%%%%%%%%% Prefix a "S" to all equations, figures, tables and reset the counter %%%%%%%%%%
+\setcounter{section}{0}
+\setcounter{equation}{0}
+\setcounter{figure}{0}
+\setcounter{table}{0}
+\setcounter{page}{1}
+\makeatletter
+\renewcommand{\theequation}{S\arabic{equation}}
+\renewcommand{\thetable}{S\arabic{table}}
+\renewcommand{\thefigure}{S\arabic{figure}}
+\renewcommand{\thesection}{S\arabic{section}}
+% \renewcommand{\thetheorem}{S\arabic{theorem}}
+% \renewcommand{\citenumfont}[1]{S#1}
+
+\newcommand{\TextUnderscore}{\rule{.4em}{.4pt}}
+
+\input{sections/main_post}
+\subsection{Sensitivity to Skip Connection} 
+\label{suppsec:skipconnection}
+Many state-of-the-art deep learning-based basecallers~\cite{wick2019performance,neumann2022rodan,konishi2021halcyon,xu2021fast,lou2020helix,perevsini2021nanopore,pages2022comprehensive,ambernas_zhang2021automated} incorporate skip connections to improve their basecalling accuracy. Figure~\ref{supfig:skip_sensitivity} shows the accuracy of \bon using two different configurations of skip connections (\texttt{s1} and \texttt{s2}) and one configuration without any skip connections (\texttt{s3}) and compares it to the baseline \bon architecture. In \texttt{s1} configuration, we reduce the number of repeats in each block to one, while in \texttt{s2} configuration, we use only one block with maximum channel size, maximum kernel size, and the maximum number of repeats.%, and \texttt{s3}: sub-divide blocks with each block consisting of two repeat.
+\yboxbegin
+  \begin{figure}[H]
+  \centering
+\includegraphics[width=0.65\linewidth,trim={0.2cm 0.25cm 0.2cm 0cm},clip]{images/skip_connection_sensitivity_4.pdf}
+%   \vspace{-15pt}
+  \caption{Basecaller sensitivity to skip connections.}
+  \label{supfig:skip_sensitivity}
+%   \vspace{-12pt}
+\end{figure}
+\yboxend
+
+For \texttt{s3} configuration, we manually remove all the skip connections from each block in \bon. We also annotate the change in model parameters compared to the baseline model. \bon architecture comprises several blocks, each consisting of a time channel separable convolution sub-block (referred to as repeat). We make two major observations. First, the number of sub-blocks we provide skip connection plays an important role. In \texttt{s1} configuration, we observe that by using only one repeat, we reduce the accuracy by 2.84\% with 66.7\% lower model parameters, while by merging all the blocks into one big block in \texttt{s2} configuration, we observe 8.75\% lower accuracy with 96.2\% higher model parameters. Second, manually removing all the skip connections in \texttt{s3} configuration leads to 40.7\% lower model parameters at the expense of a 3.88\% loss in accuracy. This performance degradation is because, during neural network training, these connections provide a direct path for propagating the error through the layers and dealing with the vanishing gradient problem, allowing deep networks to learn properly and converge during training. Therefore, manual removal of skip connections can lead to lower basecalling performance. We conclude that skip connections are critical for basecalling accuracy.
+% \newpage
+
+\subsection{Hyper-parameter Tuning for \strim}
+\label{suppsec:Hyper_skipclip}
+\Copy{IR1.10}{In Figure~\ref{supfig:kd_hyper}, we show the effect of two critical hyper-parameters of \strim (alpha ($\alpha$) and temperature ($\tau$)) on \hgb{the validation accuracy of \bon}.}  We observe that as we raise $\alpha$ while keeping $\tau$ constant, the basecaller accuracy increases. At higher $\alpha$, \strim gives more importance to the student loss than the distillation loss during the backward pass. We use $\alpha$ =0.9 throughout our experiments.
+
+\begin{figure}[h]
+  \centering
+\includegraphics[width=0.6\linewidth,trim={0.2cm 0.25cm 0.4cm 0cm},clip]{images/kd_hyper3.pdf}
+%   \vspace{-15pt}
+  \caption{Sensitivity of \strim to hyper-parameters alpha ($\alpha$) and temperature ($\tau$).}
+  \label{supfig:kd_hyper}
+  \vspace{12pt}
+\end{figure}
+
+For $\tau$, we experiment with values ranging from 0.5 to 5.0. Increasing $\tau$ provides more knowledge from the teacher network for a student network to absorb. We observe at $\tau$=2, \strim provides the highest accuracy. Further increasing $\tau$ does not provide benefits because the student network cannot absorb knowledge provided by the teacher network.
+
+
+
+\section{\mech Architecture}
+% \hfill\\
+\label{supsec:rubicall_arch}
+Figure~\ref{fig:rubicon} shows the architecture of \mech. We develop \mech using \nas and \strim. The \mech architecture is composed of 28 quantized convolution blocks containing $\sim$3.3 million model parameters. Each block consists of  quantized grouped 1-dimensional convolution and quantized pointwise 1-dimensional convolution where every layer is quantized to a different domain. The convolution operation is followed by batch normalization (Batch Norm)~\cite{ioffe2015batch} and a quantized rectified linear unit (QuantReLU)~\cite{agarap2018deep} activation function. The final output is passed through a connectionist temporal classification (CTC)~\cite{graves2006connectionist} layer to produce the decoded sequence of nucleotides (A, C, G, T). CTC is used to provide the correct alignment between the input and the output sequence.  
+
+In a learning task, $\mathcal{X}$ represents feature space with label $\mathcal{Y}$, where a machine learning model is responsible for estimating a function $f$: $\mathcal{X} \to \mathcal{Y}$.  \mech  first splits a long read in electrical-signal format (e.g., millions of signals) into multiple smaller chunks (e.g., thousands of samples per chunk) and then basecalls these chunks.  \mech uses the input signal (or squiggle) as $\mathcal{X}$ to predict nucleotides as label $\mathcal{Y}$. The CTC layer assigns a probability for all possible labels in  $\mathcal{Y}$ given an $\mathcal{X}$ at each time-step. The nucleotide with the highest probability is selected as the final output.
+
+\begin{figure}[h]
+  \centering
+%   \includesvg{images/rubicon.svg}
+  \includegraphics[width=0.5\linewidth]{images/rubicon_4.pdf}
+%   \vspace{-20pt}
+  \caption{Overview of \mech architecture. The normalized input signal is passed through a succession of quantized convolution blocks. Each block is composed of several processing steps (convolution, batch normalization, and activation). We represent the quantization as a tuple $<$weight, activation$>$. Initial layers use a higher precision for weights and activations, while the final layers use a lower precision. The final output is passed through a connectionist temporal classification (CTC) to produce the decoded sequence of nucleotides.}
+  \label{fig:rubicon}
+%   \vspace{-12pt}
+\end{figure} 
+
+\section{Comparison to More Accurate Basecallers}
+\label{suppsec:guppy_compare}
+Our goal is to make basecalling highly efficient and fast by building the first framework for specializing and optimizing machine learning-based basecaller. Currently, we focus on CNN-based basecallers because: (1) they are the most widely used basecallers, and  (2)  the fundamental multiply-accumulate (MAC) operation in a CNN model is amenable to hardware acceleration, unlike the operations in RNN-based basecallers. As \bon has the same backend as \mech (i.e., Quartznet~\cite{kriman2020quartznet}), we consider it as an expert-designed model. \go{\texttt{Bonito\_CRF}'s super high accuracy} (\gp) model is an RNN-based basecaller that provides more accuracy than \gpf at the expense of a \go{much larger} model. \sr{We compare} the \sr{overall} basecalling \sr{throughput} \sr{of} \mech with \sr{that of the} baseline basecaller\sr{s} in terms of basecalling accuracy, model parameters, and model size in Figure~\ref{supfig:model_compare_all}(a), \ref{supfig:model_compare_all}(b), and \ref{supfig:model_compare_all}(c), respectively.
+
+
+ \begin{figure}[h]
+ % \yboxbegin
+  \centering
+  \includegraphics[width=1\linewidth]{images/2023.11.01.model_compare_pareto_all_1.pdf}%{images/model_compare_AMD_CRF_SUP_1.pdf}
+  \vspace{-5pt}
+ \captionof{figure}{Comparison of \hc{average} basecalling  throughput for \mechmp with baseline basecaller in terms of:  (a) average  basecalling accuracy, (b) model parameters, and (c) model size.}
+  \label{supfig:model_compare_all}
+%   \vspace{-12pt}
+% \yboxend
+\end{figure}
+ \input{tables/model_compare.tex}
+In addition to our previous observations from Figure~\ref{fig:model_compare}, we make three new observations from Figure~\ref{supfig:model_compare_all} and Table~\ref{suptab:compare}. \go{First, \mechmp has \rmpSpeedupSUP the performance of the highly-accurate  \gp.} \Copy{IR3.5}{\hgb{\mbox{\mechmp} is the only basecaller that provides both higher performance and accuracy \ogb{when compared to all the other evaluated basecallers}.}}
+ %First, compared to \mechmp,  \gp provides 2.96\% more accuracy at the cost of 9.27$\times$ lower basecalling throughput.  
+ Second, \gp uses 7.52$\times$,	36.96$\times$,	2.77$\times$, 2.74$\times$, 36.96$\times$, and	8.14$\times$ model parameters leading to a model size of 7.53$\times$,	36.93$\times$,	2.77$\times$, and	19.22$\times$ compared to \cc, \gpf, \bon, \sac, \dor and \mechmp, respectively. Third, \gp is 5.37\% more accurate than its throughout-optimized version, \gpf, which provides up to 13.02$\times$ higher basecalling performance.  We conclude that the high accuracy of a basecaller comes at a substantial cost in terms of lower throughput due to the higher number of model parameters and model size.
+
+
+% \clearpage
+
+% \end{document}
+
+\Copy{CC2/1}{
+\section{\hgb{Evaluation on Other Hardware Platforms}}
+\label{suppsec:other_platforms}
+\hgb{We also evaluate the performance of  \mech and all the other basecallers on NVIDIA A40~\mbox{\cite{a40}} GPU with 48GiB DRAM and AMD EPYC 7442~\mbox{\cite{amdEPYC}} 24-Core with 256GiB DRAM. Compared to the AMD MI210~\mbox{\cite{mi210}}, the NVIDIA A40 has a 1.65$\times$ higher peak compute performance while maintaining a 2.35$\times$ lower peak memory bandwidth. 
+
+We make two major observations from Figure~\mbox{\ref{fig:model_compare_nvidia}}. First, \mbox{\mechmp} on AIE consistently outperforms A40 by 502.52$\times$, 14.67$\times$, 104.14$\times$, 111.25$\times$, 45.61$\times$, and 3.19$\times$ higher performance compared to \cc, \gpf, \bon, \sac, \mechfp, and \dor, respectively. Second, for compute-bound basecallers, A40 provides 1.23$\times$, 1.18$\times$, and 1.09$\times$ higher performance than AMD MI210 (Figure~\ref{fig:perf}) for \bon, \dor, and \mechfp, respectively. \ogb{For} memory-bound basecallers,  A40 provides 1.38$\times$, 1.03$\times$, and 1.36$\times$ lower performance for \cc, \gpf, and \sac, respectively. We conclude that \mbox{\framework} provides \ogb{benefits} across \ogb{multiple hardware} platforms.}}
+\yboxbegin
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\linewidth]{images/2023.11.01_basecalling_speed_nvidia_1.pdf}%{images/model_compare_AMD_CRF_1.pdf}
+  % \vspace{-15pt}
+    \captionof{figure}{Performance comparison of \mech (using floating-point precision (\mechfp) and mixed-precision (\mechmp))~\sr{and five state-of-the-art basecallers on NVIDIA A40~\cite{a40}. The y-axis is on a logarithmic scale.}}
+  \label{fig:model_compare_nvidia}
+%   \vspace{-12pt}
+\end{figure}
+\yboxend
+ % 
+
+ \Copy{IR3.9}{\hgb{
+\section{Analysis of Mapped Reads and Mapped Bases}
+\label{suppsec:read_lenght_analysis}
+Table~\ref{tab:read_length_analysis} shows the average read length, the overall number of mapped reads, the number of mapped bases, and the ratio of mapped bases to the mapped reads. Our goal is to evaluate the tools in terms of the read lengths they can generate and the alignable fraction of these reads to their corresponding reference genomes. We make three key observations.
+First, we find that the average read lengths are similar across different basecallers for each dataset, except \cc for the human genome. This indicates that the substantial differences in read length are unlikely to influence the ratio of mapped bases to the number of mapped reads, while the number of alignable sequences within each read and the number of mapped reads can have the main effect on such a ratio.
+Second, we find that basecallers provide a similar number of mapped reads and the ratio of mapped bases to the mapped reads for each dataset, except \cc for the human genome. These similarities mainly indicate that the unalignable reads and the unalignable regions within each read are likely to be similar across basecallers, leading to similar ratios of mapped bases to mapped reads when mapping reads with similar average read lengths. 
+Third, we find that \cc provides exceptions for the human genome in terms of the average read length and the mapped bases to the mapped reads ratio. This is mainly because \cc fails to basecall all raw signals for the human genome and provides a subset of basecalled reads that other basecallers generate, leading to inaccurate analysis overall.
+We conclude that almost all basecallers, except \cc, generate reads with similar average read lengths and reads with similar alignable regions, although these similarities differ by certain percentages' as we discuss in Section~\ref{subsubsection:down_read_mapping}.
+}}
+
+\include{tables/read_mapping_compare}
+
+ \Copy{IR3.6}{\ogb{
+\section{K-mer Counting Analysis}
+\label{suppsec:kmer_analysis}
+
+We analyze the occurrence of k-mer (i.e., substrings of length k) in a given sequence of basecalled reads and their assemblies in Figure~\ref{fig:kmer_reads} and Figure~\ref{fig:kmer_assembly}, respectively. We use BBMap~\cite{bbmap} to collect the number of unique k-mers and the frequency of each unique k-mer in a given sequence. During our analysis, we vary the value of k from 15 to 31. Based on our empirical analysis, we set the k value for our evaluated bacterial species to 15, where we observe distinct peaks of unique k-mers. We do not perform k-mer frequency analysis for the human genome due to the low coverage of the human genome in our experiments. %We do not show k-mer frequency for the human genome as we did not observe any distinct peaks in the k-mer frequency distribution. This absence of a distinct peak could be attributed to the low coverage of the human genome for our experiments (i.e., 3$\times$). 
+We make the following two observations from Figure~\ref{fig:kmer_reads} and Figure~\ref{fig:kmer_assembly}. First, \mech has distinct peaks for all the evaluated species, often matching the k-mer composition generated from \bon. Second, \gpf and \dor generate similar k-mer compositions as they both have the same neural network architecture.
+% Third, the peak of \mech is later on the x-axis for both read and assembly than baseline basecallers.
+
+\yboxbegin
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=1\linewidth]{images/k-mer_freq_reads1.pdf}%{images/model_compare_AMD_CRF_1.pdf}
+  % \vspace{-15pt}
+    \captionof{figure}{K-mer frequency analysis of generated reads from \mech and all the other evaluated basecallers.}
+  \label{fig:kmer_reads}
+%   \vspace{-12pt}
+\end{figure}
+\yboxend
+
+
+\yboxbegin
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=1\linewidth]{images/k-mer_freq_assembly1.pdf}%{images/model_compare_AMD_CRF_1.pdf}
+  % \vspace{-15pt}
+    \captionof{figure}{K-mer frequency analysis of generated assemblies of reads from \mech and all the other evaluated basecallers.}
+  \label{fig:kmer_assembly}
+%   \vspace{-12pt}
+\end{figure}
+\yboxend
+Table~\ref{tab:kmer_compare} presents an analysis of k-mer frequencies in the raw reads and the corresponding assemblies. We include common sequences and read-to-assembly ratios to provide a comprehensive view of the similarities and disparities in sequence representation, aiding in assessing data quality and the performance of the assembly algorithms. We observe that the k-mers identified as over-represented in the assemblies are mainly observed as over-represented k-mers in read sets for most basecallers. These over-represented k-mers are likely to appear due to the particular repetitive regions of each genome, making k-mers appear a larger amount of times for these regions. Therefore, there is potentially no additional insertion or depletion of these k-mers during the assembly process.
+}
+}
+\input{tables/kmer_compare}
+
+
+\let\noopsort\undefined
+\let\printfirst\undefined
+\let\singleletter\undefined
+\let\switchargs\undefined
+% \let\citex\undefined
+
+% \bibliographystylesupp{IEEEtran}
+% \bibliographysupp{ref}

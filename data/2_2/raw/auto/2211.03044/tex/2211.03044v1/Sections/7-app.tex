@@ -1,0 +1,122 @@
+
+\section{GLUE Tasks}
+\label{app:glue}
+We provide the details of the seven classification tasks included in the GLUE benchmark.
+
+\textbf{MNLI:} Multi-genre Natural Language Inference~\citep{MNLI} requires predicting whether a given premise sentence entails, contradicts or neutral with respect to a given hypothesis sentence. 
+
+\textbf{QQP:} Quora Question Pairs~\citep{QQP} requires judging whether a pair of questions asked are semantically equivalent.
+
+\textbf{QNLI:} Question Natural Language Inference requires predicting whether a given sentence contains the answer to a given question sentence.
+
+\textbf{SST-2:} Stanford Sentiment Treebank~\citep{SST-2} requires determining if a movie review has positive or negative sentiment. 
+
+\textbf{CoLA:} Corpus of Linguistic Acceptability~\citep{COLA} requires determining whether a given sentence is linguistically acceptable or not. 
+
+\textbf{RTE:} Recognizing Textual Entailment~\citep{RTE-5,RTE-1,RTE-3,RTE-2} requires predicting whether a given premise sentence entails a given hypothesis sentence or not.
+
+\textbf{MRPC:} Microsoft Research Paraphrase Corpus~\citep{MRPC} requires predicting whether two sentences are semantically equivalent or not.
+
+
+\section{Implementation Details}
+\label{app:impl_details}
+\input{Tables/full_prompts}
+
+\paragraph{Details of Initialization Prompts Used for Generator Tuning on Different Tasks.}
+
+For generator tuning, we find it beneficial to initialize the prefix vectors with task-descriptive prompts, and the prefix lengths (\ie, number of trained prefix token positions) are equal to the number of tokens in the prompts.
+We present details about the prompts used for initializing the prefix vectors for different tasks in Table~\ref{tab:full_prompts}.
+For sequence-pair tasks, an additional infix prompt is used between the two sequences,
+and we also tune the embeddings of the infix (\ie, prompt-tuning~\citep{Lester2021ThePO}) for generator training.
+
+
+% For SST-2, we fix the beginning of the generated sequence $\bs{x}^g$ to be ``The/this film/movie'' to make sure the generated texts are related to movie reviews.
+
+% For CoLA, we start the generated sequence $\bs{x}^g$ with a random stop word.
+
+\paragraph{Details of Generator Tuning.}
+In Algorithm~\ref{alg:meta}, we use SGD with $2e-2$ as the learning rate for the first gradient update (\ie, optimizing $\hat{\theta}_{p}^{(t)}\left(\omega^{(t)}\right)$); we use SGD with $1e-2$ as the learning rate for the second gradient update (\ie, optimizing $\omega^{(t+1)}$); we use Adam~\citep{Kingma2015AdamAM} with $5e-3$ as the learning rate for the third gradient update (\ie, optimizing $\theta_{p}^{(t+1)}$).
+We set batch size to be $2$ and training epoch to be $20$.
+
+\paragraph{Details of Generating Training Data.}
+\input{Tables/gen_hyperpara}
+Following~\cite{Meng2022GeneratingTD}, for sequence-pair tasks (MNLI, QQP, QNLI, RTE and MRPC), we randomly sample the first sequence from the pretraining corpus (\eg, Wikipedia) and use greedy sampling for generating the second sequence.
+For single-sequence tasks (SST-2 and CoLA), we use top-$k$ sampling with temperature to generate training data from scratch where $k=10$.
+For all tasks, we generate $5,000$ samples per label.
+
+For SST-2, we use one of the following tokens to start generation: ``a'', ``one'', ``the'', ``this'', ``that'', ``i'', ``you'', ``it'', ``what''. 
+For CoLA, we use a random stop word to start generation.
+
+We apply repetition penalty~\citep{Keskar2019CTRLAC} to the logits of tokens that have already appeared in the sequence.
+Overall, the token probability distribution is post-processed as follows before conducting sampling:
+\begin{align*}
+\label{eq:penalty}
+p_{\theta}(x_i|\bs{x}_{<i}) &= \frac{\exp(\bs{e}_i^\top \bs{h}_i/\omega)}{\sum_{j=1}^{|V|}\exp(\bs{e}_j^\top \bs{h}_i/\omega)}, \\  \omega &= \begin{cases}
+\tau \alpha & x_i \in \bs{x}_{<i} \\
+\tau & \text{else}
+\end{cases},    
+\end{align*}
+where $\tau$ is the temperature hyperparameter, and $\alpha$ is the repetition penalty hyperparameter.
+For labels that favor token repetitions between the first and the second sequences (\eg, paraphrase or entailment), we set $\alpha$ to be a smaller value (\eg, $1.0$), and vice versa.
+
+The hyperparameter values for training data generation on all tasks can be found in Table~\ref{tab:gen_hyperpara}.
+
+
+\paragraph{Hyperparameters for Fine-Tuning Classifier PLMs.}
+% \input{Tables/finetune_hyperpara}
+% Table~\ref{tab:finetune_hyperpara} lists the hyperparameters used in the fine-tuning stage.
+For fine-tuning on the few-shot training samples $\mathcal{D}_{\text{train}}$, we search among the following hyperparameter ranges based on development set ($\mathcal{D}_{\text{dev}}$) model performance and pick the best performing model for futher fine-tuning on synthesized data:
+Learning rate in $[1e-5, 2e-5]$ and batch size in $[4, 8]$. The number of training steps is fixed to be $1000$. We also find it beneficial to apply label smoothing (smoothing weight set to $0.15$) for fine-tuning on the few-shot training set.
+
+For fine-tuning on the synthesized training samples $\mathcal{D}_{\text{gen}}$,
+we use the following hyperparameters:
+$5e-6$ as the learning rate; $16$ as the batch size; label smoothing weight $\epsilon = 0.15$ ; temporal ensemble momentum $\gamma = 0.9$; temporal ensemble loss weight $\lambda = 20$; training steps $T = 6,000$.
+
+\paragraph{Details of Temporal Ensembling for Fine-Tuning Classifier PLMs on Synthetic Data.}
+
+We update ensembled predictions $\bar{\bs{z}}$ as follows where $\bs{p}_{\phi}$ is the current model prediction, $\gamma$ is the momentum parameter, $\hat{\bs{z}}$ is the accumulated model prediction before bias correction, $\bar{\bs{z}}$ is the accumulated model prediction after bias correction, and $t$ is the number of updates $\bar{\bs{z}}$ has received:
+\begin{equation*}
+\label{eq:udpate_ens}
+\hat{\bs{z}} \gets \gamma\hat{\bs{z}} + (1-\gamma)\bs{p}_{\phi}, \, \bar{\bs{z}} \gets \hat{\bs{z}}/(1-\gamma^t).
+\end{equation*}
+The accumulated model prediction $\hat{\bs{z}}$ has a zero initialization;  the division $(1-\gamma^t)$ is for bias correction~\citep{Laine2017TemporalEF}.
+After each update of $\hat{\bs{z}}$, it will be compared to a threshold value $\delta$; each synthesized sample $(\tilde{\bs{x}}, \tilde{y})$ will be included in training only if $\bar{z}_{\tilde{y}} > \delta$.
+
+We update the ensembled predictions $\bar{\bs{z}}$ on all samples in $\mathcal{D}_{\text{gen}}$ every $200$ steps, and set the threshold value for sample filtering $\delta = 0.8$.
+
+% \paragraph{Computation Environment.} 
+% All experiments are conducted on NVIDIA GeForce RTX 3090 GPUs. 
+% \method can be run on typical research hardware (\eg, with $>10$GB GPU memory). The generator PLM $G_\theta$ does not need to be trained so a relatively large generator can be used (\eg, a $1.63$B-parameter CTRL model).
+\paragraph{Computation Environment.}
+The experiments are conducted on NVIDIA A100 GPUs.
+
+
+\section{Data Augmentation Baseline Details}
+\label{app:aug_baselines}
+
+\paragraph{Details About Back Translation.}
+We use two trained Marian~\citep{mariannmt} models to perform data augmentation via back translation. 
+We translate our labeled examples from English to French, and then back to English. As in UDA~\citep{Xie2020UnsupervisedDA}, we 
+employ random sampling with a tunable temperature to generate a diverse set of derivative examples. We generate $32$ 
+examples from each few-shot training example and let the synthesized samples share the same label with the original few-shot training sample. 
+After combining with the original examples,
+we fine-tune the classifier and observe performance.
+
+
+\paragraph{Details About GPT3Mix~\citep{Yoo2021GPT3MixLL}.}
+\input{Tables/gpt3mix_prompt}
+We use the $175$B GPT3 model for generating the augmentations. 
+For creating each augmentation, we randomly sample $k=4$ (the optimal setting according to GPT3Mix) examples from the few-shot training set as demonstrations.
+The prompts follow the suggested format proposed in the original paper~\citep{Yoo2021GPT3MixLL} and are shown in Table~\ref{tab:gpt3mix_prompt}.
+We create $5,000$ augmented samples per label to make the resulting training set size equal to that of \method. After obtaining the augmented examples and their pseudo labels (the probability predictions over all labels by GPT3), we use them along with the real few-shot samples for fine-tuning the classifier, following the setting in GPT3Mix~\citep{Yoo2021GPT3MixLL}.
+
+\paragraph{Details About Standard Generator Fine-Tuning.}
+We fine-tune the same $1.6$B CTRL~\citep{Keskar2019CTRLAC} model as used in \method with the standard maximum likelihood objective. Different from previous studies~\citep{AnabyTavor2020DoNH,Kumar2020DataAU} that prepend categorical labels to the training samples, we enhance the generator fine-tuning with label-descriptive prompts (shown in Table~\ref{tab:full_prompts}) used in \method.
+We create $5,000$ augmented samples per label to make the resulting training set size equal to that of \method.
+
+\input{Figs/visualize}
+\section{Visualization of Token Weight Learning}
+\label{app:vis}
+To gain intuitive understanding of what tokens are assigned more weight during generator tuning, we visualize the learned weights in Fig.~\ref{fig:vis}.
+The tokens with higher weights (\eg, ``weak'' in the first example and ``hates'' in the second example) are learned to be important tokens that decide the relation of the second sentence to the first sentence (\ie, the label of the training sample).
+With such tokens emphasized during training, the generator is encouraged to capture label-discriminative information that facilitates the generation of unambiguous training samples.

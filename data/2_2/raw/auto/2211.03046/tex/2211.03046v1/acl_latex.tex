@@ -1,0 +1,653 @@
+% This must be in the first 5 lines to tell arXiv to use pdfLaTeX, which is strongly recommended.
+\pdfoutput=1
+% In particular, the hyperref package requires pdfLaTeX in order to break URLs across lines.
+
+\documentclass[11pt]{article}
+
+% Remove the "review" option to generate the final version.
+\usepackage[]{acl}
+
+% Standard package includes
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage{upgreek}
+\usepackage{multirow}
+
+\usepackage{graphicx}  %插入图片的宏包
+\usepackage{float}  %设置图片浮动位置的宏包
+\usepackage{subfigure}  %插入多图时用子图显示的宏包
+
+
+
+
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{booktabs}
+\usepackage{epsfig}
+\usepackage{multicol}
+\usepackage{multirow}
+\usepackage{mathtools}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{makecell}
+
+
+
+
+% For proper rendering and hyphenation of words containing Latin characters (including in bib files)
+\usepackage[T1]{fontenc}
+% For Vietnamese characters
+% \usepackage[T5]{fontenc}
+% See https://www.latex-project.org/help/documentation/encguide.pdf for other character sets
+
+% This assumes your files are encoded as UTF8
+\usepackage[utf8]{inputenc}
+
+% This is not strictly necessary, and may be commented out,
+% but it will improve the layout of the manuscript,
+% and will typically save some space.
+\usepackage{microtype}
+
+% If the title and author information does not fit in the area allocated, uncomment the following
+%
+%\setlength\titlebox{<dim>}
+%
+% and set <dim> to something 5cm or larger.
+
+\title{Knowledge is Power: Understanding Causality Makes Legal judgment Prediction Models More Generalizable and Robust}
+
+% Author information can be set in various styles:
+% For several authors from the same institution:
+% \author{Author 1 \and Author1 \and Author n \\
+%         Address line \\ ... \\ Address line}
+% if the names do not fit well on one line use
+%         Author 1 \\ {\bf Author 2} \\ ... \\ {\bf Author n} \\
+% For authors from different institutions:
+% \author{Haotian Chen {\bf Lingwei Zhang}  {\bf Lingwei Zhang}  {\bf Lingwei Zhang}\\ Address line \\ ... \\ Address line}
+
+\author{Haotian Chen\textsuperscript{1}, Lingwei Zhang\textsuperscript{2}, Fanchao Chen\textsuperscript{1}, Yang Yu\textsuperscript{3}\\
+\textsuperscript{1}Fudan University\\
+\textsuperscript{2}Johns Hopkins University\\
+\textsuperscript{3}Tsinghua University\\
+{\tt\small \{htchen18, chenfc18\}@fudan.edu.cn,}\\
+{\tt\small lzhan218@jh.edu, yangyu1@mail.tsinghua.edu.cn}
+}
+
+
+% To start a seperate ``row'' of authors use \AND, as in
+% \author{Author 1 \\ Address line \\  ... \\ Address line
+%         \AND
+%         Author 2 \\ Address line \\ ... \\ Address line \And
+%         Author 3 \\ Address line \\ ... \\ Address line}
+
+% \author{First Author \\
+%   Affiliation / Address line 1 \\
+%   Affiliation / Address line 2 \\
+%   Affiliation / Address line 3 \\
+%   \texttt{email@domain} \\\And
+%   Second Author \\
+%   Affiliation / Address line 1 \\
+%   Affiliation / Address line 2 \\
+%   Affiliation / Address line 3 \\
+%   \texttt{email@domain} \\}
+
+% \author{Haotian Chen \\Fudan University  \\\And
+%  Lingwei Zhang \\Johns Hopkins University  \\\And
+%  Fanchao Chen \\Fudan University  \\\And
+%  Yang Yu \\Tsinghua University \\}
+  
+% \author{Haotian Chen \\Fudan University \\\texttt{email@domain} \\\And
+%  Lingwei Zhang \\Johns Hopkins University \\\texttt{lzhan218@jh.edu} \\\And
+%  Fanchao Chen \\Fudan University \\\texttt{email@domain} \\\And
+%  Yang Yu \\Tsinghua University \\\texttt{yangyu1@mail.tsinghua.edu.cn} \\}
+
+
+
+% 
+\begin{document}
+\maketitle
+\begin{abstract}
+Legal judgment Prediction (LJP), aiming to predict a judgment based on fact descriptions, serves as legal assistance to mitigate the great work burden of limited legal practitioners. Most existing methods apply various large-scale pre-trained language models (PLMs) finetuned in LJP tasks to obtain consistent improvements. However, we discover the fact that the state-of-the-art (SOTA) model makes judgment predictions according to wrong (or non-casual) information, which not only weakens the model's generalization capability but also results in severe social problems like discrimination. Here, we analyze the causal mechanism misleading the LJP model to learn the spurious correlations, and then propose a framework to guide the model to learn the underlying causality knowledge in the legal texts. Specifically, we first perform open information extraction (OIE) to refine the text having a high proportion of causal information, according to which we generate a new set of data. Then, we design a model learning the weights of the refined data and the raw data for LJP model training. The extensive experimental results show that our model is more generalizable and robust than the baselines and achieves a new SOTA performance on two commonly used legal-specific datasets. 
+\end{abstract}
+
+
+
+
+% AI到底是不是像人那样，如果不是，那是哪样？我们提出一种方案，叫adversarial，它的逻辑是两重。第一，哪个地方对哪个地方起作用，高维空间起作用的点，怎么找。第二，adversarial变化前后，找因果关系。结论：这篇文章中有一些专门的点在起作用【特点是什么】，而不是整篇文章都在起作用。
+% gradient是因，y是输出，截断：求期望讨论的是神经元或者参数层对y的影响，单个样本讨论是词的影响。X有异质性，gradient不同local的时候不一样。
+
+% 正文
+\section{Introduction}
+Understanding why is critical for Legal judgment prediction (LJP) models, which determines whether the legal artificial intelligence (legal AI) yields to the rule of law or to the rule of correlation. LJP is a crucial task of legal AI. A LJP model aims at assisting the legal practice by predicting the judgment of a certain case (e.g., charge, term of penalty, or law article) according to the corresponding case fact descriptions~\cite{zhao2022legal,cui2022survey}. In contrast to other natural-language processing tasks, the LJP model must correctly learn the reasons behind each case rather than only make predictions. Rule of law defines the uniform principles and protocols for all judgments in a country. Every judgment must have a clear reasoning process that can cite back to the rules in the laws. Therefore, there exists a stable and uniform common ground-truth knowledge underlying all judgment cases. If a LJP model is legitimated to be adopted for legal practice, it has to learn the common ground-truth knowledge. Otherwise, the judgment prediction is invalid even if it is accurate when fitting the historical cases. To sum up, only by learning rules of law represented by common ground causality, can models perform better, achieve more robustness, and be trustworthy. %Judges make the judgments based on rules of law (law articles), which can also be referred to as a certain kind of causal mechanism. Therefore, learning the underlying common ground knowledge (causality) in training data is the desiderata w.r.t. AI for law. 
+
+\begin{figure}
+  \centering
+  \includegraphics[width=1.0\linewidth]{pictures/intro1.png}
+  \caption{An example of reversed prediction caused by character substitution.}
+  \label{fig:0}
+\end{figure}
+
+However, we found clues that the commonly adopted state-of-art LJP model misunderstands the data and learn the spurious correlations. The current LJP model can make right predictions according to wrong reasons, which has not been reported yet. In Figure~\ref{fig:0}, we provide an example, where the prediction of Legal-BERT is reversed by a small change that does not cause an essential semantic change. Further, we discovered that the most important keywords deciding the model predictions mainly concentrated on punctuation marks. A large number of predictions only rely on less than three words rather than considering the whole text as shown in Figure~\ref{level}. All the evidence indicates that the current LJP models learned shortcuts rather than the common ground-truth knowledge about the rules of the laws~\cite{geirhos2020shortcut}. 
+
+\begin{figure*}
+  \centering
+  
+  \includegraphics[width=1.0\linewidth]{pictures/12.png}
+  \caption{Causal model of spurious correlation error}
+  \label{level}
+\end{figure*}
+
+
+Predicting without understanding not only hurts the trusts on the LJP models, but also weakens those models' generalization capabilities and robustness. If the model does not learn the ground-truth knowledge underlying the cases but overfits for spurious correlations, the model is hard to work well in another dataset that has different writing patterns~\cite{cui2022stable}. Relying on spurious information also made the model more vulnerable under adversarial attacks. If the irrelevant features are modified (attacked), models will largely change their predictions, which brings severe social problems. 
+
+%这里我们提出了方法来解决问题。这个问题的挑战是什么。我们是怎么解决的。
+
+%The phenomenon results in two consequences w.r.t. existing models: performance decline and being vulnerable to attacks. The underlying causes of the former is that the process of learning spurious correlations can be referred to as shortcut learning~\cite{geirhos2020shortcut}, where the learned shortcuts can not replace the common ground causalities and are demonstrated to damage the generalization ability of models. The damage worsens especially when the distribution of some test samples shifts significantly from the training data~\cite{cui2022stable}. The reason why models can be vulnerable to attacks is that the biased decision rules of models (distorted rules of law such as shortcuts) become the source of vulnerabilities.  
+
+
+
+%In the current popular paradigm where models are required to directly learn from the sampled training data, models can suffer from overfitting: Models wrongly learn to predict based on the data-specific spurious features which is referred to as sampling bias. For example, X in CV, X in NLP ... As to existing models in LJP, we discover that they 
+
+In this paper, we theoretically analyze the mechanism how the nature of the data of legal-case texts leads the LJP model to learn spurious correlations. We further demonstrate that learning the spurious correlations makes the LJP models less generalizable and more venerable. We propose a method to mitigate misleading information in the process of training our proposed model. The extensive experimental results demonstrate that our model performs better for generalization and robustness than the baseline models and achieves a new SOTA performance on the two commonly used legal prediction datasets.
+
+
+
+
+% 正文 
+\section{Related Work}
+
+% 早期工作based on rules or statistical methods，后面machine learning methods，recently large-scale PLM based on transformer architecture.
+\paragraph{Legal Text Processing}
+Legal text processing, including legal judgment prediction (LJP), charge prediction, and legal file classification, is a long-standing task that has been studied for decades. Previous methods on legal text processing are based on rules~\cite{lawlor1963computers}, statistical methods~\cite{nagel1960weighting,keown1980mathematical}, or machine learning methods~\cite{katz2012quantitative,aletras2016predicting}, which suffers from being sensitive to noises and lacking generalization ability w.r.t. other law domains. Recently, the rapid development of large-scale pre-trained language models (PLMs) based on transformers significantly benefits this area~\cite{cui2022survey}. Some of the PLMs including BERT~\cite{devlin2018bert} are further pre-trained on legal corpora, such as Legal-BERT~\cite{chalkidis2020legalbert}, exhibiting the SOTA performance on legal text processing benchmarks (e.g., LexGLUE)~\cite{zheng2021when,chalkidis2022lexgluea}. However, in the meantime, some severe problems of models are also discovered, including unfairness and discrimination~\cite{chalkidis2022fairlex}. We take a step further towards diagnosing the problems by feature attribution, and then theoretically analyze the underlying causes. After that, we give our solution and finally demonstrate its effectiveness by extensive experimental results. 
+
+
+
+% 有的工作里认为structural information 是包含句法信息的句法树，有的认为是包含先验知识的知识库， 有的认为是论元之间的关联图，我们主要认为是去除了句中无用信息(removing less useful information) 的语义图。抽取得的图和PLM的先验知识结合时，别人都是PLM+图网，例如AGGCN，如果有多粒度的图结构的话还有GAIN，后面也有反对观点认为这样无效，然后有直接把图结构融入PLM的SSAN等，
+% 我们认为将word视作节点的话，transformer本身就具备了自适应计算边权和编码图信息的优秀能力，所以最好可以transformer去encode图，这样避免了异质embedding融合的问题，thanks to A and B，他们XXX，我们用graph linearization 把图文本化， 这样就可以直接用transformers编码得到consolidate的representation了。
+\paragraph{Infusing PLMs with Structural Information}
+Structural information includes syntax trees, knowledge bases (KBs), and graphs consisting of entities, arguments, and relations between them. We build the graphs for the purpose of removing less useful and reserving more important information in fact descriptions. Previous work infuse PLM with structural information by either applying graph neural networks (GNNs) after PLM encoders~\cite{zeng2020double}, converting graphs to adjacent matrices to mask some computations in attention mechanism of PLM~\cite{xu2021entity}, or finetuning PLM on the sentences supervised by KBs~\cite{zhang2019ernie}. However, \citet{shao2020graph} argue that the transformer itself is able to process the structural information. To utilize the ability of the transformer and avoid the discrepancy caused by merging heterogeneous information (text and graphs), we perform graph linearization to convert graphs to texts, and then employ a transformer to encode it. 
+
+
+% Feature attribution (FA) aims to assess the influence of input features on model predictions, which facilitates a lot of work in interpreting model decisions~\cite{simonyan2019deep,sundararajan2017axiomatic}. In NLP, they usually calculate a score for each input token to indicate its contribution to the model prediction. Recent years have witnessed the consistent development of attribution methods. Current methods can be roughly classified into three categories: gradient-based methods which calculates score for input features according to gradients~\cite{simonyan2019deep,springenberg2015striving,li2016visualizinga}, reference-based methods which considers the difference between the output of model and ``reference'' as the attribution score~\cite{ribeiro2016why,shrikumar2017learning,sundararajan2017axiomatic}, and erasure-based methods which obtains the score by measuring the change of model prediction after removing target features~\cite{zeiler2014visualizinga,li2016visualizinga,feng2018pathologies,chen2020generating}. FA methods are employed to interpret model predictions and have a wide range of applications which will be discussed in the next paragraph. To the best of our knowledge, this is the first work introducing FA to document-level RE for quantifying language understanding and reasoning capabilities of SOTA models.
+% BERT-ATTACK
+% \paragraph{Feature Attribution}
+
+
+
+
+
+
+% 我们通过实验发现了一些非因果信息和模型预测结果之间的spurious联系，我们在这部分尝试从理论层面分析造成这一现象的原因。就训练数据而言，我们理想的训练数据是从目标域随机采样的数据，数据中存储了信息，我们通过抽样出的数据（data-driven方法）来优化和学习一个使得数据映射关系成立概率最大的estimator。但是，在抽样的过程中无法做到随机，扭曲了信息，引入了sampling偏差。又因为机器学习模型最终学到的是输入变量和输出变量之间的线性或非线性的correlation，这是学习算法的统计基础~\cite{cui2022stable}。在这样的bias上训练模型，就使得偏差造成的spurious联系被模型学习到了。我们将分段介绍相关理论细节。
+
+% 首先，我理论里面说，legal这边ground-truth，我们期望的样子是什么，就是结合例子法官判一个XX例子的案子，需要结合因果信息，就是举例证实法律这件事上该学的因果图是C到Y。
+\section{Causal Model of Spurious Correlation Error in LJP}
+
+%In this section, we discuss how non-causal information makes model sensitive to the attacks and also results in generalization ability decline from the perspective of causality. Furthermore, we explain the reason why we need to learn causal information by block the effect of non-causal information on fact descriptions.
+
+
+Here, we propose a causal-network model to explain the generation of spurious correlation errors in the LJP model. The explanation further manifests the dynamic that the spurious correlation error weakens the LJP model's generalization capability as well as its robustness. Causal-network model~\cite{pearl2009causal} represents the causal relations between variables by a directed acyclic graph (DAG). The causal-network model denotes the random variables as nodes while their causal relationships as the directed edges. Literature demonstrated that the same DAG also captures the conditional correlations between the same set of random variables. For example, we denote the fact that $X$ directly causes $Y$ by $X \rightarrow Y$. If $X$ is the common cause of both $Y$ and $Z$, the latter two variables are independent given $X$. %Causal relationships reflect the intrinsic dependency among variables, which remains invariant across different environments. The definitions help us derive the structural causal model of LJP. 
+
+The rules of law define a basket of causal relations between the facts of the criminal cases and the associated judgments. Because all judges have to follow the rules, the judgment cases in the same country must have a stable relation between the facts and the judgments no matter the variance of judges. Therefore, we call those pieces of information about the facts deciding the judgments as the causal information $C$. While a judge prepares the case description $T$, she has to explain the relation between the facts and the judgment $Y$. Beyond, $T$ is also contingent on other features denoted by $N$, such as the grammar principle and individual writing patterns. The features of $N$ do not influence the judgment $Y$ in the ground truth and are denoted as non-causal information. Due to the grammar requirements and other reasons, $N$ and $C$ can be correlated with each other. We model the above causal relation in Figure~\ref{level}(a). According to the rules of law, $N$ has to be independent of $Y$. %To make a fair prediction according to the corresponding fact, a judge is expected to find the causal information w.r.t. the final decisions (e.g., deciding which articles are violated according to the corresponding fact description), which is depicted in Figure~\ref{}. 
+For example, for a fact description $T$ expressed by \textit{Bob, a 47 years old European white male, robbed Alice of her car.}, a court will make the judgment that Bob commits a robbery, regardless of the gender, race, region, or age of Bob. In this case, the event description \textit{Bob robbed Alice of her car} includes the causal information $C$ while the demographic information of Bob, as well as the usage of the function words, are non-causal information $N$. The usage of the function words, which is a part of $N$, can correlate with the texts including $C$. 
+
+
+%In most situations, we only have access to the fact descriptions including causal information. Formally, we use $P(Y|T)$ to estimate $P(Y|C)$, which is explained by Figure~\ref{}. Causal information decides its corresponding descriptions, which is represented by $C \rightarrow T$. Non-causal information such as gender, region, age, and even syntax of fact descriptions --- different legal assistants can adopt different combinations of function words or high frequency words to write down the facts --- causally affect the context of fact descriptions, which is described by $N \rightarrow T$. In few cases, causal and non-causal information can depend on each other (e.g., in the phrase \textit{rob somebody of something},`rob' and `of' depend on each other), according to Figure~\ref{}, we can derive that given $C$, two variables $Y$ and $N$ are unconditionally independent ($Y \perp \!\!\! \perp N | C$). 
+
+% \begin{figure}
+%   \centering
+%   \includegraphics[width=0.45\linewidth]{pictures/causal.png}
+%   \caption{graph}
+%   \label{fig:1}
+% \end{figure}
+
+% \begin{figure*}
+%   \centering
+%   \includegraphics[width=1.0\linewidth]{LaTeX/pictures/draft.pdf}
+%   \caption{graph}
+%   \label{fig:1}
+% \end{figure*}
+
+
+
+
+
+% \begin{figure*}
+% 	\centering 
+% 	\vspace{-0.35cm} %设置与上面正文的距离
+% 	\subfigtopskip=5pt %设置子图与上面正文或别的内容的距离
+% 	\subfigbottomskip=5pt %设置第二行子图与第一行子图的距离，即下面的头与上面的脚的距离
+% 	\subfigcapskip=0pt %设置子图与子标题之间的距离
+% 	\subfigure[Ground truth causal relationships.]{
+% 		\label{level.sub.1}
+% 		\includegraphics[width=0.3\linewidth]{LaTeX/pictures/causal1.png}}
+% 	\quad %默认情况下两个子图之间空的较少，使用这个命令加大宽度
+% 	\subfigure[Spurious correlation error learned by models.]{
+% 		\label{level.sub.2}
+% 		\includegraphics[width=0.3\linewidth]{LaTeX/pictures/causal3.png}}\vskip
+% 	  %这里是空了一行，能够实现强制将四张图分成两行两列显示，而不是放不下图了再换行，使用\\也行。
+% 	\subfigure[Selection bias]{
+% 		\label{level.sub.3}
+% 		\includegraphics[width=0.3\linewidth]{LaTeX/pictures/causal2.png}}
+% 	\quad
+% 	\subfigure[The exacerbated spurious tie.]{
+% 		\label{level.sub.4}
+% 		\includegraphics[width=0.3\linewidth]{LaTeX/pictures/causal4.png}}
+% 	\caption{Causal model of spurious correlation error.}
+% 	\label{level}
+% \end{figure*}
+
+
+
+\subsection{The origin of spurious correlation error in LJP model}
+Models learn the correlation relationships among variables, which can be generated in either of the three ways: causality, confounding, and data selection bias~\cite{cui2022stable}. Only the correlations generated by causality are what we expect the models to learn from. For example, in Figure~\ref{level}(a), the correlation effect between $C$ and $Y$ learned by models equals to causal effect, which faithfully reflects their intrinsic dependency. Correlations generated in other two ways are often referred to as spurious correlations. In the following paragraph, we explain how spurious correlations are generated. 
+
+The aim of the current LJP model is to learn the rules of laws encoding $P(Y|C)$ from the data set of case description $T$. However, there exist two mechanisms that can mislead the learning of the statistic LJP model. We call the first mechanism the error of self-learning. The state-of-art models are trained to self-explore $P(Y|T)$, the correlation between $Y$ and $T$, rather than directly learning $P(Y|C)$ due to the difficulty of comprehensively figuring out $C$. Consequently, the learning process can lead the LJP model to learn the incorrect causal relation between $C$, $N$, and $Y$. The training can lead the model to converge to a suboptimal point that overfits $P(Y|T)$ by considering $N$ as another cause of $Y$ rather than the noise, shown as in Figure~\ref{level}(b). While parts of $N$ play the same role in both training and testing sets, the cross-validation can fail to exclude the overfitting effects. For instance, the grammar rules play the same role in all case descriptions. Statistic learning can overfit the relation between the information about grammar rules and the legal judgments for improving prediction accuracy. The phenomenon is represented in the right part of Figure~\ref{level}: In most situations (reflected by word frequency), the model makes predictions according to punctuation marks and function words.
+
+The second mechanism is called the error of selection bias. Usually, the raw data of case descriptions compose an imbalanced dataset of $C$, $N$, and $Y$. We use data-driven methods to train different models (estimators) for learning the correlation relationships between input variables and output variables~\cite{cui2022stable}. Consequently, the statistic learning model can incorrectly fit the correlations between those variables as shown in Figure~\ref{level}(c). For instance, male criminals can be penalized harder than female ones in robbery cases because the males are stronger and thus can cause more serious damages. However, the data imbalance can lead the LJP model to misunderstand the relation between gender and penalty decision in robbery cases. Consequently, the data imbalance will cause the statistic learning model to exacerbate the overfitting generated by the error of self-learning. The spurious tie between $N$ and $Y$ is exacerbated as shown in Figure~\ref{level}(d). 
+
+%Ideally, the training data of models are first randomly sampled from the target domain, and then information are stored in the sampled data. We use data-driven methods to train different models (estimators) for learning the correlation relationships between input variables and output variables~\cite{cui2022stable}. However, on one hand sampling itself distorts the original information about these variables, on the other hand randomly sampling is often impractical, both of which introduce sampling bias in the training data. For example, the bias can be exhibited in the form of ``Men are more likely to commit a robbery'', where gender variable is bias sampled. One of the consequences of sampling bias is that models will learn the spurious correlations from $T=f_D(C,N)$ reflected by the given data $D$, instead of the genuine correlation represented in Figure~\ref{}. In statistical learning, if the frequency of $N$ is high and $N$ often co-occurs with $C$, the spurious correlations between $N$ and $Y$ will worsen and be learned by learning algorithm.
+
+%Besides the distortion, the training data also suffer from selection bias (sampling bias). Ideally, the training data of models are first randomly sampled from the target domain, and then information are stored in the sampled data. We use data-driven methods to train different models (estimators) for learning the correlation relationships between input variables and output variables~\cite{cui2022stable}. However, on one hand sampling itself distorts the original information about these variables, on the other hand randomly sampling is often impractical, both of which introduce sampling bias in the training data. For example, the bias can be exhibited in the form of ``Men are more likely to commit a robbery'', where gender variable is bias sampled. One of the consequences of sampling bias is that models will learn the spurious correlations from $T=f_D(C,N)$ reflected by the given data $D$, instead of the genuine correlation represented in Figure~\ref{}. In statistical learning, if the frequency of $N$ is high and $N$ often co-occurs with $C$, the spurious correlations between $N$ and $Y$ will worsen and be learned by learning algorithm.
+% \perp \!\!\! \perp
+% \not \! \perp \!\!\! \perp
+%\paragraph{Ground Truth Conveyed by Data}
+
+
+
+
+
+% As to existing SOTA models (transformer-based large-scale PLM) on LJP, they make judgment predictions Y according to context inputs $T$, which consist of $C$ and $N$. The causal relation between these factors are depicted in Figure~\ref{fig:1}.
+%\paragraph{Principles of Models}
+
+
+
+% pearl2009causality,我们想让模型学P(Y|C)，但模型学的是P(Y|T)，这里的T决定了非因果信息是否被选择纳入data。如因果图所示，如果cd在T上，那就会引入N和T之间的虚假关联，这被refer to as collider。【给个collider的定义】 当给定T的时候，N和Y不独立。只有给定C的时候或者打断N到T的时候，模型学习的correlation才是causal。
+% 
+%\paragraph{Conditioning on a Collider}
+%As we desire models to learn $P(Y|T)$ to predict the judgment, that is $T \rightarrow Y$, $N$ is correlated with $Y$, which is described in Figure~\ref{level.sub.2}~\cite{bareinboim2014recovering,bareinboim2015recovering}. Meanwhile, any model conditioning on $T$ will causes two unconditionally independent variables $Y$ and $N$ to be dependent in any case, which indicates that more spurious correlation between $N$ and $C$ are introduced to make $N$ correlate with $Y$. The phenomenon is known as collider~\cite{pearl2009causality}. Specifically, given $T$, $N$ and $C$ is correlated; $C$ and $Y$ is correlated due to the intrinsic dependency (causal relationship) between them; then $N$ and $Y$ is correlated, which leads to spurious correlations. One of the example consequences is that models predict the charge of robbery according to the background of Bob instead of his behavior due to the spurious correlation between background information like gender and label ``robbery''. The spurious correlation between $N$ and $Y$ is also demonstrated by our experimental results, which will be discussed later in Section~\ref{spur corr}. 
+
+
+
+
+%To sum up, if we desire models to directly learn $P(Y|T)$, spurious correlations are generated. Given C, $N$ and $Y$ are still correlated. The ground truth where $C$ is able to d-separate $N$ and $Y$ is distorted in this paradigm. 
+
+% 由于不同判例数据中，C和N形成T的方式不一样的，比如不同法官的写作风格不同。因此虽然C到Y不会变，但是机器由于误会了训练数据中的NY关系，就会导致泛化能力变差。
+% 修改N就会改变判决结果，但实际上，N在真实情况下是和Y无关的
+\subsection{Generalization Ability and Robustness of Model under spurious correlation error}
+
+Learning spurious correlations can weaken the generalization ability of LJP models. Beyond the causal information, the non-causal information and the texts vary by judges and cases. For instance, the text of a legal case is contingent on the judge who is assigned to write the case description. The writing patterns of judges affect the functional relation between $N$ and $T$. Thus, if the LJP model incorrectly learns the spurious correlations between $N$ and $Y$ in the training set, the model can perform poorly in another set when the two sets have different writing patterns as well as different functional relations between $N$ and $Y$. However, due to rule of law, the relation between $C$ and $T$ is stable, if the LJP model correctly understands the reason of a judgment, the model can uniformly perform well in various data sets~\cite{cui2022stable}. 
+
+Learning spurious correlations can make the LJP model less robust. If the LJP model learns the spurious correlation, varying $N$ can lead to a change in the prediction results. However, in the ground truth, $N$'s variation must not affect $Y$ due to the principle of rule of law. 
+
+
+\begin{figure*}
+  \centering
+  
+  %\vspace{-1.0cm}
+  \includegraphics[width=1.0\linewidth]{pictures/model.png}
+  \caption{Overview of our framework}
+  \label{fig:4}
+\end{figure*}
+
+
+%same case can have different texts if it is assigned 
+
+%Thus, the functional relation from $N$ to $T$ varies across the dataset $D$. Thus, if the LJP model incorrectly learn the spurious correlation between $N$ and $Y$ in the training data set, the model cannot perform well in another data set when the two sets have different functional relation between $N$ and $Y$.
+
+%Thus, we represent the relation between the texts and the two types of information by $T=f_D(C,N)$. Although the causal effect of $C$ on $Y$ remains invariant across different settings, models can be misled by the spurious correlation between $N$ and $Y$ explained by $T$, thereby damaging the generalization ability of models. Specifically, existing black-box models hardly make any effort to differentiate the ways of generating correlations. One of the serious consequences is that the predictive performance of model will heavily depend on the extent to which the distribution of test set shifts from that of training set. When the shift becomes more significant, the learned spurious correlations which is predictive in the training data will no longer be applicable to the test set. Therefore, \citet{cui2022stable} set learning the common links across different environments as the training object to enhance the generalization ability of model, and theoretically demonstrate its effectiveness and necessity from both causality perspective and statistical learning perspective. In our case, instead of learning the underlying common ground, models are misled by spurious correlations which is theoretically demonstrated to result in the lack of generalization ability. 
+
+%Meanwhile, as models learn the spurious correlations between $N$ and $Y$, any modification on $N$ will influence the predictions of models. The consequence is that $N$ becomes the weakness of models which makes them vulnerable to any attack on $N$.
+
+% sampling-bias造成T=f_D（C，N）这个关系不是真的，而是数据集D的，那么这件事具体如何影响模型Robust的呢？在sampling bias下，更加加剧了N对Y的影响。
+%  We theoretically analyze the underlying causes. 
+%\subsection{Selection Bias in Data}
+
+
+
+
+
+
+
+
+
+
+
+
+% 机器怎么决策，看gradient，gradient变才变。学会因果了会更稳定，gradient大改变才快。从没有这个词变成这个词有，变动的快不快。
+% 判决改一个词变化，x改mask就有一个变动方向，这个变动引起了判决的变动，gradient找到词组。能够变化的点都找出来。
+% IG，判断哪些其作用的时候不用一个个做实验。不大就不用mask了
+% adversarial是词的也可以是parameter的，adversarial这个点上输入对输出有了一个大的变化。adversarial的方向体现了SCM，gradient体现了AI认为的输入到输出的因果关系。
+% 参数有敏感的方向，什么样的embedding会在这个参数上起作用。y=b1x1+b2x2。文档或者case给定，b1才确定，否则其他词会分担走b1的影响力。case给定，讨论在这个case里面的x1，也就是说case1-x1的影响。
+
+% 正文
+\section{Methodology}
+\label{model}
+
+According to the above analysis, it is necessary to mitigate the spurious correlation error in the LJP model. Otherwise, the LJP model predicts the judgment according to spurious correlations and violates the rules of law. Consequently, the LJP model is not trustworthy even if it has a good prediction performance.
+
+Directly eliminating the spurious correlation error is a challenge. To fully prevent models from learning spurious correlations, there are two straightforward options: 1) directly conditioning on $C$ or 2) removing $N$ to block its effect of misleading the training. However, there lacks a method of filtering out $C$ from the judgment case descriptions. In the case descriptions, causal and non-causal information are entangled to form complete semantic expression. It is hard to clarify and separate the causal information from the non-causal part in a case description. Further, the data imbalance is also hard to be corrected due to the nature of language such as the Zipf's law~\cite{reed2001pareto}. For instance, the methods of reweighting the samples such as the propensity-score weighting are the major methods of correcting the data imbalance. However, it is hard to apply the reweighting methods to adjust the data imbalance existing in the fact descriptions. 
+
+
+
+%, which will be destroyed or changed in many cases if we isolate one apart from another.
+
+%Despite the mechanism of generating spurious correlations is clear, breaking down the correlations is still hard because 1) Dataset bias (sampling bias) is hard to be eliminated~\cite{}. 2) It is difficult to be identified in advance and is usually introduced unintentionally. 3)  4) The time and human costs are tremendous to accurately locate the non-causal and causal information. The issue sparks our motivation to propose our model which will be discussed in Section~\ref{model}.
+
+
+%The effects of selection bias and collider bias accumulate, causing a severe spurious correlation between $N$ and $Y$. Due to the fact that the large-scale pre-trained language models are trained in an unsupervised method, models will be inevitably misled by the bias~\cite{yang2021causal}, thereby learning the spurious correlations. Moreover, the spurious correlations learned in the training set are hard to be detected in the test set due to their same sampling strategy (e.g., spurious correlation between men and robbery can also be predictive in the test set), and the bias --- most of which abides by social conventions~\cite{hendricks2018women} and Zipf's law~\cite{reed2001paretoa} --- will not be mitigated by enlarging the scale of training set, which explains the reason why the discrepancy between the amazing performance and the unre test seteasonable decision rule of a same model can be reconciled.  
+
+
+
+
+
+
+% In other words, if causal information is clear and we can easily figure it out w.r.t. a certain prediction task, we just obtain the results by rules
+
+% 后四段总概括
+% causal 分析关注错这件事，Theory of causal and robustness，更加robust。如果更能泛化robust大概学到了causal。为什么改善robust和performance。
+% 理论的时候说事，方法时候再说做。现在的方法，构建T的时候，如果不控制，T是C和N共同决定的，N是本不该起作用，但由于其他因素而起作用的部分。只找到起因果作用的feature，ground truth information & spurious information。本来N会影响泛化能力。。。理论cite cui，按理说解决这个performance下降，
+
+
+% 我们认为LJP任务上的existing methods的因果图如图所示，V到Y这条线通过高频词实验证明了，V到S这条线因为自然语言本身的语法特性无法打断，我们认为V到Y的线使得模型在测试集上的表现不佳，根据崔鹏的理论【1】，模型如果主要通过学习V到Y来做预测，那么其表现就依赖于测试集的分布shift了多少，同时也会引发shortcut learning与unfair问题。我们不可以直接粗暴从Se里面直接去掉V的信息，这样做会直接导致performance大幅下滑，其原因就是语义信息被破坏了，实验也证明了这点。
+% 所以我们的做法是，对生成数据过程进行重定义，对数据中的信息进行重筛选，借助NLP的工具增强S同时削弱V的信息，从而增强S对Y的影响，降低V对Y的影响。围绕这个中心思想，我们采用AMR parser，从文本中提取主干信息进行结构化的同时过滤掉一部分非关键信息，并将结构化后的主干因果信息进行文本化，从而形成过滤后的文本。
+%【1】Among these three ways of generating a correlation, only the correlations generated by a causal relationship reflect the intrinsic dependency among variables; the other two types are spurious correlations sensitive to the joint distribution of features and the data collection processes. Nevertheless, in today’s off-the-shelf machine learning, black-box models do not even try to differentiate the three different ways in which these correlations are generated. Therefore, their predictive performance depends heavily on how much the test distribution shifts from the training distribution, leading to unstable performance under varying test distributions. Meanwhile, a predictive model based on spurious correlation may also be unfair.
+% 因果信息(语义)和非因果信息(语义)共同构成了一篇文档Se，这里的信息可以是词，可以是词组，可以是句子，可以是段落。但关键的是，现有的LJP的工作，往往拟合的是这个概率，当给定Se的时候，V和S产生了虚假关联，当拟合的时候，V和Y也会产生虚假关联。我们期望模型学习的是S到Y，当只有S和Y的时候，correlation就是causal，现在S和Y的correlation包含了S-V-Y，我们通过实验证明了这条路径是存在的。这会导致什么问题？模型表现就依赖于测试集的分布shift了多少，泛化能力和鲁棒性受损，在社会影响层面，就会引发shortcut learning与unfair问题。
+
+Here, we propose a method of lowering the proportion of $N$ in the training data for LJP model and mitigating the spurious correlation error. We noticed that the technology of open-information extraction (OIE) is able to capture the minimal context that mostly maintains the content~\cite{stanovsky2018supervised}. It is possible to adopt OIE as a filter to separate the context mainly includes the causal information of the legal texts from those that mainly include the non-causal information. Further, the open-source coreference method merges the context that possesses the same semantic~\cite{clark2016deep}. Thus, we adopt the open-source coreference method to mitigate the data imbalance in the legal text. 
+%for the reasons mentioned in data generating process, we can instead condition on most of $C$ and remove most of $N$ by intervening the process of generating $T$. To this end, we perform graph construction and graph-to-sequence options, and then propose our model to encode the adjusted text information, which will be introduced in the next section.
+%In this section, we heuristically lower the proportion of $N$ and increase that of $C$ in $T$, and then propose our model to encode the intervened $T$. 
+
+Thus, we adopt the OIE and open-source coreference methods to refine the dataset of legal texts. We first perform open information extraction (OIE) on input legal texts to discard the context that contains a high proportion of non-causal information. Then, we graphically structure the extracted pieces of information, which are stored in triple shown in Figure~\ref{fig:4} of the form (subject, predicate, object). In the extracted-information graph, the nodes denote the subjects and objects while the edges are predicates. The nodes possessing the same semantic meaning will be merged into one by the open-source coreference model. During the process of constructing graphs, redundant non-causal information is further reduced by merging. Meanwhile, documents are substantially compressed to focus on core information. Finally, to avoid the conflict and inconsistency that occurred in encoding heterogeneous information through Transformer~\cite{shao2020graph}, we perform graph linearization to model the extracted graphs as sequences. 
+
+The above data processing lowers the proportion of $N$ in the legal-case texts, thereby mitigating the spurious correlation between $N$ and $Y$. We further develop a training method to incorporate the processed data and the raw data for balancing the spurious correlation mitigation and information loss minimization. In the rest of this section, we provide the detail of our methods.
+
+%Our model tend to predict judgments according to $C$ instead of $N$, thus outperforming the baselines and achieve new state-of-the-art results on two widely used legal language understanding datasets w.r.t. prediction tasks.
+
+
+
+% In this step, we use two predictors: co-reference resolution predictor(https://arxiv.org/abs/1609.08667) and open information extraction triplets predictor(https://aclanthology.org/N18-1081/)
+% For each document, first we use co-reference resolution predictor to extract all expressions that refer to the same entity in a document. Then, based on the token frequency, we compute the feature of the above main expressions. After that, we apply the open information extraction triplets predictor on the document and get the triplets of subject, predicate and object. From the triplets above, we can construct a directed graph with objects and subjects be the nodes and predicates be the edges. For each directed edge (u,v), the subject of this edge is u and the corresponding edge is v.
+% 这部分自己的贡献是什么？模型方面的贡献是什么？
+% 首先在文档级做共指，然后句级别做OIE，得到所有三元组之后，我们将S和O当作节点，将predicate当作边，根据共指关系把句级别分隔开的三元组们连接到共同的节点上，从而构成文档级的图。为了增加构图的准确性，我们还引入了TFIDF的规则，计算phrase之间的相似程度，并将相似的phrase对应的节点融合。
+\paragraph{Graph Construction}
+In this section, we detail the process of extracting graph structures from text, which aims to discard and merge redundant non-causal information. First, we apply coreference resolution~\cite{clark2016deep} and open information extraction~\cite{stanovsky2018supervised} tools to identify the corresponding mentions or pronouns of each entity, and then extract relational triplets from sentences. In our constructed graph, we represent subjects and objects as nodes, which are connected by predicates as directed edges. Second, the nodes will be merged to reduce redundant non-causal information if they have similar names or meanings, which is identified by TF-IDF overlap and coreference resolution tools, respectively. Finally, as to the subsequent newly extracted triplets, we also calculate the TF-IDF overlap between the existing triplets and the new one. If the value is higher than our predefined threshold, we rule out the new triplet to reduce information replication. 
+
+
+
+% Graph+linear Reference: https://aclanthology.org/2021.naacl-main.380/
+% 工作就是使用这篇中的方法，唯一的变动就是在计算frequency时把文档数量的因子删掉了。这个地方在计算similarity是有用到，是一个控制相似节点数量的参数。当前的做法是完全不考虑相似的情况，不做合并处理。这个可以当超参调整。This paper proposes an efficient graph enhanced approach for multi-document summarization by converting the text to a directed graph including main components in the text and using the graph to extract the summarization of the text(linearization). In our work, we only need to consider one document.
+% Meanwhile, based on the result of co-reference resolution predictor, we find the unique subject in triplets which can represent all the expressions refer to the same entity. Once we get such a subject, find the corresponding feature. Using this feature, we find if there is any node already in the graph shares high similarity with such subject. If yes, increase the weight of the corresponding node. Otherwise, add a new node in the graph. As for the object, the process is similar, find if there is nodes share high similarity. If so, increase the weight of such node. Otherwise, add a new node. As for the edges, just find the corresponding nodes and add a directed node between them. Note that, there can be more than one edges starting from one and ending at another node.
+% As for linearization, first, we gather all the subgraphs and discard the subgraphs with only two nodes to make the graph consolidated. Then, we apply the BFS(广搜) on the subgraphs. For each subgraph, we find the subject node with the highest weight calculated when constructing the graph. We start from this point along the directed edges. For each pair of nodes, we re-construct the text information based on the subject, object and the corresponding predicates. Thus we get the the summaries of the document about each triplets of subject, object and predicate.
+\paragraph{Graph to Sequence}
+Existing methods of converting graphs into sequences can roughly be divided into two categories: training graph-to-sequence models~\cite{wei2021graphtosequence} based on graph transformer~\cite{cai2020graph} or heterogeneous graph transformer~\cite{yao2020heterogeneous}, and artificially designing some rules to store graphs in structured sequence which is called graph linearization~\cite{fan2019using,pasunuru2021efficientlya}. The latter faithfully express a graph and the former introduce noises in their generated sequences. To avoid introducing new non-causal information which may induce new spurious correlations, we adopt a graph linearization method, which is considered more suitable. Specifically, we first obtain the weights of nodes and edges by counting how many times their corresponding phrases appear in a document. Second, we perform graph traversal in a breadth-first manner according to the weights. Finally, the resulting sequences of graph traversal are adopted as the linearized graphs. 
+
+
+% 用图过滤的也有可能过滤掉有用信息，同时方法本身也存在一定的噪音，所以原文信息如果全部舍弃也太绝对，如果直接拼接的话，seqlen增加会使得计算复杂度平方级上涨，因此我们（提出几种方法来使得模型可以有效考虑和选择这两种信息）第一种方案就是，对信息分开编码，在hidden-state层面操作，压缩原文的权重，强调新信息的权重，灵活地考虑和选择对应信息。
+\paragraph{Model}
+
+Due to the inevitable errors of OIE tools, a small amount of causal information can be discarded during the process of constructing graphs. Therefore, it remains necessary to refer to the original text beyond linearized graphs when predicting judgments. While the extent to which our model learns from the originals should be restricted, we propose our model to adaptively learn the weights of the linearized graphs and the original raw data. To minimize the possibility of learning the spurious information from the raw data, we penalize the model when learning from the raw data and encourage it to learn from the linearized graphs. The overall architecture of our model is shown in Figure~\ref{fig:4}. 
+
+
+
+
+
+
+
+\section{Experiments}
+
+
+% 介绍ECTHR和LEGDAR
+% 
+\subsection{Datasets}
+
+
+%专有词外的英文需要改变描述
+%ECtHR 数据集是一个英文判决预测的数据集，由European Court of Human Rights cases组成。 这个数据集包含11K条数据，其中9K条为训练数据，是由2001年至2016年的判决案件组成，1K条为验证数据，由2016-2017年的判决案件组成，1K条为测试数据，由2017-2019年的判决案件组成。每一条数据的特征包含英文组成的从案件事实中提取的多个段落的描述；数据的标签为该案件所违反的ECHR的法律条款（articles），每一个案件可以违反一个法律条款，也可以违反多个法律条款，甚至可以不违反任何法律条款。ECtHR数据包含task A 和task B， 这两个task包含相同的数据特征。 对于task A， 它的标签是对应特征案件所违反的法律条款。对于task B， 它的标签是对应特征案件所声称（allegedly）违反的法律条款。在ECHR中，包含了超过60个（具体多少待查lex-glue发的时候有66个）可以违反的法律条款， ECtHR数据包含了其中的10种。
+\paragraph{ECtHR}  The European Court of Human Rights (ECtHR) dataset~\cite{chalkidis2019neural} is a legal judgment prediction dataset in English, consisting of approximately 11,000 cases from the ECtHR database. In each case, allegations are written as fact descriptions, the judgment results --- about which of human rights provisions legislated by European Convention of Human Rights (ECHR) does the current state breach --- are recorded as the label. All cases are chronologically categorized as training set (9k, 2001-2016), development set (1k, 2016-2017), and test set (1k, 2017-2019). Each case can either violate single, multiple, or none of the given legal articles. For each model, the input is fact descriptions of a case, and the output is the judgment, represented by a set of violated articles. 
+
+%LEDGAR数据集是由Tuggener et al. at 2020 创建的contract provision分类数据集。他们来自EDGAR10(Electronic Data Gathering, Analysis, and Retrieval system)中的US Securities and Exchange Commission (SEC)。 filings。这里沿用了lex-glue中使用的该数据中的一部分数据：选取了所有标签中最常见的100个标签所在的数据，其中按照年份顺序将数据分为： 60K个训练样本，10K个验证样本和10K个测试样本。每一个样本的特征为contract provisions， 标签为对应的合同类别。
+\paragraph{LEDGAR} LEDGAR (Labeled EDGAR) \cite{tuggener2020ledgar} is a dataset for contract provision classification. The contract provisions are crawled from the U.S. Securities and Exchange Commission (SEC) website, and are available from a Electronic Data Gathering, Analysis, and Retrieval (EDGAR) system on the website. Nearly 850k contract provisions from 12.5k categories are included in the originally proposed LEDGAR. Following the legal language understanding benchmark LexGLUE\cite{chalkidis2022lexgluea}, we use 80k contract provisions labeled with 100 most frequent categories from the original dataset. The new dataset is chronologically split into training set (60k, 2016-2017), development set (10k, 2018), and test set (10k, 2019).
+
+
+% \begin{table}[htb]
+%     \centering
+%     \begin{tabular}{l|ccc}
+%     \toprule
+%         \textbf{Aspect} & \textbf{Number} \\ \hline
+%         Evidence Word & 27732 \\
+%         Evidence Phrase & 10780 \\
+%         Relational Fact & 7342 \\
+%         Entity & 13716 \\
+%         Sentences & 5688 \\
+%         Relation Types & 94 \\
+%     \bottomrule
+%     \end{tabular}
+%     \caption{\label{ds-statistic-table} Statistics of  $\text{DocRED}_\text{HWE}$}
+% \end{table}
+\begin{table}
+  \centering
+%   \begin{threeparttable}
+    %\caption{Datasets}
+    
+    \begin{tabular}{l|cccc}
+    \toprule
+       \multirow{2}{*}{\textbf{Category}}  
+        &\multicolumn{4}{c}{\textbf{Dataset}}\\ \cline{2-5}
+        & Train  &  Valid   & Test  &  Classes    \\ \hline
+        ECtHR   &   9000    &   1000    &   1000    &   11    \\
+        LEDGAR  &   60000   &   10000   &   10000   &   100    \\
+    \bottomrule
+    \end{tabular}
+    %\begin{tablenotes}
+    %  \item [a] 可以通过 xelatex 编译生成模板的使用说明文档；
+    %    使用 xetex 编译 \file{thuthesis.ins} 时则会从 \file{.dtx} 中去除掉文档和注释，得到精简的 %\file{.cls} 文件。
+    %  \item [b] 更新模板时，一定要记得编译生成 \file{.cls} %文件，否则编译论文时载入的依然是旧版的模板。
+    %\end{tablenotes}
+%   \end{threeparttable}
+  \caption{Statistics of two datasets}
+    \label{tab:0}
+\end{table}
+
+The statistics of two datasets are shown in Table~\ref{tab:0}. 
+
+
+
+% BERT, RoBERTa, DeBERTa, Longformer, BigBird, Legal-BERT, CaseLaw-BERT
+\subsection{Baselines}
+
+\textbf{TFIDF+SVM} This model combines the Term Frequency and Inverse Document Frequency technique with a linear Support Vector Machine.
+\\
+\textbf{BERT}~\cite{devlin2019bert} is a pre-trained transformer model used to predict masked language and the next sentence.
+\\
+\textbf{RoBERTa}~\cite{liu2019roberta} is also a transformer-based model, it uses dynamic masking and uses larger training corpora in the pre-training stage compared with BERT. 
+\\
+\textbf{DeBERTa}~\cite{he2021deberta} computes attention using disentangled matrices and it applies an enhanced mask decoder. For the finetuning task, it proposes a new adversarial training technique.
+\\
+\textbf{Longformer}~\cite{beltagy2020longformer} uses sparse attention mechanism to make the model suitable for long sequence of language.
+\\
+\textbf{BigBird}~\cite{zaheer2020big} is also a transformer-based language model, it uses local, global, and random attention to get better performance on long sequences of language.
+\\
+\textbf{CaseLaw-BERT}~\cite{zheng2021when} is a law case oriented BERT model. This model is based on a BERT model and trained with law case data.
+\\
+\textbf{Legal-BERT}~\cite{chalkidis2020legalbert} model is similar to the CaseLaw-BERT model, they are both trained based on BERT. Legal-BERT is trained with legal corpora, contracts, law cases, and other law related documents.
+
+The backbone of our proposed model is based on Legal-BERT in this paper, our model can be easily extended to other backbones in future work. 
+
+\begin{table*}
+  \centering
+    %\caption{Main Results}
+    
+    \begin{tabular}{l|cc|cc|cc}
+      \toprule
+       \multirow{2}{*}{\textbf{Method}}  
+        &\multicolumn{2}{c|}{ECtHR(A)} &\multicolumn{2}{c}{ECtHR(B)}&\multicolumn{2}{c}{LEDGAR} \\
+        & $\upmu$-$F_1$  &  $m$-$F_1$   & $\upmu$-$F_1$  &  $m$-$F_1$ & $\upmu$-$F_1$  &  $m$-$F_1$    \\
+      \hline
+      TFIDF+SVM*         &   64.5    &   51.7  & 74.6  & 65.1    &   87.2    &   82.4    \\
+      \hline
+      BERT*              &   71.2    &   63.6  & 79.7  & 73.4    &   87.6    &   81.8    \\
+      RoBERTa*           &   69.2    &   59.0  & 77.3  & 68.9    &   87.9    &   82.3    \\
+      DeBERTa*           &   70.0    &   60.8  & 78.8  & 70.1    &   88.2    &   83.1    \\
+      \hline
+      Longformer*        &   69.9    &   64.7  & 79.4  & 71.7    &   88.2    &   83.0    \\
+      BigBird*           &   70.0    &   62.9  & 78.8  & 70.9    &   87.8    &   82.6    \\
+      \hline
+      CaseLaw-BERT*      &   69.8    &   62.9  & 78.8  & 70.3    &   88.3    &   83.0    \\
+      Legal-BERT*        &   70.0    &   64.0  & 80.4  & 74.7    &   88.2    &	83.0 	\\
+      \hline
+      ours              &   \textbf{73.4}    &   \textbf{67.6}   & \textbf{81.2}  & \textbf{75.1}   &   \textbf{88.6}    &	\textbf{83.2}    \\
+      \bottomrule
+    \end{tabular}
+  \caption{Overall experimental results. The signal `*' denotes that the results of the corresponding models are obtained from \citet{chalkidis2022lexgluea}}
+    \label{tab:2}
+\end{table*}
+
+
+
+\subsection{Experimental Settings}
+
+\paragraph{Implementation Details} 
+Our experiment is based on PyTorch and Hugging Face Transformer\cite{wolf2020transformersa}. 
+At the graph construction stage, co-reference resolution predictor\cite{clark2016deep} and OIE predictor\cite{stanovsky2018supervised} are used to extract graph relationships and construct the graph. Later, we use breadth-first search  to get the linearized graph text.
+We apply the pre-trained Legal BERT transformer from Hugging face to be our encoder. With the original fact descriptions and the corresponding graph text, we use two Legal BERT encoders to get the embeddings.  The learning rate is $1e-4$ and the optimizer is AdamW. 
+% Then, weighted sum is applied to these two embeddings. After that, a two-layer classifier is used to extract the result, mapping embedding of 768 to result of 100 or 10 classes. For LEDGAR dataset, we set the maximum sequence length to 512. For ECtHR Task A dataset, we set the maximum sequence to 128 and there can be at most 64 sequences. If the sequence is longer, the redundant part will be dropped, if shorter, it will be truncated.
+
+
+\paragraph{Metrics} 
+Following previous work~\cite{chalkidis2022lexgluea}, we adopt $\upmu$-$F_1$ and $m$-$F_1$ scores as metrics to investigate the performance (including generalization ability) of our model. To compare the robustness of models, we find a subset of the validation set in both LEDGAR and ECtHR. We delicately select 9,367 cases of the former and 28,180 cases into two subsets respectively to make sure that models (we select Legal-BERT for fair comparison) are vulnerable to each of them: By modifying a single function word in the fact descriptions, the predictions of models will be changed. Following \citet{yang2021endtoend}, We adopt \textbf{certified ratio} (\textbf{CR}) to measure the percentage of consistent predictions (unchanged predictions) under a perturbation (wrong predictions are also included) and $1-\text{CR}$ as the \textbf{success rate} (\textbf{SR}) of attack. 
+
+
+
+
+
+% 一个总表，分析结果
+% 用案例说明学对了，
+\subsection{Main Results} 
+
+The robustness and generalization ability evaluation results of our model and Legal-BERT are shown in Table~\ref{tab:1}. We can observe that not only the generalization ability is enhanced, but also the robustness of our model becomes stronger. Specifically, $41.9\%$ and $88.88\%$ predictions of Legal-BERT on input samples do not change with such perturbation, while $82.56\%$ and $92.17\%$ predictions of our model remain unchanged on LEDGAR and ECtHR, respectively. Obviously, the spurious correlation error is significantly mitigated in our proposed model because the success rate of attacks on non-causal information $N$ drops from $58.10\%$ and $11.12\%$ to $17.44\%$ and $7.83\%$, respectively. We derive that our proposed method indeed reduces the non-causal information $N$, thus mitigating the spurious correlation error of our model. The decision rule of the model has changed towards a new rule. By blocking $N$, on one hand, the robustness of our model is stronger compared with the baseline model which is exposed to the spurious correlation error, on the other hand, the generalization ability of our model is enhanced because reducing spurious correlation error can guide model to learn the underlying common ground. 
+
+The results of the SOTA baselines and our model are shown in Table~\ref{tab:2}. We evaluate the performance of our model on ECtHR and LEDGAR datasets. Compared with the baselines, our model outperforms these baselines and achieves SOTA performance on both datasets. The experimental results further demonstrate the fact we mentioned above: With reducing spurious correlation error by blocking $N$, models are easier to learn the underlying ground-truth knowledge thus enhancing generalization ability.
+
+% In the experiment, we use graph construction and graph to sequence method to extract the causal parts of the language and get graph text. We use two Legal-BERT encoders to encode the text $T$ and the graph text $T_G$ respectively and get the corresponding embedding $emb_1$ and $emb_2$. With these two embeddings, we do a weighted sum and get a new embedding of the text and graph text: $$emb = w_1*emb_1+w_2*emb_2$$
+% In LEDGAR dataset, we set the value $w_1:w_2 = 1:15$ to get such results. In ECTHR Task A dataset, we set $ w_1:w_2 \to \infty$ to get such results.
+% Using this embedding, we apply a classifier which consists two layers of fully connected networks to get the final result of the model. We use the effect of graph construction and graph to sequence method to reduce the effect of non-causal words on the predictions. As a consuquence, the $F_1$ scores become higher.
+
+
+%下表中包含了我们的模型与其他模型在ECtHR和LEDGAR数据集上的结果。我们的方法在LEDGAR和ECtHR数据上的micro f1和macro f1与lexglue的数据相比都有提升。
+
+%在我们的方法中，首先将text转化为图，再讲图转化为sequence。 之后将text和graph text分别通过两个pretrained legal bert模型分别获得两个对应的embedding：embedding1 和embedding2， 之后利用这两个embedding加权所得的embedding = w1* embedding1 + w2* embedding2。 将embedding输入分类器来获得预测的结果。
+
+%在LEDGAR数据集上,我们使用了2层linear层的网络作为分类器，我们使用text:graph text=1:15的比例 获得了表中的数据、
+
+%在ECtHR数据集上，我们使用text:graph text=1:0的比例 获得了表中的数据。我们在预测结果时使用了ATLoss中获得预测结果的方法（没用ATLoss）。
+
+\begin{table}
+  \centering
+    
+    % \begin{tabular}{l|cccc}
+    %   \toprule
+    %   \multirow{2}{*}{\textbf{Method}}   
+    %     &\multicolumn{4}{c}{LEDGAR} \\
+    %     & $\upmu$-$F_1$  &  $m$-$F_1$ & CR & SR  \\ \hline
+    %   legal bert & 0.3858 & 0.3986 & 41.90 & 58.10	\\
+    %   ours       & \textbf{0.4421} & \textbf{0.4378} & \textbf{82.56} & \textbf{17.44} \\
+    %   \bottomrule
+      
+    % \end{tabular}
+    
+    \begin{tabular}{l|cc|cc}
+      \toprule
+      \multirow{2}{*}{\textbf{Method}}   
+        &\multicolumn{2}{c|}{ECtHR} &\multicolumn{2}{|c}{LEDGAR} \\
+        & CR & SR & CR & SR  \\ \hline
+      Legal Bert & 88.88 & 11.12 & 41.90 & 58.10	\\
+      ours       & \textbf{92.17} & \textbf{7.83} & \textbf{82.56} & \textbf{17.44} \\
+      \bottomrule
+      
+    \end{tabular}
+    %\begin{tablenotes}
+    %  \item [a] 可以通过 xelatex 编译生成模板的使用说明文档；
+    %    使用 xetex 编译 \file{thuthesis.ins} 时则会从 \file{.dtx} 中去除掉文档和注释，得到精简的 %\file{.cls} 文件。
+    %  \item [b] 更新模板时，一定要记得编译生成 \file{.cls} %文件，否则编译论文时载入的依然是旧版的模板。
+    %\end{tablenotes}
+  \caption{Results on our selected subset from the validation set.}
+    \label{tab:1}
+\end{table}
+
+
+
+
+
+
+
+
+
+
+
+
+% \subsection{Results of Spurious Correlation Effect}
+% \label{spur corr}
+% %如tab2所示。在LEDGAR数据中，我们在验证集中，将部分“虚词”使用“【mask】”遮住后会使得模型预测的结果改变.
+% %在legal bert模型中，遮挡前后大约有41.9%的预测结果不发生改变。在我们的模型中，大约有82.56%的预测结果不会发生改变
+% We counted the top-K most important words that the Legal BERT model pay attention to in LEDGAR dataset, shown in \ref{level}. The top words are all non-causal words. We also kept the top $X$ percent of the most important words to test the performance of Legal BERT model, the results are shown in \ref{fig:3}, it shows that when top $20\%$ important words remain, the f1 scores reach $80\%$, so the model puts huge importance on the non-causal words in this dataset. These words are not relevant with the prediction but they play am important role in the prediction. 
+
+
+% \begin{figure}
+%   \centering
+  
+%   %\vspace{-2.0cm}
+%   \includegraphics[width=1.0\linewidth]{LaTeX/pictures/attention.png}
+%   \caption{Attention Word Ranking}
+%   \label{fig:2}
+% \end{figure}
+
+
+
+% \begin{figure}
+%   \centering
+  
+%   \includegraphics[width=1.2\linewidth]{LaTeX/pictures/performance_new.png}
+%   \caption{LEGDAR Dataset Model Performance}
+%   \label{fig:3}
+% \end{figure}
+
+
+
+% 高频词实验
+% \subsection{Analysis and Discussion}
+%LEDGAR数据中，我们根据token在句中的重要程度，提取出每句中前x%重要的词，x的范围从0-100。
+
+%在这基础上，我们测试了在保留不同比例的重要的词的情况下，模型预测的效果，如图所示。 图中可知，当拥有大约前20%的重要的词的时候，模型的f1 score已经接近80，我们统计了前20%重要的token对应的词的词频，如fig所示。可见前10个词的都是“虚词”。
+
+\begin{figure*}
+  \centering
+  \includegraphics[width=1.0\linewidth]{pictures/case_study.png}
+  \caption{Case study}
+  \label{fig:5}
+\end{figure*}
+
+
+%改变一个虚词后prediction就直接改变了，这样的例子有XX个，我经过控制后，这样的例子减少了XX个。如果数字不好，就挑一个例子说明情况。
+\subsection{Case Study}
+
+% A concrete example of such prediction can be illustrated in \ref{fig:4}. This case do not violate any article but the baseline model predicts that it violates articles 3,7 and 9. After changing the comma to [MASK], the baseline model predicts that it violates articles 3,6,7,8,9 and 10. Our model can successfully predict that the case do not violate any articles even if the comma is changed to [MASK].
+Figure~\ref{fig:5} exhibits the case study of our proposed model compared with Legal-BERT. After merging and discarding the redundant non-causal information, we retain the causal information to aid the prediction. Specifically, more than learning the spurious correlation between the token `[' and the articles 5, 9, 10, 11, and 14 as shown in Figure~\ref{fig:0}, Legal-BERT learns the spurious correlation between `the' and article 5 in this case, which results in predicting judgment according to non-causal information. Perturbations like missing the token `[' or `the' in fact descriptions can frequently happen in real-world applications due to the writing habits of a legal assistant. They surprisingly confuse Legal-BERT to change a prediction from ``no crime'' and ``Violated article 3'' to ``violating articles 5, 9, 10, 11, and 14'' and ``violated articles 3 and 5'', respectively. The severe spurious correlation error impedes the real-world application of legal AI. Under the guidance of our proposed causal model, we merge and discard non-causal information in our proposed method based on Legal-BERT, which largely mitigates the spurious correlation and learns the correlations that represent causal relations. Our proposed method is able to make predictions according to the relevant causal information ``detention'', thereby leading to a right prediction (enhancing generalization ability) and avoiding focusing on the non-causal information such as ``the'' (improving robustness).
+
+
+
+\section{Conclusion}
+In this paper, we investigate the decision rule of the legal-specific PLM in legal AI. We exhibit the potential problems of the decision rules caused by spurious correlation error, and propose a structural causal model to theoretically analyze the underlying mechanism. Under the guidance of our analysis, we propose a method to simultaneously reduce non-causal information and retain causal information in the given fact descriptions. The experimental results indicate that spurious correlations between non-causal information and predictions largely damage the generalization ability and robustness of legal AI. We appeal to future work to take the spurious correlation error into consideration for improving the overall performance of legal AI.
+
+
+\bibliography{custom}
+\bibliographystyle{acl_natbib}
+
+% \appendix
+
+% \section{Example Appendix}
+% \label{sec:appendix}
+
+% This is an appendix.
+
+\end{document}

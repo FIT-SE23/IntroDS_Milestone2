@@ -1,0 +1,110 @@
+\input{figs/overview.tex}
+%\vspace{-0.4cm}
+\section{DeepFlow Overview}\label{sec:overview}
+
+Figure~\ref{fig:overview} shows an overview of the \name framework. \name takes the following set of \textbf{inputs}: 
+%
+(1) \underline{System} design hierarchy (e.g., the number of accelerator nodes per device, the number of devices in the system, the network topology connecting nodes within a device and across the devices), 
+(2) \underline{Architecture template} of each accelerator node which provides a high-level definition of its components and how those components fit together. The purpose of the template is to provide a blueprint for the accelerator without committing to any specific hardware parameters.
+%A component definition (e.g., minimal compute units (MCU\footnote{Examples of what we regard as MCU includes SMU in older GPUs, Tensor Cores in newer GPUs or systolic array in TPUs}), memory hierarchy, network), specification of each component (e.g., flop rate for each MCU, MCU dimensions, number of MCUs sharing a set of register files, dataflow execution model, and characteristics and scope of different levels of memory hierarchy), 
+(3) \underline{Technology} parameters for each hardware component (e.g. energy per flop), 
+(4) \underline{Design budgets} for each hardware component (area, power, perimeter),  
+(5) \underline{Machine learning model} specification in the form of a high-level compute graph, parameters of each compute node (kernel type, tensor dimensions), and
+(6) \underline{Parallelism strategy} (data, model, kernel, and/or pipeline parallelism dimensions) which distributes the compute graph across the entire system. 
+(7) \underline{Device mapping} strategy which defines mapping of parallel shards onto hardware nodes.
+Given these inputs, \name predicts the end-to-end performance of one iteration (i.e., single batch) of the model and finds an optimal hardware-software-technology design point as \textbf{output}. 
+
+DeepFlow is composed of two major components.
+\underline{CrossFlow} which operates in a stand-alone mode and can predict performance for any input configuration; and a search and optimization engine (\underline{SOE}) which enables design space search. 
+%To do so, \name breaks the problem into multiple phases.
+%Each phase or building block of \name is described in details next.
+\vspace{-0.1cm}
+\subsection{CrossFlow Building Blocks}
+
+\paragraph*{\em Micro-Architecture Generator Engine (AGE)}
+
+AGE takes the following set of \textbf{inputs}:
+(1) Design constraints (i.e the power, area and perimeter budget and breakdown across micro-architectural components such as cache, network, compute cores). 
+This breakdown can be provided manually by users or automatically by the Search and Optimization Engine (SOE, Section~\ref{subsec:soe}).
+%We also provide technology specifications such as 
+%and their physical characteristics such as area/power per core under nominal operating conditions, SRAM/register characteristics. 
+(2) Technology parameters such as energy per flop, energy per data bit transfer for each level of memory and network hierarchy, threshold and maximum gate voltage, integration substrate parameters such as bump/interconnect pitch. We provide a wide range of standard and future technology libraries as baseline. (3) Architecture template which is a blueprint of the underlying accelerator chip without committing to any specific hardware parameters. Given these input, AGE performs a frequency-voltage-area scaling optimization to generate the following \textbf{output} parameters such that design budgets for all component are met: 
+(1) Compute throughput.
+(2) Capacity for different levels of memory hierarchy.
+(3) Bandwidth to each level of memory hierarchy.
+(4) Inter-node as well as intra-node network bandwidth. 
+These parameters are then utilized by the performance prediction engine (PPE) to estimate the execution time of each kernel.
+%As mentioned previously, 
+%The output of this stage is the input to performance engine to estimate the execution time of each kernel. Next, we describe the search and optimization engine (SOE) which feeds input values to AGE, if we want to use the model for architecture search.
+%\vspace{-0.2cm}
+\paragraph*{\em Compute Graph Transformation and Device Placement Engine (DPE)}
+The parallelization strategy and device mapping are critical in deciding the overall execution time. Here, we first transform the model graph to a `super-graph' to reflect the parallelization strategy provided by the users manually, or SOE engine (Section~\ref{subsec:soe}) automatically. For example, to apply data parallelism, the model graph is replicated and appropriate edges are added to model the gradient exchange. After generating the transformed graph, DPE assigns the vertices of the transformed graph to the system nodes following a heuristic approach to minimize the communication overhead. %
+%The details are presented in section~\ref{}.
+
+%\vspace{-0.2cm}
+\paragraph*{\em Performance Prediction Engine (PPE)}
+%With the device mapping for all the vertices of the compute (super-)graph known, the next step is to calculate the overall execution time for a forward pass and/or a backward pass. 
+We use hierarchical roofline modeling to predict the performance of each compute node. To calculate the overall end-to-end execution time, while respecting scheduling constraints (e.g. one kernel at a time per GPU, or prioritizing one kernel launch over another) we use event-driven simulation.%
+%We explain the details of the PPE in section~\ref{}.
+\subsection{Search and Optimization Engine (SOE)}\label{subsec:soe}
+Co-optimizing micro-architectural parameters and the parallelization strategy that minimizes the overall end-to-end execution time requires navigating a large space of design parameters. 
+Search and optimization engine (SOE) enables the automatic design space search and finds an 
+%that meets the total power and area constraints, and simultaneously explores software parallelization strategies to find the 
+optimal design point which meets the design constraints and minimizes the overall execution time.
+%Because the hardware configuration space is very large, the search algorithm we designed 
+SOE takes inspiration from ML-assisted search algorithms, in particular gradient decent search with momentum and builds on top of the CrossFlow modeling engine.
+%The software parallelization design space is much smaller compared to the hardware design space and therefore we employ an exhaustive grid search. 
+
+%Gradient search is an iterative process. In each step, SOE takes the predicted time from previous iteration as input to re-adjust the following parameter settings: (1) power, area and perimeter breakdown across different architectural components. (2) a parallelization strategy. These parameters will be fed back to CrossFlow to estimate the overall execution time. This process continues until convergence or user-specified number of steps. 
+%The details of SOE's search algorithm are elaborated in Section~\ref{}. 
+\vspace{-0.2cm}
+\subsection{Parallelism Strategy Space}
+\label{subsec:par_strategy}
+There are a myriad of ways to parallelize a model across a large multi-node system. Exploring the parallelism space and finding the optimal strategy is critical to overall performance and system utilization. DeepFlow explores kernel, data and layer parallelism. It uniquely identifies each parallelism strategy by following notations: $\texttt{RC-\{KP1\}-\{KP2\}-d\{DP\}-p\{LP\}}$ or $\texttt{CR-\{KP1\}-d\{DP\}-p\{LP\}}$ depending on the choice of kernel parallelism.
+RC (Row-Column) and CR (Column-Row) refer to different forms of kernel parallelism, i.e. distributed GEMM through inner-product or outer-product implementation.
+%\begin{equation*}
+%    \texttt{RC: R{KP1\}\_C\{KP2\}\_d\{DP\}\_p\{LP\}}
+%\end{equation*}
+%Where \texttt{RC} or \texttt{CR} refers to the type of kernel parallelism strategy, i.e. Row-Column or Column-Row,
+%\texttt{N} refers to the number of parallel nodes,
+\texttt{KP1} and \texttt{KP2} are the parameters of distributed GEMM. 
+For Row-Column (\texttt{RC}) or inner-product, \texttt{KP1} and \texttt{KP2} would refer to the number of ways we shard the first matrix across rows and the second matrix across columns.
+For Column-Row (\texttt{CR}) or outer-product, we would only need one parameter to specify the parallelization strategy; \texttt{KP1} will refer to the number of ways we cut the first matrix across columns and the second matrix across rows.
+\texttt{DP} represents the number of model replicas and data shards assigned to each to exploit data parallelism.
+\texttt{LP} is the number of ways we cut layers into stages to exploit pipeline parallelism.
+
+\begin{comment}
+\subsection{Modes of Operation}
+\name has two modes of operation, standalone performance estimation mode and a architecture search mode.
+\paragraph{Standalone Performance (SP) Estimation Mode}
+Often ML practitioners or hardware designers want to estimate the performance of a model on a particular system configuration. For example, what is the cost optimal number of accelerators that one should deploy for distributed training? Or what is the estimated performance gain from choosing an accelerator with costlier HBM2E vs HBM2? To enable one to quickly answer such questions and to estimate performance under certain known system configurations, the tool can be run in the SP mode. 
+
+In this mode, the description of the architecture of a scale-out system consisting of multiple accelerators, the architecture of the accelerator hardware themselves and the description of the neural network is taken as input, and fed into CrossFlow, which calculates the execution time of each training step. 
+
+%In this mode, the description of the architecture of a scale-out system consisting of multiple accelerators, the architecture of the accelerator hardware themselves and the description of the neural network is taken as input. The tool calculates the execution time of each training step. 
+
+%In this mode, the user 
+%has the flexibility to use either just the \perfE or use \perfE alongside the AGE. While using just the \perfE  alone, the user needs to provide the architectural parameters of the tiles and the system. On the other hand, while using AGE  alongside \perfE, the user 
+%needs to define the technology parameters and the hardware constraints i.e., the overall area and power breakdown among the different architectural components of the system. T
+
+%In this mode, the tool generates the micro-architectural parameters of the accelerator chip using the AGE. It then runs the compute graph transformation and the device placement engine, and uses the \perfE to predict the execution time. 
+
+\subsubsection{Architecture Search (AS) Mode}
+
+The insatiable demand to run large models in the shortest possible time demands that we find the optimal hardware and software design points to train these models. From the hardware perspective, it is about finding the right micro-architecture as well as the overall system architecture of the distributed system. 
+From the software perspective, it is about finding the right parallelization strategy. 
+Often these decisions depend on each other, and so finding the optimal design points across the stack means 
+navigating a large design space.
+
+As one can imagine, the design space of the inputs to the tool is large and iterating over the entire design space is a tedious task. To efficiently search over the input space to find the optimal hardware constraints and parallelization strategy, the tool can be run in the AS mode. 
+In this mode, the SOE module is used. The user will not need to provide the exact hardware parameters and the parallelization strategy. Only the architecture template and the initial compute graph will need to be provided as input to the tool. The tool then performs a search over the design space to find the optimal parameter settings that results in minimum training time. 
+%We used gradient descent algorithm (details in Section~\ref{}) for this search.
+
+%\subsection{Inputs and Outputs}
+
+%\paragraph{SP-Mode}
+%In this mode, the hardware 
+
+%\paragraph{AS-Mode}
+
+\end{comment}

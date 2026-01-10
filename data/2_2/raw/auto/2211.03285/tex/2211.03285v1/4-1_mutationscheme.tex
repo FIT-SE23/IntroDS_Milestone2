@@ -1,0 +1,133 @@
+\subsection{Bandit-Friendly Mutation Scheme}
+\label{sec:mutationscheme}
+
+\aptLtoX[graphic=no,type=env]{\begin{center}
+\includegraphics{figure/Algorithm1.pdf}
+\end{center}
+\begin{center}
+\includegraphics{figure/Algorithm2.pdf}
+\end{center}}{\begin{figure*}
+\begin{minipage}{\columnwidth}
+\begin{algorithm}[H]
+\centering
+\caption{Conventional Random Mutation Scheme}
+\label{alg:conv}
+\begin{algorithmic}[0]
+\vspace{-0.15\baselineskip}
+\Require{$seed$ -- a test case to be mutated}
+\vspace{-0.15\baselineskip}
+\Ensure{$input$ -- a new input to be tested}
+\vspace{5pt}
+\Function{RandomMutation}{$seed$}
+\vspace{-0.15\baselineskip}
+\State $input$ $\gets$ \Call{CopyBytesFromSeed}{$seed$}
+\vspace{-0.15\baselineskip}
+\State $batch\_size$ $\gets$ \Call{DecideBatchSize}{\null}
+\vspace{-0.15\baselineskip}
+\For{$i$ $\gets$ $1$ \textbf{to} $batch\_size$}
+\vspace{-0.15\baselineskip}
+\State 
+    \tikzmk{A}
+    $mutation$ $\gets$ \Call{SelectOperator}{\null}
+    \tikzmk{B}
+    \boxita{red}
+    \vspace{-0.15\baselineskip}
+    \State $pos$ $\gets$ \Call{SelectPosition}{$input$}
+    \vspace{-0.15\baselineskip}
+    \State $input$ $\gets$ \Call{ApplyOperator}{$mutation, input, pos$}
+\vspace{-0.15\baselineskip}
+\EndFor
+\vspace{-0.15\baselineskip}
+\State \textbf{return} $input$
+\vspace{-0.15\baselineskip}
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+\end{minipage}
+\hfill
+\begin{minipage}{\columnwidth}
+\begin{algorithm}[H]
+\centering
+\caption{Our Random Mutation Scheme}
+\label{alg:ours}
+\begin{algorithmic}[0]
+\vspace{-0.15\baselineskip}
+\Require{$seed$ -- a test case to be mutated}
+\vspace{-0.15\baselineskip}
+\Ensure{$input$ -- a new input to be tested}
+\vspace{5pt}
+\Function{RandomMutation}{$seed$}
+\vspace{-0.15\baselineskip}
+\State $input$ $\gets$ \Call{CopyBytesFromSeed}{$seed$}
+\vspace{-0.15\baselineskip}
+\State $batch\_size$ $\gets$ \Call{DecideBatchSize}{\null}
+\vspace{-0.15\baselineskip}
+\State 
+       \tikzmk{A}
+       $mutation$ $\gets$ \Call{SelectOperator}{\null}
+       \tikzmk{B}
+       \boxitb{lettuce}
+\vspace{-0.15\baselineskip}
+\For{$i$ $\gets$ $1$ \textbf{to} $batch\_size$}
+\vspace{-0.15\baselineskip}
+    \State $pos$ $\gets$ \Call{SelectPosition}{$input$}
+\vspace{-0.15\baselineskip}
+    \State $input$ $\gets$ \Call{ApplyOperator}{$mutation, input, pos$}
+\vspace{-0.15\baselineskip}
+\EndFor
+\vspace{-0.15\baselineskip}
+\State \textbf{return} $input$
+\vspace{-0.15\baselineskip}
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+\end{minipage}
+\end{figure*}}
+
+Algorithm~\ref{alg:conv} shows a scheme of random mutation that modifies a given seed, commonly observed in existing fuzzers including the AFL family (e.g., \cite{AFL, AFLFast, lafintel, AFLpp}), Honggfuzz \cite{honggfuzz}, and Angora \cite{Angora}. 
+This mutation scheme selects a mutation operator and applies it to a source seed as many times as the value of $batch\_size$.
+As a result, even if the created input finds a new execution path in a PUT (that is, obtains a reward), it becomes unclear which one has contributed to the discovery among the different selected operators.
+Thus, the scheme does not have a favorable form for optimizing the probability distribution of selecting mutation operators.
+
+We have reconstructed this scheme based on the following assumption: the multiple mutation operators used to create a single input are unlikely to work together. In other words, the scheme only applies several mostly independent mutation operators simultaneously and tests them on a PUT at once.
+Thus, the scheme can be considered as a type of batch processing in which mutation operators are applied in batches.
+
+\begin{figure}[tb]
+\centering
+\includegraphics[width=.33\textwidth]{figure/renovate_havoc.png}
+\caption{Illustration of the essential concept of Algorithm~\ref{alg:ours}.
+Each square represents a byte in the input, and colored squares indicate bytes that have been modified by mutation.}
+\label{fig:renovate_havoc}
+\end{figure}
+
+Figure~\ref{fig:renovate_havoc} describes the essential concept of the proposed scheme shown in Algorithm~\ref{alg:ours}, which originates from our assumption.
+Under this assumption, we do not necessarily need to apply multiple mutation operators to a single input.
+In particular, we would be able to obtain the same code coverage by applying each mutation operator to different copies of the input and testing them separately.
+Furthermore, the assumption allows us to recombine these separated mutation operators as we like because the operators do not affect each other.
+This justifies the inclusion of only one type of mutation operator per batch in Algorithm~\ref{alg:ours}.
+
+However, we would not be able to say that the assumption is universally applicable.
+For instance, if a large number of mutation operators are included in a single batch, it is extremely likely that a PUT will find errors in the created input at a very early stage of its execution, resulting in no new execution path.
+If we did not pack so many mutation operators into a batch, and instead applied the operators to different copies of the input, we would have been more likely to find a new execution path.
+Hence, in this case, we can say the mutation operators are mutually dependent.
+
+Therefore, to ensure that our assumption can be applied \textbf{in most cases} and can serve as a basis for our approach, we incorporated these two schemes into AFL++ and compared the quantity of code coverage obtained.
+If these two versions of AFL++ have no significant difference in code coverage, we can say that our assumption is valid in practice, which eventually means Algorithm~\ref{alg:ours} is practicable.
+Note that our assumption does not need to be (and would not be) valid \textbf{always}. The important thing here is whether fuzzers should persist in the conventional scheme Algorithm~\ref{alg:conv} at all costs. 
+
+We ran the two versions for 24 h against 10 PUTs selected from FuzzBench ten times each.
+The method for selecting PUTs and other detailed experimental setups are described in Section~\ref{subsec:eval-setup}.
+Note that AFL++ follows Algorithm~\ref{alg:conv} from the beginning. 
+
+The results are shown in Figure~\ref{fig:comp_scheme_with_coarse}.
+In all the tested PUTs, the AFL++ incorporating our scheme did not show any serious deterioration or stagnation compared to the original AFL++.
+In the figure, the two versions exhibit similar increasing trends, and the AFL++ incorporating our scheme achieves even better code coverage in some PUTs.
+In other words, we observe no fatal drawbacks when employing Algorithm~\ref{alg:ours} instead of Algorithm~\ref{alg:conv}.
+This allows us to reasonably convert fuzzers following Algorithm~\ref{alg:conv} into those following Algorithm~\ref{alg:ours} to directly apply the bandit algorithms.
+
+\begin{figure*}
+\centering
+\includegraphics[width=0.93\linewidth]{figure/scheme_comp_norm_mod.png}
+\caption{Comparison between Algorithm~\ref{alg:conv} and Algorithm~\ref{alg:ours}. The x-axis and y-axis show the number of generated inputs and edges covered, respectively. The solid line, and upper and lower dashed lines show 50\%, 75\% and 25\% quantile, respectively.}
+\label{fig:comp_scheme_with_coarse}
+\end{figure*}

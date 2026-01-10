@@ -1,0 +1,256 @@
+\section{Preliminaries}
+\label{sec:preliminaries}
+As ViTs greatly surpass canonical ConvNets in many vision tasks, several works try to explain \textit{what} makes ViTs work. We present a comprehensive macro architecture from two aspects, overall framework and essential operations.
+% and empirical explanations.
+
+% fig: framework
+\begin{figure}[t]
+    \vspace{-0.5em}
+    \centering
+    \includegraphics[width=0.92\linewidth]{Figs/fig_framework.pdf}
+    \vspace{-0.75em}
+    \caption{\textbf{Illustration of the macro architecture.} It has 4 stages in hierarchical, and each stage $i$ contains an embedding stem and $N_{i}$ blocks of $\mathrm{SMixer}(\cdot)$ and $\mathrm{CMixer}(\cdot)$ with PreNorm~\cite{acl2019Learning} and identical connection~\cite{he2016deep}. The features within the stage $i$ are kept in the same shape of $C_{i}\times \frac{H}{2}\times \frac{W}{2}$, except that $\mathrm{CMixer}(\cdot)$ will increase the dimension to $rC_{i}$ as an inverted bottleneck \cite{cvpr2018mobilenetv2}.
+    }
+    \label{fig:framework}
+    \vspace{-1.25em}
+\end{figure}
+
+\subsection{Overall Framework}
+\label{sec:framework}
+Recent studies have shown that the inherent framework makes ViTs superior~\cite{liu2021swin, nips2021MLPMixer, 2022convmixer}.
+Therefore, we first introduce a hierarchical design for ConvNets that takes in the merits of ViTs as in Figure \ref{fig:framework}. It primarily comprises three cardinal components: (\romannumeral1) embedding stem, (\romannumeral2) spatial mixing block, and (\romannumeral3) channel mixing block.
+The embedding stem is a key component in classical ConvNets~\cite{he2016deep, xie2017aggregated} and ViTs \cite{iclr2021vit, iccv2021PVT}, which downsamples the input image to reduce image-inherent redundancies and computational overload. Given $X$ in $H\times W$ resolutions as the input image or the output from the previous stage, we treat the stem as a ``size controller" at the start of each stage:
+\vspace{-0.30em}
+\begin{equation}
+    Z = \mathrm{Stem}(X),
+    \vspace{-0.40em}
+\end{equation}
+% where $Z\in \mathbb{R}^{C_{i}\times \frac{H}{2}\times \frac{W}{2}}$ is the embedded feature.
+where $Z$ is downsampled to $\frac{H}{2}\times \frac{W}{2}$ resolutions.
+Then, the feature flows to a stack of residual blocks at each stage.
+The network modules can be decoupled into two separate components: $\mathrm{SMixer}(\cdot)$ and $\mathrm{CMixer}(\cdot)$ for spatial-wise and channel-wise information propagation~\cite{yu2022metaformer},
+% According to MetaFormer~\cite{yu2022metaformer} and shortcut connection structure~\cite{sifre2014rigid, raghu2021vision}, the network modules can be decoupled into two separate components: $\mathrm{SMixer}(\cdot)$ and $\mathrm{CMixer}(\cdot)$ for spatial-wise and channel-wise information propagation,
+% which are applied across spatial and channel spaces successively, and formulated as:
+\vspace{-0.50em}
+\begin{equation}
+    Y = X + \mathrm{SMixer}\big(\mathrm{Norm}(X)\big),
+    \vspace{-0.50em}
+\end{equation}
+\begin{equation}
+    Z = Y + \mathrm{CMixer}\big(\mathrm{Norm}(Y)\big),
+    \vspace{-0.20em}
+\end{equation}
+where $\mathrm{Norm}(\cdot)$ is a normalization layer, \textit{e.g.,} Batch Normalization~\cite{ioffe2015batch} (BN). Notice that $\mathrm{SMixer}(\cdot)$ could be various spatial operations (\textit{e.g.,} self-attention~\cite{vaswani2017attention}, convolution), while $\mathrm{CMixer}(\cdot)$ is usually achieved by channel-wise MLP in inverted bottleneck~\cite{cvpr2018mobilenetv2} and an expand ratio of $r$.
+% For instance, one can perform spatial aggregation by a convolution or non-local~\cite{wang2018non} module and conduct channel aggregation by multi-layer perceptron (MLP) or the squeeze and excitation (SE)~\cite{hu2018squeeze} block, respectively.
+
+\subsection{Revisiting Essential Operations}
+\label{sec:operations}
+How to learn contextual and robust features effectively is the main theme of visual representation learning. We categorize two types of significant operations that are bound up with the expression capacities: \textit{regionality perception} and \textit{context aggregation}. Here, we assume the input feature $X$ and the output $Z$ are in the same shape $\mathbb{R}^{C\times H\times W}$.
+
+\vspace{-1.0em}
+\paragraph{Regionality Perception}
+% Convolution operation is essential for efficient and robust training, because it is armed with local and structural inductive bias, which perfectly aligns with the redundant nature of raw image pixels.
+Raw images are with local structure and are of high redundant in spatial space.
+This nature requires operations with local and structural inductive biases to effectively extract contextual representation.
+% 因为图像信号具有冗余性和局部结构性，在DNNs中需要一些具有local inductive bias的操作来高效的抽取上下文特征。这类操作使得训练更稳定、高效。
+% Since raw images are redundant signals, operations armed with local and structural inductive biases are fundamental components in DNNs, which ensure efficiency and stability during training. 
+We summarize these operations and network modules that \textit{statically} extract contextual features as \textit{regionality perception} and define it as $Z = \mathcal{S}(X, W)$, where $\mathcal{S}(\cdot,\cdot)$ can be an arbitrary binary operator (\textit{e.g.,} dot-product, convolution, element-wise product) and $W$ denotes the learnable weight.
+Instances of regionality perception are locally connected and weight-sharing on different positions, such as all kinds of convolutions~\cite{cvpr2016inceptionv3, iclr2016dilated, chollet2017xception}, spatial MLP~\cite{nips2021MLPMixer}, or even non-parametric operations like pooling~\cite{yu2022metaformer} and spatial shifting~\cite{aaai2022shiftvit}. The convolution operation is the most commonly used and thoroughly studied, balancing the efficiency \textit{vs.} accuracy trade-off~\cite{2017MobileNet, cvpr2018mobilenetv2, icml2019efficientnet}.
+Convolution can be written as $Z = \mathcal{S}(X, K)$, where $\mathcal{S}(\cdot,\cdot)$ is the convolution and the kernel $K\in \mathbb{R}^{M\times C\times k\times k}$ consists $M$ filters.
+% To further boost the representation abilities, considerable efforts are spared to make convolution-based regionality perception lighter and more flexible. Some works tend to factorize vanilla convolution into depthwise (DW) and pointwise (PW) counterparts concerning the latency/accuracy trade-off~\cite{sifre2014rigid, 2017MobileNet, icml2019efficientnet}.
+% Contemporarily, multi-path convolution modules~\cite{szegedy2015going, szegedy2016rethinking, xie2017aggregated} are studied to boost regionality interactions in both spatial and channel dimensions, where the input is split into several embeddings with different conv operations and finally merged by concatenation.
+
+\vspace{-1.0em}
+\paragraph{Context Aggregation}
+Apart from the local features, high-level semantic context modeling is also vital for visual recognition.
+Classical ConvNets~\cite{simonyan2014very, xie2017aggregated} often use deep stacks of these modules to capture the long-range interactions limited by their receptive fileds.
+% If only regionality perception modules were available, as in classical ConvNets~\cite{simonyan2014very, xie2017aggregated}, deep stacks of these modules is a common approach to model long-range interactions due to the limited receptive fields.
+However, these designs might be computationally inefficient and produce redundant features~\cite{2017MobileNet, iccv2017ChannelP}. To tackle this dilemma, context aggregation modules were proposed to adaptively explore and emphasize the underlying contextual information and decrease trivial redundancies from the input feature. Formally, we summarize \textit{context aggregation} as a family of network components that \textit{adaptively} capture interactions between two embedded features:
+\vspace{-0.40em}
+\begin{equation}\label{eq:aggregate}
+    O = \mathcal{S}\big(\mathcal{F}_{\phi}(X), \mathcal{G}_{\psi}(X)\big),
+    \vspace{-0.40em}
+\end{equation}
+where $\mathcal{F}_{\phi}(\cdot)$ and $\mathcal{G}_{\psi}(\cdot)$ are the aggregation and context branches with parameters $\phi$ and $\psi$. Optionally, the output can be transformed to the input dimension by a linear projection, $Z = OW_{O}$.
+In contrast to regionality perception, context aggregation modules model the importance of each position on $X$ by the aggregation branch $\mathcal{F}_{\phi}(X)$ and reweights the embedded feature from the context branch $\mathcal{G}_{\psi}(X)$ by $\mathcal{S}(\cdot,\cdot)$.%, which is usually an inherently general operation.
+% Consequently, context aggregation can be viewed as a prototype operation for various existing modules by designating different designs $\mathcal{S}(\cdot,\cdot)$, $\mathcal{F}(\cdot)$, and $\mathcal{G}(\cdot)$.
+
+\input{Tabs/tab_attention.tex}
+
+We briefly introduce two types of commonly-adopted context aggregations: self-attention mechanism~\cite{vaswani2017attention, wang2018non, iclr2021vit} and gating attention~\cite{dauphin2017language, hu2018squeeze}, as shown in Table~\ref{tab:attention}.
+% The self-attention mechanism utilizes a dot-product as $\mathcal{S}(\cdot,\cdot)$.
+Notably, the importance of each position on $X$ is calculated by global interactions of all other positions in $\mathcal{F}_{\phi}(\cdot)$ with a dot-product.
+This operation takes quadratic complexity and resulted in large computational overhead. To overcome this limitation, many attention variants in linear complexity~\cite{nips2021SOFT, iclr2022cosFormer} were proposed to substitute dot-product self-attention, \textit{e.g.,} linear attention~\cite{nips2020linformer, nips2022hilo} in the second line of Table~\ref{tab:attention}, but they usually introduce inductive biases and might degenerate to trivial attentions~\cite{icml2022Flowformer}.
+Different from self-attention, gating unit employs an element-wise product $\odot$ as $\mathcal{S}(\cdot,\cdot)$ in linear complexity, \textit{e.g.,} gated linear unit (GLU) variants~\cite{Shazeer2020GLU} and squeeze-and-excitation (SE) modules~\cite{hu2018squeeze} in the last two lines of Table~\ref{tab:attention}. However, they only aggregate the information of each position or the overall context with global average pooling (GAP), which lacks spatial interactions.
+
+% figure: spatial interaction analysis
+\begin{figure}[b]  % bottom
+\centering
+\vspace{-1.50em}
+    \subfloat[]{\label{fig:mask}
+    \includegraphics[height=0.465\linewidth,trim= 22 0 22 0,clip]{Figs/fig_analysis_mask.pdf}
+    \vspace{1pt}}
+    \hspace{-0.17cm}
+    \subfloat[]{\label{fig:interaction}
+    \includegraphics[height=0.500\linewidth,trim= 1 5 0 1,clip]{Figs/fig_analysis_interaction.pdf}
+    }
+\vspace{-1.0em}
+    \caption{%\textbf{Analysis of multi-order interaction.}
+    \textbf{(a) Illustrations of representation bottleneck.} Humans can recognize the object from images with around 50\% patches while learning little new information with a few (\textit{e.g.,} 5$\sim$10\%) or almost all patches (\textit{e.g.,} 90$\sim$95\%). DNNs are inclined to extract the most information from very few or the most patches but usually have little information gain with 25$\sim$75\% patches.
+    \textbf{(b) Distributions of the interaction strength $J^{(m)}$} are plotted for Transformers (DeiT and Swin) and ConvNets (ConvNeXt and MogaNet) on ImageNet-1K with $224^2$ resolutions and $n$ = $14\times 14$. Middle-order interactions mean the middle-complex interaction, where a medium number of patches (\textit{e.g.,} 0.2$\sim$0.8n) participate.
+    }
+    \label{fig:spatial_interaction}
+    \vspace{-0.50em}
+\end{figure}
+
+
+\section{Representation Bottleneck from the View of Multi-order Interaction}
+\label{sec:rep_bottleneck}
+%Existing studies mainly investigate the \textit{why} ViTs work from two directions: (a) Evaluation of robustness against noises finds that self-attentions~\cite{naseer2021intriguing, iclr2022how, li2022A2MIM} or gating mechanisms~\cite{icml2022FAN} in ViTs are more robust than convolutions. For example, ViTs can still recognize the target object with large occlusion ratios (\textit{e.g.,} only 10$\sim$20\% visible patches in Figure~\ref{fig:mask}).
+%(b) Evaluation of out-of-distribution samples reveals that both self-attention mechanism and depth-wise convolution (DWConv) with large kernels share similar shape bias as human vision~\cite{nips2021partial, cvpr2022replknet}, while canonical ConvNets (using small convolutional kernels) exhibit strong bias on local texture~\cite{hermann2020origins}. These properties of DNNs are summarized as \textit{representation bottleneck}~\cite{deng2021discovering}.
+The analysis of DNNs' representation capability delivers a new perspective to explain and recognize existing DNNs.
+In contrast to previous studies that mainly center on the robustness and generalization ability of DNNs~\cite{naseer2021intriguing, icml2022FAN, iclr2022how}, we expand the scope to the investigation of feature interaction complexities.
+Intuitively, as shown in Figure~\ref{fig:mask}, the powerful ViTs can still recognize the target object under extreme occlusion ratios (\textit{e.g.,} only 10$\sim$20\% visible patches) but produce limited information gain with intermediate occlusions~\cite{deng2021discovering}, which indicates a cognition gap between prevailing deep models and human vision.
+%
+It can be explained by $m$-th order interaction $I^{(m)}(i,j)$ and $m$-order interaction strength $J^{(m)}$, as defined in \cite{zhang2020interpreting, deng2021discovering}.
+Considering the image with $n$ patches in total, $I^{(m)}(i,j)$ measures the average interaction complexity between the patch pair $i,j$ on all contexts consisting of $m$ patches, where $0\le m \le n-2$ and the order $m$ reflects the contextual complexity. Normalized by the average of interaction strength, the relative interaction strength $J^{(m)}$ with $m\in (0,1)$ measures the complexity of interactions encoded in DNNs. Refer to Appendix~\ref{app:interaction} for definitions and details.
+Along this line, we show empirically in Figure~\ref{fig:interaction} that most current DNNs are more favored to encode excessively low-order or high-order interactions while typically missing the most informative middle-order ones.
+%The reason for this cognition gap might be the sole implementation of regionality perception or context aggregation modules in mainstream DNNs, which merely capture simple or complex interactions but fail to model the middle-order interactions explicitly.
+From our perspective, such a representation bottleneck might attribute to the inappropriate combination of aforementioned regionality perception and context aggregation operations~\cite{treisman1980feature, 2021shapebias, deng2021discovering, li2022A2MIM}, which infuses unfavorable interaction bias into deep architectures.
+% As concluded in previous analyses \cite{2021shapebias, deng2021discovering, li2022A2MIM}, enhancing the ability to encode more middle-order interactions will help DNNs to learn more comprehensive representations.
+% Note that $I^{(m)}(i,j)$ measures the average interaction complexity between variables $i,j$ on all contexts consisting of $m$ patches, and the order $m$ reflects the contextual complexity of $I^{(m)}(i,j)$. In Figure~\ref{fig:interaction}, we present the representation bottleneck by interaction strength $J^{(m)}$ with $m\in (0,1)$, where DNNs learn usually fail to capture middle-order interactions. Appendix~\ref{app:interaction} provides details of the representation bottleneck.
+
+
+\vspace{-0.5em}
+\section{Methodology}
+\label{sec:method}
+% In this section, we instantiate the overall framework as MogaNet equipped with spatial and channel aggregation blocks for multi-order context aggregation and channel-wise multi-order features reallocation.
+% In this section, we instantiate the overall framework as MogaNet with convolution-based modules that efficiently combine regionality perception and context aggregation.
+
+\vspace{-0.5em}
+\subsection{Overview of MogaNet}
+\label{sec:overview}
+% Figure~\ref{fig:app_moga_framework} provides a comprehensive illustration of the four-stage MogaNet architecture. 
+Figure~\ref{fig:app_moga_framework} provides an illustration of the four-stage MogaNet architecture.
+For stage $i$, the input image or feature is first fed into the embedding stem to regulate the feature resolutions and embed into $C_{i}$ dimensions. Assuming the input image in $H\times W$ resolutions, features of the four stages are in $\frac{H}{4}\times\frac{W}{4}$, $\frac{H}{8}\times\frac{W}{8}$, $\frac{H}{16}\times\frac{W}{16}$, and $\frac{H}{32}\times\frac{W}{32}$ resolution respectively.
+Then, the embedded feature flows into $N_{i}$ Moga Blocks, consisting of spatial and channel aggregation blocks as presented in Sec.~\ref{sec:moga} and Sec.~\ref{sec:channel}, for further context extraction and aggregation. 
+GAP and a linear layer will be added after the final output for classification tasks. As for dense prediction tasks~\cite{tpami2015faster, 2017iccvmaskrcnn, eccv2018upernet}, the output from four stages can be used through neck modules~\cite{cvpr2017fpn, cvpr2019semanticFPN}.
+
+% figure: spatial Multi-Order
+\begin{figure}[b]  % bottom
+    \vspace{-1.0em}
+    \centering
+    \includegraphics[width=1.0\linewidth]{Figs/fig_moga_spatial.pdf}
+\vspace{-1.75em}
+    \caption{\textbf{Structure of our proposed spatial aggregation block.}}
+    \label{fig:moga_multiorder}
+    \vspace{-0.50em}
+\end{figure}
+
+% figure (Channel aggregation & analysis) and table (ablation)
+\begin{figure*}[t!]
+\vspace{-0.75em}
+\centering
+\begin{minipage}{0.67\linewidth}
+    \subfloat[]{\label{fig:channal_moga}
+    \includegraphics[height=0.430\linewidth,trim= 0 0 0 0,clip]{Figs/fig_moga_channel.pdf}
+    % \vspace{1pt}
+    }
+    \hspace{-0.18cm}
+    \subfloat[]{\label{fig:channal_analysis}
+    \includegraphics[height=0.435\linewidth,trim= 1 6 0 1,clip]{Figs/fig_analysis_decomp.pdf}
+    }
+    \vspace{-1.0em}
+    \caption{
+\textbf{(a) Structure of our proposed channel aggregation block.}
+\textbf{(b) Analysis of channel MLP and the channel aggregation module.} Based on MogaNet-S, performances and model sizes of the raw channel MLP, MLP with SE block, and the channel aggregation is compared with the MLP ratio of $\{2,4,6,8\}$ on ImageNet-1k.
+    }
+\end{minipage}
+~\begin{minipage}{0.32\linewidth}
+    \vspace{-1.25em}
+    \input{Tabs/tab_ablation.tex}
+\end{minipage}
+\vspace{-1.25em}
+\end{figure*}
+
+\subsection{Multi-order Gated Aggregation}
+\label{sec:moga}
+% as we discussed in Sec.~\ref{sec:rep_bottleneck}, recent works have empirically verified that the sole presence of regionality perceptions or context aggregation is insufficient to learn diverse contextual features and multi-order interactions simultaneously~\cite{iclr2022uniformer, pinto2022impartial, deng2021discovering}.
+Feature integration theory~\cite{treisman1980feature} showed that human vision perceives the object by extracting basic contextual features and associating individual features with attention.
+However, as we empirically discussed in Sec.~\ref{sec:rep_bottleneck}, the sole presence of regionality perceptions or context aggregation is insufficient to learn diverse contextual features and multi-order interactions simultaneously~\cite{iclr2022uniformer, pinto2022impartial, deng2021discovering}.
+% Herein, we expand the scope to a novel direction based on the representation bottleneck of DNNs and first analyze existing networks from the perspective of multi-order interactions. 
+Figure~\ref{fig:interaction} shows conventional DNNs tend to focus on low or high-order interactions. They are missing the most informative middle-order interactions. Thus, the primary challenge is how to capture contextual multi-order interactions effectively and efficiently.
+%As the sole presence of regionality perceptions or context aggregations has been empirically verified to be insufficient for visual recognition~\cite{iclr2022uniformer, pinto2022impartial, nips2022iformer}, we first analyze existing models from the perspective of multi-order interactions. Figure~\ref{fig:interaction} shows that mainstream DNNs tend to learn low or high-order interactions, indicating that they fail to capture more informative middle-order interactions as human vision~\cite{treisman1980feature}. Thus, the primary challenge is how to capture contextual multi-order interactions efficiently.
+To this end, we propose a spatial aggregation (SA) block as $\mathrm{SMixer}(\cdot)$ to aggregate multi-order contexts in a unified design, as shown in Figure~\ref{fig:moga_multiorder}, which consists of two cascaded components:
+\vspace{-0.40em}
+\begin{equation}
+    \label{eq:moga_block}
+    Z = X + \mathrm{Moga}\Big( \mathrm{FD}\big(\mathrm{Norm}(X)\big) \Big),
+    \vspace{-0.40em}
+\end{equation}
+where $\mathrm{FD}(\cdot)$ is a feature decomposition module (FD) and $\mathrm{Moga}(\cdot)$ is a multi-order gated aggregation module comprising the gating $\mathcal{F}_{\phi}(\cdot)$ and the context branch $\mathcal{G}_{\psi}(\cdot)$.
+
+\paragraph{Multi-order contextual features.}
+\vspace{-1.0em}
+As a pure convolutional structure, we extract multi-order features with both \textit{static} and \textit{adaptive} regionality perceptions. 
+% Since convolutions are inherently high-pass filters~\cite{iclr2022how, wang2022anti}, we design $\mathrm{FD}(\cdot)$ to adaptively decompose and enhance the high-frequency details to learn more informative features of full-frequency bands, which is formulated as: 
+Except for $m$-order interactions, there are two trivial interactions, $0$-order interaction of each patch itself and $1$-order interaction covering all patches, which can be modeled by $\mathrm{Conv}_{1\times 1}(\cdot)$ and $\mathrm{GAP}(\cdot)$. To force the network focus on the multi-order interactions, we propose $\mathrm{FD}(\cdot)$ to dynamically exclude trivial interactions, which is formulated as:
+\vspace{-0.50em}
+\begin{align}
+    \label{eq:FD_proj}
+    Y &= \mathrm{Conv}_{1\times 1}(X),\\
+    \label{eq:FD}
+    Z &= \mathrm{GELU}\Big(Y + \gamma_{s}\odot\big( Y-\mathrm{GAP}(Y)\big) \Big),
+    \vspace{-0.60em}
+\end{align}
+where ${\gamma}_{s} \in \mathbb{R}^{C\times 1}$ is a scaling factor initialized as zeros. By re-weighting the trivial interaction component $Y - \mathrm{GAP}(Y)$, $\mathrm{FD}(\cdot)$ also increase feature diversities \cite{iclr2022how, wang2022anti}.
+Then, we ensemble depth-wise convolutions (DWConv) to encode multi-order features in the context branch of $\mathrm{Moga}(\cdot)$. Unlike previous works \cite{eccv2022edgeformer, nips2022hilo, nips2022iformer, nips2022hornet} that combine the normal DWConv and self-attentions to model local and global interactions, we employ three DWConv layers with dilation ratios $d\in \{1,2,3\}$ in parallel to capture low, middle, and high-order interactions: given the input feature $X\in \mathbb{R}^{C\times HW}$, $\mathrm{DW}_{5\times 5, d=1}$ is first applied for low-order features; then, the output is factorized into ${X}_l \in \mathbb{R}^{C_l \times HW}$, ${X}_m \in \mathbb{R}^{C_m \times HW}$, and ${X}_h \in \mathbb{R}^{C_h \times HW}$ along the channel dimension, where $C_l + C_m + C_h =C$; afterward, ${X}_l$ and ${X}_h$ are assigned to $\mathrm{DW}_{5\times 5, d=2}$ and $\mathrm{DW}_{7\times 7, d=3}$, respectively, while ${X}_l$ serves as identical mapping; finally, the output of ${X}_l$, ${X}_m$, and ${X}_h$ are concatenated as multi-order contexts, $Y_{C} = \mathrm{Concat}(Y_{l, C_{l}}, Y_{m}, Y_{h})$. 
+Notice that the proposed $\mathrm{FD}(\cdot)$ and multi-order DWConv layers only require a little extra computational overhead and parameters than $\mathrm{DW}_{7\times 7}$ used in ConvNeXt~\cite{cvpr2022convnext}, \textit{e.g.,} +multi-order and +$\mathrm{FD}(\cdot)$ increase 0.04M parameters and 0.01G FLOPS over $\mathrm{DW}_{7\times 7}$ as shown in Table~\ref{tab:ablation}.
+
+\vspace{-1.0em}
+\paragraph{Gating aggregation.}
+To aggregate the output contexts from the context branch, we employ SiLU~\cite{elfwing2018sigmoid} activation in the gating branch, \textit{i.e.,} $x\cdot \mathrm{Sigmoid}(x)$, which can be regarded an advanced version of Sigmoid. As verified in Appendix~\ref{app:ablation_gating}, we find SiLU has both the gating effects as Sigmoid and the stable training property.
+Taking the output from $\mathrm{FD}(\cdot)$ as the input, we rewrite Eq.~(\ref{eq:aggregate}) for $\mathrm{Moga}(X)$:
+\vspace{-0.50em}
+\begin{align}
+    \label{eq:moga}
+    Z &= \underbrace{\mathrm{SiLU}\big( \mathrm{Conv}_{1\times 1}(X) \big)}_{\mathcal{F}_{\phi}} \odot \underbrace{\mathrm{SiLU}\big( \mathrm{Conv}_{1\times 1}(Y_{C}) \big)}_{\mathcal{G}_{\psi}},
+    \vspace{-1.5em}
+\end{align}
+% where $\mathcal{G}_{\psi}(\cdot)$ and $\mathcal{F}_{\phi}(\cdot)$ are defined as $\mathrm{SiLU}(\mathrm{Conv}_{1\times 1}(\cdot))$.
+With the proposed SA blocks, MogaNet captures much more middle-order interactions, as validated in Figure~\ref{fig:interaction}. 
+The SA block produces high-quality multi-order representations with similar parameters and FLOPs as ConvNeXt, which is well beyond the reach of existing methods without applying cost-consuming aggregation (\textit{e.g.,} self-attention).
+
+\subsection{Multi-order Features Reallocation by Channel Aggregation}
+\vspace{-0.25em}
+\label{sec:channel}
+% Emphasize the superiority of our CA compared with vanilla SE
+As discussed in Sec.~\ref{sec:framework}, mainstream architectures perform channel-mixing $\mathrm{CMixer}(\cdot)$ merely by two linear projections, \textit{e.g.,} 2-layer channel MLP~\cite{iclr2021vit, liu2021swin, nips2021MLPMixer} with a channel expand ratio $r$ or the MLP with a $3\times 3$ DWConv in between~\cite{cvmj2022PVTv2, aaai2022LIT, nips2022hilo}.
+As plotted in Figure~\ref{fig:channal_analysis}, the vanilla channel MLP requires numerous parameters ($r$ default to 4 or 8) to achieve expected performance, having low computational efficiency. 
+This problem might be caused by redundancy cross channels \cite{eccv2018CBAM, iccv2019GCNet, icml2019efficientnet, cvpr2020Orthogonal}, and most approaches address this issue by improving feature diversity, \textit{e.g.,} inserting a SE module~\cite{hu2018squeeze} into MLP.
+Different from previous designs requiring another MLP bottleneck, we design a lightweight channel aggregation module $\mathrm{CA}(\cdot)$ to re-weight the high-dimensional hidden spaces and further extend it to a channel aggregation (CA) block. 
+As shown in Figure~\ref{fig:channal_moga}, the output of our CA block is written as:
+\vspace{-0.5em}
+\begin{equation}
+\begin{aligned}
+    Y &= \mathrm{GELU}\Big(\mathrm{DW_{3\times 3}}\big(\mathrm{Conv_{1\times 1}}(\mathrm{Norm}(X))\big)\Big),\\
+    Z &= \mathrm{Conv_{1 \times 1}}\big(\mathrm{CA}(Y)\big) + X.
+\end{aligned}
+\vspace{-0.4em}
+\end{equation}
+Concretely, $\mathrm{CA}(\cdot)$ is implemented by a channel-reduce projection $W_{r}: \mathbb{R}^{C\times HW}\rightarrow \mathbb{R}^{1\times HW}$ and GELU to gather and reallocated channel-wise information:
+\vspace{-0.5em}
+\begin{equation}
+    \mathrm{CA}(X) = X + \gamma_{c}\odot\big(X - \mathrm{GELU}(XW_{r})\big),
+\vspace{-0.4em}
+\end{equation}
+where $\gamma_{c}$ is the channel-wise scaling factor. Figure~\ref{fig:channal_analysis} verifies the efficiency of $\mathrm{CA}(\cdot)$ in comparison to the vanilla MLP and the MLP with SE module. Despite some improvements to the baseline, the MLP $w/$ SE module still requires large MLP ratios (\textit{e.g.,} $r$ = 6) to achieve expected performance while introducing extra parameters and computational overhead. In contrast, our proposed $\mathrm{CA}(\cdot)$ with $r$ = 4 brings 0.6\% gain over the baseline at a small extra cost (0.04M extra parameters and 0.01G FLOPs) while achieving the same performance as the baseline with $r$ = 8.
+% It is implemented by various attention mechanisms in recent vision Transformer models or spatial Multi-layer Perceptron (MLP) in MLP-like models. Note that the main function of the token mixer is to propagate token information, although some token mixers can also mix channels, like attention. At Stage II, the second sub-block primarily consists of a two-layered MLP with non-linear activation, looking at cross-channel correlations via a set of $1\times 1$ convolutions. 
+
+\subsection{Implementation Details}
+\label{sec:details}
+Following the network design style of ConvNets~\cite{he2016deep, cvpr2022convnext, guo2022van}, we design MogaNet of five different model sizes (X-Tiny, Tiny, Small, Base, and Large) via stacking the different number of spatial and channel aggregation blocks at each stage, which has similar numbers of parameters as RegNet~\cite{cvpr2020regnet} variants (400MF, 800MF, 4GF, 8GF, and 16GF). Detailed configurations and hyper-parameters are shown in Table~\ref{tab:app_architecture}.
+We set the channels of the multi-order DWConv layers to $C_l:$ $C_m:$ $C_h$ = 1:3:4 (discussed in Appendix~\ref{app:ablation_multiorder}).
+% The embedding stem in canonical ResNet contains a 7$\times$7 convolution layer with stride 2, followed by a max-pooling layer, which results in a 4$\times$ downsampling of the input images.
+Similar to~\cite{2021patchconvnet, iclr2022uniformer, nips2022EfficientFormer}, the first embedding stem in MogaNet is designed as two stacked 3$\times$3 convolution layers with the stride of 2 while adopting the single-layer version for embedding stems in other three stages.
+We select GELU~\cite{hendrycks2016bridging} as the common activation function and only use SiLU in the Moga module as Eq.~(\ref{eq:moga}).

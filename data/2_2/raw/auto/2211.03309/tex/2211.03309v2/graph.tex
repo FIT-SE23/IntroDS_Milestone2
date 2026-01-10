@@ -1,0 +1,72 @@
+\input{figs/transformation.tex}
+\section{Compute Graph Transformation and Device Mapping}
+\label{sec:mapping}
+%Given the ML model description (in form of a compute graph), the system topology (in form of a system graph) and the parallelization strategy, we use device mapping engine to map the vertices of the compute graph (kernels) onto the vertices of the system graph (nodes) and map the edges of the compute graph (data dependency edges) to the edges of the system graph (physical network links). However, before the mapping happens, we transform the compute graph to reflect the parallelism strategy specified by the user.
+
+%Given the ML model description (in form of a compute graph), and the parallelization strategy, we first transform the compute graph to reflect the parallelism strategy. Next, we use device mapping engine to map the vertices of the compute graph (kernels) onto the vertices of the system graph (accelerator nodes) and map the edges of the compute graph (data dependency edges) to the edges of the system graph (physical network links).
+
+Given the ML model description (in form of a \textit{compute graph}) and the distributed system topology (in form of a \textit{system graph}), 
+%an essential step before performance prediction is to 
+we find an optimal mapping from vertices and edges in the compute graph to hardware nodes and network links in the system graph. 
+%However, there is not a one-to-one mapping from nodes in the compute graph to hardware nodes in the system graph in presence of parallelism: A compute node (kernel) can be replicated and mapped to different hardware nodes (data parallelism), or it can be replaced with smaller sub-kernels (kernel parallelism). This complicates the mapping problem.
+However, before mapping, we transform the compute graph into a \textit{super-graph} to reflect the parallelism strategies specified as input.
+%to enable a one-on-one mapping between nodes in the compute graph to hardware nodes in the distributed system graph. 
+
+
+%\vspace{0.1in}
+\subsection{Compute Graph Structure Transformation}
+%A graph transformation or rewrite defines a set of rules of the form $S \rightarrow R$, with $S$ being the starting graph and $R$ being the result graph. 
+%A rewrite rule is applied to the starting graph by searching for an occurrence of the pattern graph (pattern matching, thus solving the subgraph isomorphism problem) followed by replacing the found occurrence by an instance of the replacement graph. 
+%A rewrite rule specifies a replacement graph that replaces each node in the starting graph, and how these replacement graphs are connected in the result graph.
+%A graph transformation is the stepwise replacement of subgraphs inside a host graph. 
+%data parallelism entails replicating the graph $N$ times and connecting the corresponding compute vertices in a fashion consistent with the reduction algorithm: for ring-all-reduce, the corresponding vertices would be connected in a ring fashion.
+%A graph transformation or rewrite defines a set of rules that apply to sub-graphs in the \textit{original} graph in order to generate the \textit{result} graph.
+%A rewrite rule specifies a \textit{replacement} graph that replaces every instance of a \textit{sub-graph} (pattern matching) in the original graph.
+%It also defines how these replacement graphs are connected in the result graph~\cite{}.
+Each parallelism strategy is a form of graph transformation where the sub-graph to be replaced is a single node, so essentially all nodes would be replaced with the same replacement graph.
+For example, to model data parallelism (with the ring-all-reduce implementation) we would need to 
+$\textit{replace}$ each node in the original graph with a ring of length $N$ (for an $N$-data parallel strategy). 
+The new edges on the ring will be marked as $\textit{cross-edge}$ to capture the fact that they connect compute nodes hosted on separate devices.
+To capture a kernel parallelism strategy (e.g. $\texttt{RC-\{KP1\}-\{KP2\}}$), we would need to $\textit{replace}$ each node in the compute graph with a 2-dimensional torus of $\texttt{KP1} \times \texttt{KP2}$ dimension 
+(assuming the reduction algorithm along each dimension is ring-all-reduce). 
+Similarly, new edges on the torus would be marked as cross-edge.
+To capture a pipeline parallelism, no node transformation is required. The pipeline parallelism slices the original graph into multiple sub-graphs, each hosted on a separate hardware node.
+Edges connecting sub-graphs would be marked as cross-edge.
+Figure~\ref{fig:transformation} shows the composition of multiple parallelism strategies applied in sequence (pipeline, data and kernel parallelism, respectively). 
+$G_0$ is the original compute graph and $G_4$ is the final transformed graph.
+
+
+
+%Pipeline parallelism, unlike other forms, does not result in replication or replacement of graph nodes. It simply modifies the edge type between nodes across layers that are mapped to different pipeline stages to capture their cross-connection nature. 
+
+%\vspace{0.1in}
+\subsection{Device Mapping and Routing Engine}
+%After the transformation stage, the transformed graph would have $N_r\times$ more number of nodes than the original graph, where $ N_r = dp\times kp_1 \times kp_2$, and $dp$, $kp_1$ and $kp_2$ are multiplicative factors of data parallel and kernel parallel strategy. 
+%Moreover, to exploit pipeline parallelism, each model replica can be partitioned into $P$ sub-graphs and hosted in separate devices. 
+%Data parallelism, kernel parallelism and pipeline parallelism would require each parallel shard to be hosted on a separate physical device. Hence, the total number of hardware nodes, $N_h$, should be $N_r \times P$.
+%We use pipeline parallelism to slice the super-graph into smaller partitions such that number of partitions is consistent with total number of replicas and number of physical devices. 
+Data parallelism, kernel parallelism and pipeline parallelism would require that each parallel shard to be hosted on a separate physical device.
+Hence, device mapping happens at the granularity of a parallel shard. 
+%Each parallel shard is basically a sub-graph in the transformed graph.
+We want parallel shards that are close in the parallel space to be mapped onto nodes that are close in the physical space to minimize communication. 
+%However, parallelism space is usually a 5 or 4 or 3-dimensional hypercube, while the underlying system graph is usually a 3 or 2-dimensional mesh or torus.
+However, the transformed graph usually has higher dimension than the system graph. 
+Figure~\ref{fig:transformation} shows such example, where the final transformed graph ($G_4$) is 4-D hypercube and the system graph is a 2-D torus.
+Therefore, it will not be possible to map all adjacent nodes in the compute graph to adjacent nodes in the system graph.
+We adopt a greedy approach to conduct such mappings: We start with a parallel dimension, map all parallel shards along that dimension to adjacent nodes in the hardware.
+If the number of shards along the parallel dimension is larger than the hardware dimension we are mapping onto, we wrap-around to the next immediate dimension.
+We continue this process along other dimensions in a specific order, until all nodes are mapped.
+The order at which we walk along the parallelism dimensions results in different mappings.
+For 4 different parallelism strategies, we explore $(4!)$ = 24 possible orderings to pick the best mapping.
+Once node mapping is determined, we take a last step to map edges to physical links.
+An edge that connects to adjacent node in the compute graph may map to a multi-hop path as shown in Figure~\ref{fig:transformation}. 
+As a result, one physical link would be shared across multiple edges.
+The number of logical edges sharing a physical link is an important factor for effective bandwidth estimation.
+We use $X-Y$ routing to map edges in the compute graph to paths in the system graph.
+Overall, the whole transformation step followed by device mapping is necessary to find an accurate estimation of \textit{edge} timing. 
+
+
+%Depending on the parallelism strategy, the transformed compute graph can take the form of a 5D/4D/3D hypercube. However, the underlying system topology may be a 2D or 3D hypercube. This means that multiple edges in the compute graph would need to be mapped in to one edge/link of the system graph. The number of logical edges that are mapped into a physical edge is an important metric as it captures the effect of link bandwidth sharing which ultimately affects the communication overhead. Based on link sharing, we allocate the derated/partial link bandwidth to the edges of the compute graph. In order to find a mapping that minimizes the maximum number of edges that is mapped in to each network link, we use a greedy heuristic. Our heuristic works as follows: starting with one axis in the parallelization space, we map the vertices along that axis as close as possible, before moving to the vertices in the second axis. We repeat this for different permutations of axes and choose the one which minimizes the communication overhead.
+
+
+%\todosaptadeep{These different parallelism strategies have major implications on end-to-end performance and stress different resources of the system. As an example, very large models often wouldn't fit in the main memory capacity of a single accelerator device, and therefore model and/or pipeline parallelism needs to be employed. Model parallelism on the other hand, can stress inter-node network characteristics.}

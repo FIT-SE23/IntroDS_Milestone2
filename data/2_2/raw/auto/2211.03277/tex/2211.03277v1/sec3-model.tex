@@ -1,0 +1,129 @@
+%!TEX ROOT = ./acl2021.tex
+% \begin{figure*}[t]
+%     \centering
+%     \begin{subfigure}[b]{0.49\textwidth}
+%         \centering
+%         \includegraphics[width=\textwidth]{Figures/Picture 1.png}
+%         \caption{Separate Variant: different LMs for Question Decomposer and RC Component}
+%         \label{fig:decomposer-rc}
+%     \end{subfigure}
+%     \begin{subfigure}[b]{0.49\textwidth}
+%         \centering
+%         \includegraphics[width=\textwidth]{Figures/Picture 2.png}
+%         \caption{Unified Variant: Single LM for Question Decomposer and RC Component}
+%         \label{fig:t5-unified}
+%     \end{subfigure}
+%     \caption{The variants of the proposed model.}
+%     \label{fig:encoder}
+% \end{figure*}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{Figures/structure.png}
+    \caption{Our model structure on complex reading comprehension through question decomposition. Step 1: Question Decomposer generates a sequence of sub-questions; Step 2: RC component predicts the answer based on question, sub-questions and the given context. The context of this given example is truncated.}
+    \label{fig:decomposer-rc}
+\end{figure*}
+
+\section{Complex Question Answering Through Decomposition}
+\label{sec3-model}
+%
+Our focus in this work is on complex questions requiring multi-hop reasoning. 
+%
+As such, our approach consists of the following two steps: 
+\begin{enumerate}
+\item The complex question is decomposed to a sequence of sub-questions. The decomposition of the question is performed by the \emph{question decomposer} component of our system. %, detailed in \S \ref{sec3-prob-model}. 
+
+%First, a question decomposer learns to decompose each difficult multi-hop question into several sub-questions in an end-to-end trainable way. Section \ref{sec3-sub-semantic-parser} details our decomposing approach.
+\item The model produces the answer to the complex question leveraging the generated subquestions to provide guidance to the reasoning of the system. This is performed by the \emph{reading comprehension} component. 
+
+%Our model leverages another end-to-end approach that also regards the sub-questions obtained from previous step as the input. Section \ref{sec3-sub-encoder} details our reasoning approach.
+\end{enumerate}
+
+We use LMs such as T5 and Bart as the backbone\footnote{Our approach is general, and it can be used with other pre-trained seq2seq models and language models as well.} for {both}  question decomposer and the reading comprehension (Figure \ref{fig:decomposer-rc}). 
+%
+We present several variants of our model, depending whether the models for the above two steps are either separate or unified using multitask learning. 
+%
+%We show that the same multitask-trained T5 can successfully decompose complex questions and make use of the decomposed questions to guide its reasoning process when generating the answer. 
+%
+As we have the ground truth question decomposition for only a subset of the training data, we treat the missing decompositions as latent variables. 
+%
+We then propose an algorithm based on Hard-EM \cite{Neal98aview}  for learning the model. The rest of this section provides more details.  
+
+\paragraph{Probabilistic Model.}
+\label{sec3-prob-model}
+Given a question $Q$ and a $C$ context pair, our system generates the answer $A$ according to the following probabilistic model: 
+
+% \vspace{-5mm}
+{
+\begin{eqnarray}
+&&P_{\theta}(A|Q,C) = \sum_Z P_{\theta}(A,Z|Q,C)\\ \label{eq:whole}
+ && = \sum_Z P^{\text{dc}}_{\text{LM}}(Z|Q)\times P^{\text{rc}}_{\text{LM}}(A|Q,C,Z) \label{eq:split}
+\end{eqnarray}
+}
+
+% \vspace{-4mm}
+\noindent where $Z$ denotes the unobserved decomposition of the question, $P^{\text{dc}}_{\text{LM}}(Z|Q)$~\footnote{We have made the following independence assumption: $P^{\text{dc}}_{\text{LM}}(Z|Q) \approx P^{\text{dc}}_{\text{LM}}(Z|Q,C)$.} denotes the question decomposer (operationalised based on one specific LM), and $P^{\text{rc}}_{\text{LM}}(A|Q,C,Z)$ denotes the reading comprehension component.
+%
+In principle, the $P^{\text{dc}}_{\text{LM}}$ and $P^{\text{rc}}_{\text{LM}}$ components can be constructed using different models, so the parameters $\theta$ of the whole probabilistic model consists of those for these two models. This is denoted by the \emph{separate} variant. 
+
+We further investigate using the same LM for both the question decomposer and reading comprehension component, which we denote by the \emph{unified} variant in the experiments. In this case, the probabilistic model parameter $\theta$ consists of only one set of parameters corresponding to the underlying model.
+
+\paragraph{Question Decomposer.}
+To obtain high-quality sub-questions, we first train a question decomposer $P^{\text{dc}}_{\text{LM}}$ to break down difficult multi-hop questions, i.e., the first term in Equation \ref{eq:split}.
+%
+It learns the decomposition based on {QDMRs} \cite{break-it-down}.  
+%
+We only use the specific partition on the DROP dataset~\cite{DROP:2019} and treat QDMRs as sub-questions.
+%
+These sub-questions only cover around 10\% QA pairs in DROP.
+Therefore, we need to predict decompositions for the rest of the dataset.
+More details will be revealed in Section \ref{sec4-exper}.
+
+Formally, given a multi-hop question $Q$, the question decomposer $P^{\text{dc}}_{\text{LM}}$ generates the sub-questions $Z := \{Q^1, Q^2, ..., Q^s\}$. 
+%
+Intuitively, We treat it as a seq2seq learning problem:
+%
+our input to the encoder is ``$\texttt{<PARSE>} Q $'', where \texttt{<PARSE>} is a special token. 
+The decoder then generates tokens of the sub-questions in auto-regressive way  ``$\texttt{<subQ>} Q^1 \texttt{<subQ>} Q^2 \texttt{<subQ>} \ldots Q^s$'', where \texttt{<subQ>} is a special token~\footnote{We employ the greedy search algorithm to generate the sub-questions $Z$. However, one can leverage other strategies like beam search to make more than one predictions.}. 
+
+\paragraph{Reading Comprehension Component.}
+To further obtain answers based on the question and generated sub-questions, the reading comprehension component $P^{\text{rc}}_{\text{LM}}$ generates the answer $A$, i.e., the second term in Equation \ref{eq:split}. 
+In stead of directly answering all the sub-questions given by the trained question decomposer, we train our RC component to predict the final answer in a sequence-to-sequence way.
+
+Formally, given a multi-hop complex question $Q$ and the corresponding sub-questions $Z := \{Q1, Q2, ..., Q^s\}$ generated by a trained question decomposer, our input to the RC encoder is ``{\small $\texttt{<QUESTION>} Q \texttt{<subQ>} Q^1 \ldots \texttt{<subQ>} Q^s \texttt{<CONTEXT>} C$}'', where \texttt{<QUESTION>} and \texttt{<CONTEXT>} are special tokens.
+In other words, we concatenate the multi-hop question and all the sub-questions, together with the context as the input to our RC component.
+The decoder then generates the tokens of the answer autoregressively. 
+
+\begin{algorithm}[t]
+\caption{Learning with Hard-EM }\label{alg:cap}
+\begin{algorithmic}[1]
+\Require an initial pre-trained LM $M$; the full reading comprehesion dataset $\mathcal{D}_1$; the subset with sub-question annotations $\mathcal{D}_2$. 
+\State Train $M$ on $\mathcal{D}_2$ to get $M^0$
+\For{ iter \textbf{in} N\_iters}
+    \State For all $\mathcal{D}=\mathcal{D}_1\setminus\mathcal{D}_2$ employ $M^{iter-1}$ to predict sub-questions and get $\mathcal{D}^{iter}$
+    \State Retrain $M^{iter-1}$ on all examples: $\mathcal{D}_2\cup\mathcal{D}^{iter}$, get updated model $M^{iter}$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Training and Inference.} 
+The training objective of our model is
+
+\begin{equation}
+\begin{split}
+    \mathcal{L} = &\sum_{(Q,C,A) \in \mathcal{D}_1 \setminus \mathcal{D}_2} \log P_{\theta}(A|Q,C) + \\ &\sum_{(Q,C,Z^*,A)\in \mathcal{D}_2} \log P_{\theta}(A,Z^*|Q,C),
+\end{split}
+\end{equation}
+
+\noindent where $Z^*$ denotes the ground truth decomposition available only for the subset of the training data referred to by $\mathcal{D}_2$.
+%
+The first term of the training objective involves  enumerating over all possible latent decompositions, which is computationally intractable. Therefore, we resort to Hard-EM for learning the parameters of our model (see Algorithm  \ref{alg:cap}) for the unified variant. 
+%
+We found taking 10 iterations of the Hard-EM algorithm to be mostly sufficient for learning model parameters in our experiments. 
+
+For the separate variant, i.e., using two different LMs for $P^{\text{dc}}_{\text{LM}}$ and $P^{\text{rc}}_{\text{LM}}$, we train the question decomposer on $\mathcal{D}_2$, and then train the reading comprehension component on $\mathcal{D}_2$ as well as $\mathcal{D}_1 \setminus \mathcal{D}_2$ augmented with the generated decomposition $Z$. 
+%
+We also compare with training the reading comprehension component on $\mathcal{D}_2$ only, in the experiments. 
+During inference time, we first generate the question decomposition $\tilde{Z}$ according to 
+$P^{\text{dc}}_{\text{LM}}$, and then use $\tilde{Z}$ in $P^{\text{rc}}_{\text{LM}}$ to generate the answer. 
+

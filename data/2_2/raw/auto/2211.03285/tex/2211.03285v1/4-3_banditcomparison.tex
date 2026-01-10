@@ -1,0 +1,83 @@
+\subsection{Bandit Algorithms for Fuzzing}
+\label{sec:banditcomparison}	
+
+Although our scheme is designed to accommodate bandit algorithms naturally, not all bandit algorithms may yield the same level of performance improvement.
+As previous studies have highlighted, if fuzzing is viewed as a bandit problem and reward is defined as the discovery of a new execution path or crash, the rewards obtained will decrease with time because the discovery can only be made a finite number of times \cite{ScheduleBlackBox, EcoFuzz, SyzVegas, SIVO}.
+As a result, the estimates of the expected rewards become poor. This can lead to worse performance in some bandit algorithms, such as UCB1 \cite{UCB1}, because they rely on accurate estimates of the expected rewards to select a promising arm an appropriate number of times; the poor estimates themselves may deteriorate the algorithm performance even if the best arm is still correctly inferred.
+Thus, these previous studies employed bandit algorithms that tolerate changes in expected rewards, such as adversarial or non-stationary bandit algorithms.
+
+\begin{table}[tb]
+\centering
+\caption{List of bandit algorithms implemented.}
+\label{tab:bandit_algorithms}
+\begin{tabular}{l}
+\toprule
+Classical (Stationary) Bandit Algorithm:                             \\
+\midrule
+\, UCB1 \cite{UCB1} \, / \, KL-UCB \cite{KLUCB}                      \\
+\, Thompson sampling (TS) \cite{TS}                                  \\
+\cmidrule[1pt]{1-1}
+Non-Stationary Bandit Algorithm:                                     \\
+\midrule
+\, discounted TS (dTS) \cite{dTS}                                    \\
+\, discounted Boltzmann Exploration (dBE) \cite{BE, SIVO, SIVOimpl}  \\
+\, adaptive shrinking TS (ADS-TS) \!\cite{ScaleMAB, ADS}             \\
+\cmidrule[1pt]{1-1}
+Adversarial Bandit Algorithm:                                        \\
+\midrule
+\, EXP3-IX \cite{Exp3ix} \, / \, EXP3++ \cite{Exp3pp, ImpParaExp3pp} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[tb]
+\centering
+\caption{Ranks and scores averaged over 10 PUTs of AFL++ and 8 versions of \OurMethodName-AFL++ after 24 h. }
+
+\begin{tabular}{lccccc}
+\toprule
+
+& AFL++ & UCB1 & KL-UCB & TS & dTS \\
+\midrule
+
+Rank Avg & \textit{ 7.9 } & 5.5 & 3.5 & 3.9 & 3.0 \\
+Score Avg & \textit{ 89.44 } & 93.83 & 96.58 & \textbf{ 98.81 } & 97.85 \\
+
+\midrule
+
+& dBE & ADS-TS & EXP3-IX & EXP3++ \\
+\midrule
+
+Rank Avg & 4.9 & \textbf{ 2.6 } & 6.5 & 6.9 \\
+Score Avg & 95.57 & 97.39 & 94.11 & 93.56 \\
+
+\bottomrule
+
+\end{tabular}
+
+\label{tab:alg_cmp_summary}
+\end{table}
+
+
+To check whether this concern seriously affects the performance and to determine which bandit algorithm should be used in \OurMethodName{}, we implemented several versions of \OurMethodName-AFL++ with various bandit algorithms and ran them against 10 PUTs from OSS-Fuzz~\cite{OSSFuzz} for 24 h ten times each. 
+We prepared PUTs from OSS-Fuzz because, as advised by B\"{o}hme et al. \cite{FuzzReliability}, we needed to avoid overfitting to the benchmarks in Section~\ref{sec:evaluation} by knowing which algorithm works best in PUTs of the benchmarks. However, simultaneously, we also wanted to make this preliminary comparison further applicable by carrying it out with a diverse variety of real-world programs.
+For the same purpose, we made the configuration of each PUT, including initial seeds, dictionaries, and command line arguments fed to the fuzzers, consistent with that used in the OSS-Fuzz infrastructure. 
+Moreover, to minimize selection bias, we first enumerated 64 projects in OSS-Fuzz that met certain requirements and then selected 10 projects randomly among them (listed in Table~\ref{tab:alg_cmp_all}).
+The requirements we posed were that the project must be compatible with AFL++, and that the project must be built with no error for the sake of avoiding experimenter bias introduced by ad-hoc fixes at our own discretion.
+
+Table~\ref{tab:bandit_algorithms} lists bandit algorithms we implemented.
+Note that regarding the implementation of dBE, we completely followed SIVO \cite{SIVO} by using its configuration of hyperparameters and introducing its heuristics, although its implementation of Boltzmann exploration diverged from those in literature owning to the heuristics \cite{SIVOimpl}.
+Other details of the experimental settings are provided in Section~\ref{subsec:eval-setup}. 
+
+Table~\ref{tab:alg_cmp_summary} represents the ranks and scores of eight versions of \OurMethodName-AFL++ averaged over the 10 PUTs, which can also be seen in the reports of FuzzBench \cite{FuzzbenchReport}.
+Both metrics were calculated from the median obtained code coverage\footnote{We define the gain of code coverage as the difference between the initial and final edge coverage. We summarize the initial code coverage of each PUT in Table~\ref{tab:put_details}.} over 10 instances for each PUT. The score of each fuzzer was the proportion of its median coverage to the highest median. 
+Among the stationary bandit algorithms, TS provided the best performance improvement on average, whereas UCB1 performed relatively poorly.
+Among the non-stationary bandit algorithms, dTS and ADS-TS, which are based on TS, showed a higher performance than dBE and achieved the highest average rank; on the other hand, both adversarial bandit algorithms exhibited noticeably poor performance.
+These results are consistent with previous numerical experiments on stochastic bandit problems \cite{UCBEval, TSEval, TSEval2}, which indicates that our mutation scheme can be characterized more as a stochastic bandit problem than an adversarial bandit problem.
+Moreover, the non-stationarity of fuzzing as a bandit problem cannot be confirmed in this experiment, as the TS, dTS, and ADS-TS algorithms produced comparable results.
+However, this cannot completely disprove the non-stationarity because TS sometimes gives a strong performance even in non-stationary bandit problems, for example, when the best arm is unchanged \cite{TSWinInNonst}.
+
+We must note that, as shown in Table~\ref{tab:alg_cmp_all},  this stochastic tendency can be observed \textbf{on average}, not necessarily on \textbf{each} PUT, and also that there may be different tendencies for different mutation schemes.
+Nevertheless, it is likely that fuzzers with bandit optimization can improve their performance by regarding their algorithm as a type of bandit problem and appropriately employing bandit algorithms in that class.
+Based on this result, we have adopted TS as the standard algorithm for \OurMethodName-AFL++ for further experiments because it achieved the highest median coverage.
+

@@ -1,0 +1,299 @@
+\documentclass[a4paper,11pt]{article}
+\pdfoutput=1 % if your are submitting a pdflatex (i.e. if you have
+             % images in pdf, png or jpg format)
+
+\usepackage{jinstpub} % for details on the use of the package, please
+                     % see the JINST-author-manual
+\usepackage{lineno} % line
+\usepackage{multicol}
+\usepackage{subcaption}
+
+\title{\boldmath Design and Development of the Core Software for STCF Offline Data Processing}
+
+\author[a,b]{W. H. Huang }
+\author[c,d]{H. Li }
+\author[c,d]{H. Zhou}
+\author[a,b]{T. Li }
+\author[e]{Q. Y. Li }
+\author[a,b,1]{X. T. Huang \note{Corresponding author.}}
+
+
+% The "\note" macro will give a warning: "Ignoring empty anchor..."
+% you can safely ignore it.
+
+\affiliation[a]{Shandong University,\\Qingdao,Shandong, 266237, China}
+\affiliation[b]{Key Laboratory of Particle Physics and Particle Irradiation, Ministry of Education, Shandong University,\\Qingdao, Shandong, 266237, China}
+\affiliation[c]{University of Science and Technology of China,\\HeFei, Anhui, 230026, China}
+\affiliation[d]{State Key Laboratory of Particle Detection and Electronics
+Department of Modern Physics,\\HeFei, Anhui, 230026, China}
+\affiliation[e]{Shandong Institute of Advanced Technology,\\Jinan, Shandong, 250100, China}
+
+% e-mail addresses: only for the forresponding author
+\emailAdd{huangxt@sdu.edu.cn}
+
+
+\abstract{
+
+The Super Tau Charm Facility (STCF) is a proposed electron-positron collider working at $\sqrt{s}=2\sim 7$ GeV, and the peak luminosity is designed to be above $0.5 \times 10^{35}cm^{-2}s^{-1}$. The massive amount of scientific data brings great challenges to the offline data processing software, including the Monte Carlo~(MC) simulation, calibration, reconstruction as well as the data analysis. To facilitate efficient offline data processing, the offline software of Super Tau Charm Facility (OSCAR) is developed based on SNiPER, a lightweight framework designed for HEP experiments, as well as a few state-of-art software in the HEP community, such as podio and DD4hep.\par
+This paper describes the design and implementation of OSCAR, which provides the foundation for the development of complex algorithms to be applied on the large data sets produced by STCF, particularly the way to integrate the common HEP software toolkits, such as Geant4, DD4hep and podio, into SNiPER. The software framework also provides a potential solution for other lightweight HEP experiments as well.
+
+}
+
+
+\keywords{Offline software framework; STCF; OSCAR; SNiPER}
+
+
+%\arxivnumber{1234.56789} % only if you have one
+
+
+% \collaboration{\includegraphics[height=17mm]{example-image}\\[6pt]
+%   XXX collaboration}
+% or
+\collaboration[c]{}
+
+\begin{document}
+%\linenumbers  % line
+\maketitle
+\flushbottom
+
+\section{Introduction}
+\label{sec:intro}
+
+STCF~\cite{Peng:2020orp} is a high-luminosity electron-positron collider operating under a center-of-mass energy $2\sim 7$ GeV in China. STCF has a rich physics program for the tau and charm physics, providing the precise test of the Standard Model as well as the probe for new physics beyond the Standard Model. The STCF project is currently under exploration with an extensive R\&D program and would play a crucial role in the high-intensity frontier of elementary particle physics worldwide. The peak luminosity of STCF is designed to $0.5 \times 10^{35}cm^{-2}s^{-1}$, almost two orders of magnitude higher than the present Tau-Charm factory. The huge amount of scientific data produced by STCF brings a great challenge for STCF offline data processing. To provide a powerful and efficient software for the offline data processing tasks, OSCAR is designed and developed to provide a common platform for STCF offline applications, including the MC simulation, the raw data calibration, the reconstruction as well as the data analysis.
+
+OSCAR is developed based on SNiPER~\cite{Zou:2015ioy}, a common lightweight software framework developed for HEP experiments, as well as a few commonly used third party software, such as ROOT~\cite{ref1}, Geant4~\cite{GEANT4:2002zbu}, Garfield++, etc. Some state-of-art software and toolkits in the HEP community are also incorporated in OSCAR, such as podio~\cite{Gaede:2021izq}, DD4hep~\cite{Frank:2014zya} and so on. This paper aims to present the design and implementation of OSCAR, which also provides a potential solution for other lightweight HEP software as well. In Section 2, the basic requirements and design criteria of STCF offline software is outlined. Then Section 3 describes the implementation of OSCAR in detail, including the SNiPER framework, the event data model (EDM), the management of the event data as well as the detector data. Section 4 presents some results of application based on OSCAR. Finally, Section 5 summarizes the current status and gives outlook on the development.
+
+
+\begin{figure}[h]
+\begin{minipage}{0.49\linewidth}
+\includegraphics[height=16pc]{generaldesignnew.png}
+\caption{\label{label} The architecture and composition of OSCAR}
+\label{fig:design}
+\end{minipage}
+\begin{minipage}{0.49\linewidth}
+\includegraphics[height=13pc]{task-time.png}
+\caption{\label{label} (a) The \emph{Task} consists of \emph{Algorithm}s, \emph{Service}s and \emph{Sub-Task}s. (b) \emph{Algorithm}s in one \emph{Task} would be executed in order and \emph{Algorithm}s in \emph{Sub-Task} should be executed on demand with the \emph{Incident} mechanism.}
+\label{fig:task-time}
+\end{minipage}
+\end{figure}
+
+\section{Requirements and Design}
+
+To effectively build the STCF offline software, the underlying framework plays an essential role. It builds the skeleton of the offline software where application developers or physicists could plug in their code to perform data processing physics analysis. However, there exists several challenges for OSCAR. For instance, it is expected that the STCF could run more than one decade, raising requirements of OSCAR's flexibility, stability and compatibility. In addition, the huge data volume and low signal to noise ratio of STCF imposes additional requirements on highly efficient event selection (skimming) machanism, which is closely related with the design of OSCAR's data management system and Input/Output~(I/O) system. Many state-of-art software for HEP, such as podio and DD4hep, are emerging to provide higher performance on management of event data or detector data for future collider experiments. Furthermore, some advanced technologies, including many-core architecture and parallel computing, are becoming more and more powerful and successful in HEP data processing. In conclusion, OSCAR should not only take full advantage of these technologies above, but keep flexible for upcoming new software in the future as well.\par
+To fulfill the requirements above, one of key design criteria of OSCAR is modularity. Each component takes care of specific functionality and provides well defined interfaces by which they interact with each other.
+Another key design criterion is low coupling, which makes key components independent with each other as possible and shields the implementation of certain functionality from technologies adopted by OSCAR.\par
+
+\section{Implementation}
+
+\subsection{Architecture}
+
+A schematic view of OSCAR is shown in Figure~\ref{fig:design}: It mainly consists of three layers, external libraries, the core software and STCF experiment specific applications. External libraries contain software and toolkits frequently used in HEP experiments, like ROOT, Geant4, etc. DD4hep and podio, as parts of the Common Turnkey Software Stack (also called as Key4hep)~\cite{Ganis:2021vgv}, are also adopted for the detector description and the EDM, respectively. The core software, including the underlying framework, EDM, event data management system, detector data management system as well as interfaces between different components, plays crucial roles for performance and functionality of OSCAR. Experiment specific applications include software of physics generators, detector simulation, digitization, calibration, reconstruction as well as physics analysis, which are the most important components of OSCAR and are developed based on the core software and external libraries. 
+
+\subsection{SNiPER Framework}
+
+As the underlying framework of OSCAR, SNiPER is a lightweight software developed for HEP experiments and has been successfully used in a few experiments, such as JUNO~\cite{JUNO:2015zny}, LHAASO~\cite{LHAASO:2019qtb}, nEXO~\cite{nEXO:2018ylp} and so on. The distinguishing features of SNiPER includes the following:
+
+$\bullet$Support of flexible event processing sequences. As shown in Figure~\ref{fig:task-time}(a) , the unit of SNiPER is a \emph{Task}, where developers can embed their \emph{Algorithm}s and \emph{Service}s to implement specific applications. Each \emph{Task} instance has its own \emph{DataStore}, which manages the lifetime of events in its \emph{Task} so that every \emph{Task} controls its own event loop independently. Typical multiple \emph{Task} instances can be configured in a single SNiPER job in a nested structure, as shown in Figure~\ref{fig:task-time}(b). The execution of \emph{Task} instances can be configured flexibly to facilitate complex event processing sequence. One \emph{Task} could be triggered by another with the \emph{Incident} mechanism. For example, in an event mixing procedure, the signal and background samples are produced independently. Then each sample can be configured as an input in each \emph{Sub-Task} instance. In this way, the event mixing algorithm in \emph{TopTask} triggers signal and background inputs on demand according to signal-to-noise ratio.
+
+$\bullet$Support of custom data I/O and event buffering. Within SNiPER, data I/O and event buffering can be flexibly implemented based on experiment specific requirements. For instance, a first input first output (FIFO) data buffer~\cite{Zou:2015ioy} is developed, which enables high efficiency data access and storage, as well as the capability to retrieve the events within a defined time window. FIFO data buffer stores adjacent events and provides a sophisticated method of memory updating. When turning of the time window, FIFO serves as a buffer which holds single or multiple independent event data objects.
+
+$\bullet$Support of parallel computing. With multiple \emph{Task}s and FIFO , SNiPER has intrinsic superiorities in parallel computing. To simplify the development of paralleled applications, MT-SNiPER is developed as a non-invasive wrapper of SNiPER kernel modules, so that it is almost transparent for developers to parallelize their applications. The implementation details of MT-SNiPER will be further discussed in Section 5.
+
+\subsection{Data Management}
+
+\subsubsection{Event Data Management}
+\
+\newline
+\indent In the offline software, algorithms would not directly use event data objects in the persistency store (persistent data), but instead, use event data objects in memory (transient data). For both persistent and transient data, there is one set of description for EDM objects. EDM, the heart part of offline software, does not only define the event information and correlations between event objects in different processing stages, but provides the interface and communication channels between different application algorithms as well. Therefore, it is crucial to design an efficient EDM that meets all use cases in offline data processing as well as physics analysis.\par 
+Based on podio, EDM4hep project aims to design common EDM for future collider experiments. In this project, the event information and relationships between different objects are described in yaml~\cite{ref2} files, based on which C++ code for EDM classes could be automatically generated. In addition, using plain-old-data (pod) types will have fine support on parallelism. Therefore, the EDM of STCF, which has been implemented as an extension of EDM4hep, naturally supports parallel computing for STCF offline data processing. These classes described in Figure~\ref{fig:datamodel} include EDM at the simulation stage and reconstruction stage, as well as the relationships between them.\par
+\begin{figure}[h]
+\center
+%\begin{minipage}{36pc}
+\includegraphics[width=0.98\linewidth, height=17pc]{datamodel.png}
+\caption{\label{label}Podio-based Event Data Model of STCF. Classes are defined on demand of Detector Sub System, such as Inner Tracker, Main Drift Champer~(MDC), Partical Identification~(PID), Electromagnetic Calorimeter~(ECAL) and so on.}
+\label{fig:datamodel}
+%\end{minipage}\hspace{2pc}
+\end{figure}
+Integrating podio into SNiPER is vital in order to make use of the EDM based on podio efficiently within OSCAR. The event data management of podio mainly consists of three parts. \emph{EventStore} handles event data in memory, while \emph{ROOTReader} and \emph{ROOTWriter} manage data input and output, respectively. Correspondingly, the event data management of OSCAR consists of three components: \emph{DataStore}, \emph{InputSvc} and \emph{OutputSvc}. As illustrated in Figure~\ref{fig:datastore-podio}(a), in one \emph{Task}, there is a pair of \emph{Incident}s named \emph{BeginEvtHdl} and \emph{EndEvtHdl}, which would be triggered automatically at the beginning and ending of an event loop respectively. \emph{InputSvc} is invoked by \emph{BeginEvtHdl} to convert persistent event data from file into transient event data in \emph{DataStore}. The data flow between \emph{Algorithm}s proceeds via \emph{DataStore}, which is an intermediate buffer for event data conversions, including the conversion between transient and persistent objects. \emph{OutputSvc} is invoked by \emph{EndEvtHdl} to perform conversion from transient event data in \emph{DataStore} into persistent event data in file. As shown in Figure~\ref{fig:datastore-podio}(b), \emph{PodioDataSvc}, \emph{PodioInputSvc}, \emph{PodioOutputSvc} and \emph{DataHandle} are developed to integrate the podio with OSCAR. \emph{PodioDataSvc}, implemented as a container of \emph{EventStore} to serve as the \emph{DataStore} manages the lifetime of podio-based events. \emph{DataHandle} is developed as an user end template class to provide interfaces of identifying and accessing event data objects from \emph{PodioDataSvc}. Corresponding to \emph{InputSvc} and \emph{OutputSvc}, \emph{PodioInputSvc} and \emph{PodioOutputSvc} are implemented to support podio-based events, respectively.\par
+
+\begin{figure}[h]
+\includegraphics[width=0.98\linewidth, height=17pc]{datastore-podio.png}
+\caption{\label{label} (a) Event data management.       (b) Podio-based event data management.}
+\label{fig:datastore-podio}
+\end{figure}
+
+\subsubsection{Detector Data Management}
+\
+\newline
+\indent The detector simulation framework, a middleware between Geant4 and SNiPER, has been implemented. It consists of the integration of Geant4 and SNiPER, configurable user interfaces, geometry management and modularized user actions~\cite{Lin:2017yxy}. Based on DD4hep, a geometry management system (GMS)\cite{Li:2021sjr} is designed to provide a consistent detector description for simulation, reconstruction and visualization. In GMS, the library of elements and materials is shared and each sub-detector is described in a separated XML file, while the full detector is defined and configured in a mother XML file. Each sub-detector has a version number in order to support different design schemes.\par
+The key point of detector data management is a service for detector description in XML format~(\emph{DDXMLSvc}), which is developed as a middleware between DD4hep and OSCAR. It manages transformations of detector descriptions for simulation, reconstruction and visualization. When transmitted into \emph{DDXMLSvc}, the detector geometry defined in XML would be parsed and constructed into corresponding sub-detectors or the full detector. Thus, \emph{DDXMLSvc} has all the information of detectors. Information would be delivered to different plugins of DD4hep on demand. For example, information of detector would be delivered to DDG4~\cite{ref3} to transform the geometry into Geant4 format and then used by the detector simulation. Similarly, DDRec~\cite{ref3} for reconstruction and DDEve~\cite{ref3} for visualization are also integrated, as illustrated in Figure~\ref{fig:ddxmlsvc}. With current implementations, OSCAR fully supports simulation, reconstruction and visualization work with one single source geometry definition, which naturally guarantees the consistency of geometry information in different applications.
+
+\begin{figure}[h]
+\includegraphics[width=0.98\linewidth, height=10pc]{ddxmlsvc.png}
+\caption{\label{label} Data flow of geometry information managed with \emph{DDXMLSvc}. }
+\label{fig:ddxmlsvc}
+\end{figure}
+
+\subsection{Parallel Computing}
+Multiple SNiPER Task Scheduler (\emph{Muster})~\cite{Zou:2019cyq}, developed based on Intel Threading Building Blocks (TBB)~\cite{ref4}, manages the parallelism in SNiPER. When using \emph{Muster}, multiple instances of \emph{Task} would be created and their corresponding TBB-based \emph{Worker}s are also created for execution.\par
+In the \emph{Muster}, a typical sequence of parallel job could be described as follows: there is one dedicated single thread for reading/writing and the transient data to/from a \emph{GlobalBuffer} which simultaneously holds multiple events. When processing, different events are dispatched to different \emph{Worker}s. The \emph{Muster} is mainly based on Intel TBB's scheduler, it creates these \emph{Worker}s and manages their lifetime. Then \emph{Worker}s can be executed in threads concurrently. When a \emph{Worker} is invoked, it grabs and locks an event from \emph{GlobalBuffer} until it completes. During the execution of a \emph{Worker}, the event is handled by a thread local SNiPER \emph{Task}. This feature ensures that a \emph{Worker} looks the same as a serial SNiPER application. When an event is completed, \emph{Worker}s would try to send it to a dedicated writing thread. As a successful application, parallel simulation based on SNiPER TBB has been adopted in JUNO by integrating Geant4 into \emph{Muster}, which achieves a linear speedup for simulation~\cite{Lin:2017yxy}.\par
+Using EDM based on podio in parallel mode of \emph{Muster} is under developing. Given that the I/O system in podio is implemented with the \emph{EventStore}, and it could supplies only single event object caching in one reading, a new mechanism for storing multiple transient data objects and decoupling the I/O system from the \emph{EventStore} are required to support parallel computing in OSCAR. Therefore, a new class \emph{GlobalBuffer} is developed to store most of the information of \emph{EventStore} except its I/O system, as illustrated in Figure~\ref{fig:parr}. With this design, the \emph{EventStore} of podio is smoothly integrated within \emph{Muster}. Reading and writing \emph{Task}s are separated from each other, and they are implemented with a single thread, respectively. 
+%The most of remaining in \emph{EventStore} is defined in \emph{EventBuffer}. 
+Different from storage for one event object in \emph{EventStore}, \emph{GlobalBuffer} is designed to contain multiple event objects. \emph{ROOTReader} is designed to execute in one single thread. It would read several event objects and transform them to the \emph{GlobalBuffer} until the \emph{GlobalBuffer} reaches the \emph{Watermark}, a configurable number of kept event objects. All the events stored in \emph{GlobalBuffer} have \emph{READY} or \emph{FINISH} status. When an event is tagged as \emph{REDAY}, \emph{Muster} would send it to one dedicated \emph{Worker} for processing. When completed, the event would be tagged as \emph{FINISH}, and the output thread would write the event into a file as persistent data. Then the \emph{GlobalBuffer} would clear the space of this event and wait for next event loop.
+
+
+\begin{figure}[h]
+\includegraphics[width=0.98\linewidth, height=13pc]{parr.png}
+\caption{\label{label} Data management in parallel computing based on podio.}
+\label{fig:parr}
+\end{figure}
+
+\section{Applications }
+
+
+In OSCAR, the MC data production chain is developed, including event generator, full detector simulation and event reconstruction. A typical exclusive process $e^+ e^- \to J/\psi\to\rho(\to\pi^+\pi^-)\pi^0(\to\gamma\gamma)$ is used to commission the underlying algorithms and validate the basic software function. The known decays $J/\psi\to\rho(\to\pi^+\pi^-)\pi^0(\to\gamma\gamma)$ are generated by STCFEvtGen, which is reused from BesEvtGen\cite{Ping:2008zz}. The $J/\psi$ resonance in electron positron collision is simulated by the MC event generator KKMC~\cite{Jadach:1999vf}. Objects of final-state particles, including charged tracks~($\pi^+\pi^-$)and neutral photon showers, are reconstructed with simulated hits through the full reconstruction algorithms.\par
+
+For each $J/\psi$ candidate, it's required to have two charged tracks with zero net charge and at least two good photons. To suppress final state radiation photons, the angle between photon and the original direction of the nearest charged track must be greater than $15^{\circ}$. The combination with the closest mass to $\pi^{0}$ is considered to be from $\pi^{0}$. The invariant mass distributions of $\pi^{0}$ ($M_{\gamma\gamma}$), $\rho(770)$ ($M_{\pi^+\pi^-}$) and $J/\psi$ ($M_{\rho\pi^0}$) are shown in Figure~\ref{fig:event_rec} (a), (b) and (c), respectively. The Crystal-Ball function is used to describe the $M_{\gamma\gamma}$ and $M_{\rho\pi^0}$ distribution, and the Breit-Wigner function is used to describe the $M_{\pi^+\pi^-}$ distribution. The fitted results are $133.9\pm6.2$ MeV, $3085.2\pm32.1$~MeV and  (M, $\Gamma$) = ($773.6\pm0.9$~MeV, $144.8\pm2.1$~MeV), respectively. In the MC sample, the input values of $\pi^0$, $\rho(770)$ and $J/\psi$ are quoted from PDG~\cite{ParticleDataGroup:2020ssz}, and they are $134.9770\pm0.0005$~MeV, $775.26\pm0.25$~MeV, and $3096.900\pm0.006$~MeV. The reconstructed value and corresponding input value are in good agreement, which indicate the reconstruction of the signal process works well.
+
+At present, a test run of the simulation software is implemented on a dedicated high performance computing cluster under CENTO 7 system. Together with the job submission system, large amount of MC samples are being generated, which can be used in futher studies of the detector performance and physical potential capabilities.
+\begin{figure}[h]
+\centering
+\subcaptionbox*{(a)}{\includegraphics[width=0.3\textwidth]{mpi0.png}}
+\hfill
+\subcaptionbox*{(b)}{\includegraphics[width=0.3\textwidth]{mrho.png}}
+\hfill
+\subcaptionbox*{(c)}{\includegraphics[width=0.3\textwidth]{mjpsi.png}}
+\caption{ Plot~(a) shows the invariant mass of reconstructed $\pi^0$ particles~($M_{\gamma\gamma}$), plot~(b) shows the invariant mass of reconstructed $\rho$ particles~($M_{\pi^+\pi^-}$) and plot~(c) shows the invariant mass of reconstructed $J/\psi$ particles~($M_{\rho\pi^0}$) . The dots with error bars indicate MC samples and the red solid lines indicate the fit results of the distribution. In the fit, the $M_{\gamma\gamma}$ distribution in plot~(a) and $M_{\rho\pi^0}$ distribution in plot~(c) are modeled by Crystal-Ball function and the $M_{\pi^+\pi^-}$ distribution in plot~(b) is described with Breit-Wigner function. }
+\label{fig:event_rec}
+\end{figure}
+
+
+\section{Conclusion}
+  
+In this paper, we developed the Offline Data Processing Software Framework for STCF~(OSCAR), which is based on SNiPER and adopted new technologies and tools, such as DD4hep and podio. In OSCAR, a chain for full simulation and reconstruction has been set up, and large MC samples have been generated for detector performance study. The study shows the performance of detector simulation and reconstruction could fulfill the requirements of STCF. Meanwhile, OSCAR is also provide a potential solution for other lightweight HEP experiments.
+
+
+
+\acknowledgments
+This work was supported by National Natural Science Foundation of China (NSFC) under Contracts Nos. 12025502, 12105158; the international partnership program of the Chinese Academy of Sciences under Grant No. 211134KYSB20200057 ; Double First-Class university project foundation of USTC.\par
+
+
+% We suggest to always provide author, title and journal data:
+% in short all the informations that clearly identify a document.
+
+\begin{thebibliography}{99}  
+%\cite{Peng:2020orp}
+\bibitem{Peng:2020orp}
+H.~P.~Peng, Y.~H.~Zheng and X.~R.~Zhou,
+%``Super Tau-Charm Facility of China,''
+Physics \textbf{49}, no.8, 513-524 (2020)
+%doi:10.7693/wl20200803
+%10 citations counted in INSPIRE as of 06 Nov 2022
+%\cite{Zou:2015ioy}
+\bibitem{Zou:2015ioy}
+J.~H.~Zou, X.~T.~Huang, W.~D.~Li, T.~Lin, T.~Li, K.~Zhang, Z.~Y.~Deng and G.~F.~Cao,
+%``SNiPER: an offline software framework for non-collider physics experiments,''
+J. Phys. Conf. Ser. \textbf{664}, no.7, 072053 (2015)
+%doi:10.1088/1742-6596/664/7/072053
+%44 citations counted in INSPIRE as of 24 Oct 2022
+\bibitem{ref1}https://root.cern.ch/doc/master/classTObject.html
+%\cite{GEANT4:2002zbu}
+\bibitem{GEANT4:2002zbu}
+S.~Agostinelli \textit{et al.} [GEANT4],
+%``GEANT4--a simulation toolkit,''
+Nucl. Instrum. Meth. A \textbf{506}, 250-303 (2003)
+%doi:10.1016/S0168-9002(03)01368-8
+%16120 citations counted in INSPIRE as of 06 Nov 2022
+%\cite{Gaede:2021izq}
+\bibitem{Gaede:2021izq}
+F.~Gaede, G.~Ganis, B.~Hegner, C.~Helsens, T.~Madlener, A.~Sailer, G.~A.~Stewart, V.~Volkl and J.~Wang,
+%``EDM4hep and podio - The event data model of the Key4hep project and its implementation,''
+EPJ Web Conf. \textbf{251}, 03026 (2021)
+%doi:10.1051/epjconf/202125103026
+%2 citations counted in INSPIRE as of 03 Nov 2022
+%\cite{Frank:2014zya}
+\bibitem{Frank:2014zya}
+M.~Frank, F.~Gaede, C.~Grefe and P.~Mato,
+%``DD4hep: A Detector Description Toolkit for High Energy Physics Experiments,''
+J. Phys. Conf. Ser. \textbf{513}, 022010 (2014)
+%doi:10.1088/1742-6596/513/2/022010
+%71 citations counted in INSPIRE as of 06 Nov 2022
+%\cite{Ganis:2021vgv}
+\bibitem{Ganis:2021vgv}
+G.~Ganis, C.~Helsens and V.~V\"olkl,
+%``Key4hep, a framework for future HEP experiments and its use in FCC,''
+Eur. Phys. J. Plus \textbf{137}, no.1, 149 (2022)
+%doi:10.1140/epjp/s13360-021-02213-1
+%[arXiv:2111.09874 [hep-ex]].
+%2 citations counted in INSPIRE as of 06 Nov 2022
+%\cite{JUNO:2015zny}
+\bibitem{JUNO:2015zny}
+F.~An \textit{et al.} [JUNO],
+%``Neutrino Physics with JUNO,''
+J. Phys. G \textbf{43}, no.3, 030401 (2016)
+%doi:10.1088/0954-3899/43/3/030401
+%[arXiv:1507.05613 [physics.ins-det]].
+%976 citations counted in INSPIRE as of 06 Nov 2022
+%\cite{LHAASO:2019qtb}
+\bibitem{LHAASO:2019qtb}
+A.~Addazi \textit{et al.} [LHAASO],
+%``The Large High Altitude Air Shower Observatory (LHAASO) Science Book (2021 Edition),''
+Chin. Phys. C \textbf{46}, 035001-035007 (2022)
+%[arXiv:1905.02773 [astro-ph.HE]].
+%157 citations counted in INSPIRE as of 06 Nov 2022
+%\cite{nEXO:2018ylp}
+\bibitem{nEXO:2018ylp}
+S.~A.~Kharusi \textit{et al.} [nEXO],
+%``nEXO Pre-Conceptual Design Report,''
+[arXiv:1805.11142 [physics.ins-det]].
+%87 citations counted in INSPIRE as of 06 Nov 2022
+\bibitem{ref2}https://github.com/yaml
+%\cite{Lin:2017yxy}
+\bibitem{Lin:2017yxy}
+T.~Lin \textit{et al.} [JUNO],
+%``Parallelized JUNO simulation software based on SNiPER,''
+J. Phys. Conf. Ser. \textbf{1085}, no.3, 032048 (2018)
+%doi:10.1088/1742-6596/1085/3/032048
+%[arXiv:1710.07150 [physics.ins-det]].
+%5 citations counted in INSPIRE as of 04 Nov 2022
+%\cite{Li:2021sjr}
+\bibitem{Li:2021sjr}
+H.~Li, W.~H.~Huang, D.~Liu, Y.~Song, M.~Shao and X.~T.~Huang,
+%``Detector geometry management system designed for Super Tau Charm Facility offline software,''
+JINST \textbf{16}, no.04, T04004 (2021)
+%doi:10.1088/1748-0221/16/04/T04004
+%3 citations counted in INSPIRE as of 05 Nov 2022
+\bibitem{ref3}https://dd4hep.web.cern.ch/dd4hep/reference
+%\cite{Zou:2019cyq}
+\bibitem{Zou:2019cyq}
+J.~Zou, T.~Lin, W.~Li, X.~Huang, Z.~Deng, G.~Cao and Z.~You,
+%``The Event Buffer Management for MT-SNiPER,''
+EPJ Web Conf. \textbf{214}, 05026 (2019)
+%doi:10.1051/epjconf/201921405026
+%0 citations counted in INSPIRE as of 06 Nov 2022
+\bibitem{ref4}James Reinders. Intel Threading Building Blocks. O'Reilly Media, Sebastopol, CA, 2007
+%\cite{Ping:2008zz}
+\bibitem{Ping:2008zz}
+R.~G.~Ping,
+%``Event generators at BESIII,''
+Chin. Phys. C \textbf{32}, 599 (2008)
+%doi:10.1088/1674-1137/32/8/001
+%348 citations counted in INSPIRE as of 06 Nov 2022
+%\cite{Jadach:1999vf}
+\bibitem{Jadach:1999vf}
+S.~Jadach, B.~F.~L.~Ward and Z.~Was,
+%``The Precision Monte Carlo event generator K K for two fermion final states in e+ e- collisions,''
+Comput. Phys. Commun. \textbf{130}, 260-325 (2000)
+%doi:10.1016/S0010-4655(00)00048-5
+%[arXiv:hep-ph/9912214 [hep-ph]].
+%985 citations counted in INSPIRE as of 06 Nov 2022
+%\cite{ParticleDataGroup:2020ssz}
+\bibitem{ParticleDataGroup:2020ssz}
+P.~A.~Zyla \textit{et al.} [Particle Data Group],
+%``Review of Particle Physics,''
+PTEP \textbf{2020}, no.8, 083C01 (2020)
+%doi:10.1093/ptep/ptaa104
+%4600 citations counted in INSPIRE as of 06 Nov 2022
+\end{thebibliography}
+
+\end{document}

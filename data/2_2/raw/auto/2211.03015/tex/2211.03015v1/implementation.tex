@@ -1,0 +1,50 @@
+\section{Framework Realization}
+To determine the feasibility of implementing the proposed framework using COTS components, we tried and tested several approaches to run the mobile OS remotely, isolate applications, and interact with the remote server.
+We came across several challenges and learned a number of lessons while building this secure framework that we discuss in Section~\ref{lessons}. 
+Below, we walk through the approach that we found to be the most feasible that we then implemented on an Android-based remote server.
+We specifically chose Android because of its open-source and more accessible nature. 
+Irrespective of the server OS, conceptually speaking, the client OS can be Android or iOS.
+We assumed that the computing resources required to realize the secure framework (i.e., client device, remote server, screen sharing protocol and SMS Gateway) were not vulnerable to any other cyber or physical attack, and the only risk in question was zero-click exploitation.
+
+\begin{figure}[t]
+\begin{center}
+\includegraphics[width=\linewidth]{figures/solution2.pdf}
+\caption{Framework Realization: We ran each chat app (WhatsApp, Signal and messaging application) remotely in containerized Android Emulators on GCP and accessed them from the mobile's web browser via WebRTC service.}
+\label{fig:solution2}
+\end{center}
+\end{figure}
+
+\subsection{Server Setup and Application Isolation}
+We set up an Android cloud emulator~\cite{androidcloud} on Google Cloud Platform (GCP) that enabled us to run the official Android Emulator~\cite{androidstudio} on top of Docker~\cite{docker} as a web service.  
+Android Emulator is part of Google's development environment for Android, i.e., Android Studio, which enabled us to run Android instance on the cloud. 
+In addition, Docker is an open-source platform that uses OS-level virtualization to package application(s) in a container, i.e., isolate applications from the host system.
+We configured each chat application (WhatsApp, Signal and regular messaging application) to run in a separate Docker container (as illustrated in Figure~\ref{fig:solution2}), which considerably reduced the chances of cross-application zero-click exploitation. 
+WhatsApp and Signal were configured on the server using the user's number.
+To receive SMS/ regular messages on the remote server, we configured the messaging application with the cloud-based SMS Gateway service, namely Twilio~\cite{twilio}.  
+Twilio API forwarded the SMS to and from our server over HTTPS (TLS 1.2 encryption)~\cite{twiliosecurity}, without the need of a physical SIM card. 
+The API can be further tweaked to allow messages only from verified contacts and disable the preview of web links in the text messages, thereby reducing the chances of zero-click infection.
+This setup has an added advantage; iMessages are received as regular SMS on the server, and the client device (i.e., iPhone) remains protected from any iMessage-based exploit.
+
+As Android Emulator requires Kernel-based Virtual Machine (KVM) to run Android OS smoothly, the hardware-based virtualization enabled us to implement this setup on our dedicated Linux server as well as cloud platforms, i.e., GCP, Amazon Web Services (AWS) and Microsoft Azure.  
+In short, containerized Android Emulator helped run chat applications remotely in isolation.
+
+\subsection{Remote Interaction with Chat Applications} 
+The Android Cloud Emulator~\cite{androidcloud} utilized WebRTC protocol~\cite{webrtc} to display the remote screen on the client device.  
+WebRTC is an open-source project that provides \textit{real-time communication} capabilities by supporting video, voice, and data for the web. 
+As WebRTC does not require installation of any plugin or third-party software at either end, it essentially helped obtain unattended access to the server, i.e., it bypassed the need for a human agent to accept the connection request at the server every time and ensured connectivity even after a system restart.
+However, WebRTC requires a direct connection between the communicating peers, which is not always possible over the Internet.  
+Hence, we utilized a TURN (i.e., Traversal Using Relays around NAT) server to relay the contents of the remote screen to the client device over the Internet. 
+This made the server screen accessible via the server's public IP. 
+Note that iOS does not fully support screen sharing via WebRTC on the mobile's web browser; hence, we configured screen sharing via an alternate method that exchanges png screenshots to provide screen capturing for iOS users.
+
+Next, for remotely controlling the server screen from the client device, we used a React web application that helped deliver the user's keystrokes on the mirrored screen (on the client device) to the server.
+To improve the user experience, we modified the React web application to provide a full-screen view. 
+
+\subsection{Other Security Features} 
+To proactively limit the damage caused by a successful zero-click attack and prevent the attacker from passively eavesdropping on the targeted application for a long time, we decided to periodically reset each instance to its initial (unaffected) snapshot. 
+Our thinking was that this would help wipe off undetected infections and terminate connections (if any) established by the attacker. 
+
+Moreover, as each remote instance serves as an independent Android smartphone, we enabled Kiosk mode to restrict each container to the predefined application so it can remain open at the server 24/7.  
+GoKiosk~\cite{gokiosk} is one of the Kiosk applications that is freely available on the Play Store.  
+In short, with this setup, the client device did not receive any untrusted message directly; rather, the message was first delivered to the server and then streamed via screen mirroring on the client device.
+Hence, our key insight was that the zero-click attack could only compromise the targeted application and not affect the client device or other remote apps.

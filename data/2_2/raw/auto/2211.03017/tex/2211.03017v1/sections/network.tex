@@ -1,0 +1,68 @@
+\section{Network Design}
+
+Our inverse rendering framework takes a single image of indoor scene as input and jointly predicts the spatially-varying material, geometry and lighting of the scene, and can further re-render the appearance of the input image. Fig.~\ref{fig:pipeline} overviews the architecture of our framework, which consists of three parts: material-geometry network (\S\ref{sec:mgnet}), lighting network (\S\ref{sec:light} and \S\ref{sec:background}), and a differentiable Monte-Carlo rendering layer (\S\ref{sec:render}). The material-geometry network is an end-to-end convolutional network which directly predict the reconstruction results. The lighting network $\mathbf{LightNet}$ is comprised of three sub-parts: A Resnet34 encoder to produce local feature map from the input image (like pixelNeRF~\cite{yu2021pixelnerf}), a screen-space ray tracer to trace the source of the light, and a final MLP decoder to predict the lighting radiance result. The rendering layer takes G-Buffers and lighting as input, and uses Monte Carlo raytracing to reproduce realistic rendering results.
+
+\subsection{Material and Geometry Network}\label{sec:mgnet}
+The input to our material and geometry prediction network $\mathbf{MGNet}$ is a single high dynamic range image, which can be directly obtained from our synthetic dataset. For real-world photos, we preprocess them with an inverse gamma correction. We use a single DenseNet121~\cite{huang2017densely} encoder to extract deep features of the material and shape parameters of the scene with different depth, as well as four separate decoders to obtain the final predicted albedo ($A$), material ($M$), normal ($N$), and depth ($D$), where $M$ consists of two parts: roughness $R$ and metallic $M_t$. While decoding neural features of different depths, upsampling and skip links are used to preserve multi-level details. Please refer to supplementary material for the detailed architecture of $\mathbf{MGNet}$. 
+
+\subsection{Lighting Network}\label{sec:light}
+
+We now describe our approach to predict any incident light intensity $L_i(\mathbf{p}, \mathbf{d})$ at point $\mathbf{p}$ with direction $\mathbf{d}$ from a single image. We fix our coordinate system as the \textit{view space} of the input image and specify position $\mathbf{p}$ and light direction $\mathbf{d}$ in this coordinate system.
+
+Given an input image $\mathbf{I}$ of a scene, we first extract a feature map $\mathbf{F} = E(\mathbf{I})$, where $E$ is an encoder with ResNet34~\cite{he2016deep} architecture. For any location $\mathbf{x}$ in the scene, we can retrieve the corresponding image feature by projecting $\mathbf{x}$ onto the image coordinates $\pi(\mathbf{x})$ using camera intrinsics and extract the local feature vector $\mathbf{F}[\pi(\mathbf{x})]$. Instead of directly using the local feature at incident point $\mathbf{p}$, we trace the ray from $\mathbf{p}$ with direction $-\mathbf{d}$ to point $\mathbf{s}$ in the scene, which can be treated as a virtual point light of $L_i(\mathbf{p}, \mathbf{d})$. We extract the local feature vector $\mathbf{F}[\pi(\mathbf{s})]$. The local feature is then passed into the final MLP decoder $f$, along with view direction $\mathbf{d}$ and some local G-Buffers (diffuse albedo $K_d$, specular albedo $K_s$, normal $N$ and roughness $R$) at $\pi(\mathbf{s})$ $\mathbf{G}[\pi(\mathbf{s})]$, as
+\begin{align}
+    \mathbf{s} &= \mathrm{trace}(\mathbf{p}, -\mathbf{d}),\\
+    L_i(\mathbf{p}, \mathbf{d}) &= f(\gamma(\mathbf{d}), \mathbf{F}[\pi(\mathbf{s})], \mathbf{G}[\pi(\mathbf{s})]),
+\end{align}
+where $\gamma(\cdot)$ is positional encoding function which is common used in NeRF~\cite{mildenhall2020nerf} to capture the high-frequency details within the data. The $\mathrm{trace}$ operation is implemented by \textbf{screen space ray tracing} (SSRT). We show our pipeline schematically in Fig.~\ref{fig:pipeline}.
+
+Our \textbf{screen space ray tracer} works on the depth map of the scene. It takes depth map $\mathbf{D}$, starting point $\mathbf{p}$, and the tracing direction $\mathbf{d}$ as inputs. The screen space ray tracer performs ray marching through pixels from the start point. At each step, the current depth of the ray is updated and compared with the surface depth of the pixel. If the ray depth is larger, it indicates that the ray has passed through the pixel surface, i.e. an intersection has occurred. Otherwise, it continues ray marching to an adjacent pixel until hitting the edge of the image.
+
+
+\subsection{Uncertainty-Aware Out-of-View Lighting Network }\label{sec:background}
+
+A limitation of screen space ray tracing is that the traced ray does not necessarily intersect within the field of view of the image. Therefore, an additional network (named ``out-of-view lighting network'') is designed to handle lights from the out-of-view area of the scene. The design of our out-of-view lighting network is inspired by Neural Radiance Fields (NeRF)~\cite{mildenhall2020nerf}, which uses an MLP to represent the scene and uses volume rendering to predict the radiance of a ray. In the original version, the weights of the MLP are trained scene-specifically. Instead, we leverage hypernetwork~\cite{ha2016hypernetworks} to reconstruct out-of-view lighting by predicting the scene-specific weights of the NeRF MLP, and then query the radiance by the same volume rendering and alpha compositing techniques.
+
+The out-of-view lighting network architecture is shown in Fig.~\ref{fig:pipeline} (right-hand side).
+Given the input image $\mathbf{I}$, we first extract a global feature $\mathbf{F}_\mathrm{g} = G(\mathbf{I})$, where $G$ is an encoder with ResNet34 architecture (separate from the encoder in Section \ref{sec:light}). Then, $\mathbf{F}_\mathrm{g}$ is taken by hypernetwork $H$ and the MLP's weights $\Phi$ are returned. To query an incident light intensity $L_i(\mathbf{p}, \mathbf{d})$, we sample $N$ 3D points $\{\mathbf{x}_i = \mathbf{p} - t_i\mathbf{d}\}$ on ray $(\mathbf{p}, -\mathbf{d})$. With positional encoding $\gamma$ and NeRF MLP $f$, density $\sigma$ and RGB color $\mathbf{c}$ are returned. The complete process can be formulated as:
+\begin{align}
+    \Phi &= H(G(\mathbf{I})), \\
+    \{\sigma_i, \mathbf{c}_i &= f(\gamma(\mathbf{x}_i); \Phi)\} _{i=1}^N .
+\end{align}
+Then light intensity $L$ can be composited by
+\begin{equation}
+    \hat{L} = \sum_{i=1}^N{T_i(1-\exp(-\sigma_i\delta_i))\mathbf{c}_i}, \text{where } T_i = \exp\left(-\sum_{j=1}^{i-1}{\sigma_j\delta_j}\right),
+\end{equation}
+where $\delta_i = t_{i+1} - t_i$ is the distance between adjacent samples. Due to performance consideration, our NeRF MLP is a small-scale network and does not take ray direction $\mathbf{d}$ as the MLP input like the original paper~\cite{mildenhall2020nerf} does.
+
+The out-of-view lighting network is capable of predicting lighting anywhere in the scene. We now describe how we use it to refine the light predictions within field-of-view. Screen space ray tracing has a limitation that it may report some false positive of intersections. For real intersections, the difference between surface depth and ray depth is small, while the depth difference will increase when the intersection is a false positive. We model it as the ``uncertainty'' of SSRT, which is activated by hyperbolic tangent function: $u = \tanh(10\Delta d)$ where $\Delta d \in [0,\infty)$ is the depth difference. The refined light prediction is then formulated as 
+\begin{equation}\label{eq:combine}
+    \hat{L}_\mathrm{refined} = (1 - u) \times \hat{L}_\mathrm{SSRT} + u \times \hat{L}_\mathrm{out-of-view},
+\end{equation}
+where $\hat{L}_\mathrm{SSRT}$ is the light prediction by our SSRT-based lighting network and $\hat{L}_\mathrm{out-of-view}$ is the light prediction by our out-of-view lighting network. When uncertainty value $u$ is large, screen space ray tracing becomes untrusted and the final prediction is dominated by out-of-view lighting prediction. We ablate between using only out-of-view network predictions and using full model predictions combined with Eq.~\ref{eq:combine} in our supplementary material.
+% \huo{How about changing the terminology 'background' to 'out-of-view' across the whole paper?}
+\subsection{Rendering Layer}\label{sec:render}
+
+\setlength\tabcolsep{0.5pt}
+% \def\arraystretch{0.5}%
+% \renewcommand{\arraystretch}{1.5}
+\begin{figure}[h]
+    \centering
+    % \includegraphics{}
+    \begin{tabular}{cccc}
+        Ground Truth & \cite{li2020inverse} & Ours (no MC) & Ours \\
+        \includegraphics[width=2.1cm]{figure/render_highspp/render_0_gt.png} & \includegraphics[width=2.1cm]{figure/render_highspp/render_0_li.png} & \includegraphics[width=2.1cm]{figure/render/render_9_nomc.png} & \includegraphics[width=2.1cm]{figure/render_highspp/render_0_pred.png} \\[-0.5ex]
+        \includegraphics[width=2.1cm]{figure/render_highspp/render_1_gt.png} & \includegraphics[width=2.1cm]{figure/render_highspp/render_1_li.png} & \includegraphics[width=2.1cm]{figure/render/render_10_nomc.png} & \includegraphics[width=2.1cm]{figure/render_highspp/render_1_pred.png} \\
+    \end{tabular}
+    \vspace*{-2.5ex}
+    \caption{\textbf{Qualitative comparison on re-rendered image}. ``Ours (no MC)'' means that we re-render the image using our lighting prediction results but \citet{li2020inverse}'s rendering layer (instead of our MC rendering layer). Note that \citet{li2020inverse}'s render layer causes significant artifacts on glossy surfaces.}
+    \label{fig:render}
+    % \vspace*{-2.5ex}
+\end{figure}
+
+Unlike \citet{li2020inverse} which discretes the incident hemisphere to approximate the integration, we leverage differentiable Monte Carlo raytracing to produce photorealistic re-rendering results. Given sample count $N$, we use BRDF importance sampling to sample $N$ ray directions $\{d_i\} = \{\phi_i,\theta_i\}$ according to view direction, surface normal and material parameters (roughness and metallic) at pixel point $\mathbf{p}$.
+We then perform screen-space raytracing according to $d_i$ to trace the source point and predict the radiance of the corresponding direction $\{\tilde{L_i}\}$ from $\mathbf{LightNet}$. The rendering layer computes the unbiased re-rendered image by
+\begin{equation}\label{equ:render}
+    \tilde{I} = \frac{1}{N}\sum_{i=1}^N{\frac{f_r(v,d_i;\tilde{A},\tilde{N},\tilde{R},\tilde{M_t})\tilde{L_i}\cos{\theta_i}}{p(v,d_i;\tilde{N},\tilde{R},\tilde{M_t})}},
+\end{equation}
+where $f_r(\omega_i,\omega_o)$ is the BRDF evaluation value and $p(\omega_i,\omega_o)$ is the probability distribution function (PDF) value of BRDF importance sampling, and $v$ is the view direction. Our importance sampling rendering layer can produce much more realistic re-rendered images compared to \cite{li2020inverse}, especially in specular reflections and highlights. As shown in Fig.~\ref{fig:render}, our rendering layer is capable of recovering specular reflections on the glossy floor, while the rendering layer used by \cite{li2020inverse} produces significant artifacts. The artifacts of \cite{li2020inverse}'s discretization rendering algorithm are caused by the deterministic discrete direction sampling at each pixel, which is likely to miss important directions in the specular BRDF term. The missing of important reflection directions results in interleaved patterns in the re-rendered result. In contrast, our importance sampling strategy can faithfully recover high-frequency reflections on glossy surfaces.

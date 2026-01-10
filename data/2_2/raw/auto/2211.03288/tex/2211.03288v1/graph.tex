@@ -1,0 +1,186 @@
+\section{Graph Based Decoding}
+\label{sec:graph}
+In contrast, graph-based decoding tackles both challenges, in two stages.
+The first stage constructs a graph that approximates the \emph{error model} $P(\mathcal{E})$.
+The second stage then uses this graph and the syndrome to compute a correction. Both stages can employ heuristics to simplify the computation, finding a ``good'' correction within polynomial time.
+Because the error model is usually known given the hardware and code, i.e., offline, and the syndrome is only observed at runtime, i.e., online, only the second stage needs to be computed at runtime.
+
+%How we map error model to a graph
+\subsection{Graph Construction}
+\label{sec:graph_construction}
+The first stage constructs a weighted graph that represents an approximation of the error model $P(\mathcal{E})$, which we call the \textit{model graph}.
+We first describe how to construct the model graph assuming that errors happen independently and only with data qubits. We will discuss how the graph can be extended to consider other types of errors in \S\ref{ssec:generalize3d}.
+Under the independence assumption, one can reduce $P(\mathcal{E})$ into  
+\begin{equation}
+\begin{split}
+    P(\mathcal{E}) &= \prod_{\mathcal{E}_i \in \mathcal{E}} P(\mathcal{E}_i) \prod_{\mathcal{E}_i \notin \mathcal{E}} \left(1-P(\mathcal{E}_i)\right) \\
+                   &= \prod_{\mathcal{E}_i \in \mathcal{E}} \frac{P(\mathcal{E}_i)}{1 - P(\mathcal{E}_i)} \prod_{\mathcal{E}_i} \left(1-P(\mathcal{E}_i)\right) \\
+                   &\propto \prod_{\mathcal{E}_i \in \mathcal{E}} \frac{P(\mathcal{E}_i)}{1 - P(\mathcal{E}_i)}
+    \label{eq:independence}
+\end{split}
+\end{equation}
+where $\mathcal{E}_i$ indicates the $i$th independent error.
+If the independence assumption is true for single data qubit Pauli X and Z errors, one can construct two separate graphs to represent the X and Z error models. 
+
+A vertex in the model graph represents an ancilla in the code.
+An edge between two vertices represents an independent error (\eg X or Z error) of the corresponding data qubit that could result in nontrivial measurements of the corresponding ancillas.
+For example,  \autoref{fig:graph_making_b} shows those edges in the model graphs for X and Z errors of CSS surface code.
+
+An error on a data qubit at the border of the code may result in nontrivial measurement of a single ancilla, such as \autoref{fig:single_X_boundary_error}.
+One can add a virtual \emph{boundary vertex} and use the edge connecting it with the ancilla vertex to represent this error. 
+We call the boundary vertices on the left and right the X boundary vertices because they deal with X errors; similarly, we call the top and bottom boundary vertices the Z boundary vertices.
+\autoref{fig:graph_making_c} visualizes these edges that connect one real vertex and one virtual boundary vertex.
+The final model graph for the surface code of \autoref{fig:graph_making_a} is shown in \autoref{fig:graph_making_d}.
+
+The weight of an edge in a model graph represents the probability of the corresponding independent error, i.e., $w_i = -\log\frac{P(\mathcal{E}_i)}{1 - P(\mathcal{E}_i)}$.
+A set of edges corresponds to a set of independent errors; the probability of this set of errors is determined by the sum of the corresponding weights, per the independence assumption (\autoref{eq:independence}).
+
+\begin{figure*}[ht]
+    \renewcommand*\thesubfigure{(\alph{subfigure})}  % add parentheses manually
+    \centering
+    \begin{subfigure}{.24\linewidth}
+        \centering
+        \includegraphics[width=0.76\linewidth]{figures/surface_codes/CSS_with_indices.pdf}
+        \caption{}
+        \label{fig:graph_making_a}
+    \end{subfigure}
+    \begin{subfigure}{.24\linewidth}
+        \centering
+        \includegraphics[width=0.9\linewidth]{figures/graph/pair_matchings.pdf}
+        \caption{}
+        \label{fig:graph_making_b}
+    \end{subfigure}
+    \begin{subfigure}{.24\linewidth}
+        \centering
+        \includegraphics[width=0.9\linewidth]{figures/graph/boundary_matchings.pdf}
+        \caption{}
+        \label{fig:graph_making_c}
+    \end{subfigure}
+    \begin{subfigure}{.24\linewidth}
+        \centering
+        \includegraphics[width=0.9\linewidth]{figures/graph/model_graph.pdf}
+        \caption{}
+        \label{fig:graph_making_d}
+    \end{subfigure}
+    \caption{The process of generating a model graph for the graph for d = 3 CSS surface code. (a) The surface code patch with ancilla qubits numbered. (b) A graph showing all independent X and Z errors having two nontrivial measurements (c) A graph showing all independent X and Z errors having single nontrivial measurement (d) The model graph showing all independent X and Z errors. The dotted circles in (c) and (d) are virtual boundary vertices. In (b) (c) and (d), X and Z errors are shown blue and yellow respectively.
+	}
+    \label{fig:graph_making}
+\end{figure*}
+
+\paragraph{Decoding Graph}
+Once a measurement is performed on the surface code, some of the ancillas may report nontrivial measurement. 
+The set of the corresponding vertices in the model graph is called the \emph{syndrome}.
+The model graph and the syndrome are the basis of error decoding. Marking the vertices from the syndrome in the model graph, one derives the \emph{decoding graph}, which is the basis of error decoding. \autoref{fig:csg_construction_c} shows the decoding graph for the model graph from \autoref{fig:graph_making_d}.
+
+\paragraph{Syndrome Graph}
+Given the syndrome $S$,  
+we can construct the \textit{syndrome graph} $G(V,E)$ as shown in \autoref{fig:csg_construction_d}. $V$ is the set of nontrivial measurement vertices from the model graph. $e\in E$ represents the set of the minimum-weight paths between two nontrivial measurement vertices in the model graph. Because each path in the model graph corresponds to an error pattern, $e$ also defines a set $\mathbf{e}$ of error patterns each corresponding to a minimum-weight path.
+
+In a syndrome graph, we say two vertices are adjacent to each other if the edge connecting them has a small weight. Otherwise, we say they are far from each other. 
+
+A subgraph of the syndrome graph is defined by a subset of $E$, $E'$. It defines a set of error patterns $\mathbf{E'}$ according to 
+    $\mathbf{E}'=\{\E|\E=\sum_{e\in E'} \E_e,\forall \mathcal{E}_e\in\mathbf{e}\}$.
+
+\paragraph{Logical Equivalence}
+Given two subgraphs of the syndrome graph defined by $E_1$, $E_2\subseteq E$, respectively, we say they are logically equivalent if $\forall \mathcal{E}_1\in \mathbf{E}_1$ and $\forall \mathcal{E}_2\in \mathbf{E}_2$, $\mathcal{E}_1+\mathcal{E}_2$\footnote{Here $+$ is the symmetric difference, defined in \autoref{ap:proof}.} is a trivial logical operator.
+
+\begin{table}[t]
+\centering
+\caption{Mathematical symbols}
+\begin{tabular}{ |c|c|} 
+ \hline
+ Symbol & Meaning  \\ \hline\hline
+ $e$ & edge\\\hline
+ $E$ & set of edges  \\\hline
+ $\mathcal{E}$ & an error pattern \\ 
+ \hline
+ $\hat{\mathcal{E}}$ & the operator form of $\E$ \\ 
+ \hline
+ 
+ $\mathbf{E}$& set of error patterns\\\hline
+\end{tabular}
+\end{table}
+
+\subsection{Perfect Matching}
+\label{sec:matching}
+
+\begin{figure}[ht]
+    \renewcommand*\thesubfigure{(\alph{subfigure})}  % add parentheses manually
+    \centering
+    \begin{subfigure}{.42\linewidth}
+        \centering
+        \includegraphics[width=1\linewidth]{figures/graph/syndrome_graph.pdf}
+        \caption{}
+        \label{fig:csg_construction_c}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{.42\linewidth}
+        \centering
+        \includegraphics[width=1\linewidth]{figures/graph/complete_syndrome_graph.pdf}
+        \caption{}
+        \label{fig:csg_construction_d}
+    \end{subfigure}
+    \caption{ Example decoding (a) and syndrome (b) graphs for the model graph in \autoref{fig:graph_making_d}.
+    The decoding graph is the model graph with with nontrivial measurement vertices marked (red). 
+    The syndrome graph is constructed by computing the minimum-weight paths between nontrivial measurement vertices from the model graph and removing trivial ones.
+    }
+    \label{fig:csg_construction}
+\end{figure}
+
+Given the syndrome $S$, the second stage seeks to identify the error pattern that caused it. That is, it solves the following problem, often approximately. \begin{equation}
+    \mathcal{E}(S) = \arg \max \limits_\mathcal{E} P(\mathcal{E}|S)
+    \label{eq:graphdecodeformula}
+\end{equation}
+
+Once $\mathcal{E}(S)$ is identified, a correction $C'$ can be applied,  to avoid a logical error, i.e., $ C'(S)\in \mathbf{C}_{\mathcal{E}(S)}$, or to perfectly cancel $\mathcal{E}(S)$, i.e., $\hat{C}'=\hat{\mathcal{E}}(S)^{\dagger}$.
+
+Graph-based decoding solves \autoref{eq:graphdecodeformula} by finding a \emph{perfect matching} in the syndrome graph.
+A perfect matching is a subgraph in which all vertices of the syndrome graph are incident to one and only one edge. It presents the set of error patterns $\mathbf{E}$ such that $\mathcal{E}\in\mathbf{E}$ produces the syndrome.
+$P(\mathcal{E}|S)$ for $\mathcal{E}\in\mathbf{E}$ is determined by the sum of the weights of edges in the perfect matching. The larger the sum, the lower $P(\mathcal{E}|S)$.
+Therefore, a most likely error pattern given the syndrome, \ie maximizing $P(\mathcal{E}|S)$, corresponds to a minimum weight perfect matching of the syndrome graph.
+
+Some useful properties of perfect matchings of a syndrome graph can be found in \S\ref{sec:theory_pm}.
+
+Comparing  \autoref{eq:graphdecodeformula} with \autoref{eq:coset}, one can see that graph-based decoding is missing the summation $\sum$. That is, it selects the most likely error and intends to correct it, while the optimal decoder should select the correction that will most likely correct the error. As a result, graph-based decoding is sub-optimal in terms of logical error rate. 
+
+We note that virtual boundary vertices are treated specially when finding a perfect matching in the syndrome graph: they do not have to be matched. 
+
+We care about two classes of graph-based decoders that differ in how they find a perfect matching given a syndrome graph. 
+
+\begin{itemize}
+\item 
+ A \textit{Minimum Weight Perfect Matching (MWPM)} decoder finds a minimum-weight perfect matching for the syndrome graph. 
+The best implementation of the MWPM decoder has a worst-case time complexity of $O(d^5)$~\cite{micali1980v,gabow1991faster,goldberg2004maximum}, not scalable for large surface codes. 
+
+\item 
+ A \textit{Union-Find (UF)} decoder~\cite{delfosse2020linear} does not find a minimum-weight perfect matching. It does not even find a perfect matching. Rather, it finds a subgraph that is logically equivalent to a perfect matching of low weight. 
+ Because of this, UF decoders can be much faster and more scalable than MWPM decoders.
+ Notably, the original UF decoder uses the decoding graph with $O(d^2)$ worst-case time complexity, instead of the syndrome graph (See \autoref{ap:equiv_uf}).
+\end{itemize}
+
+We will explain how these two classes are related further in \S\ref{sec:interpretation}.
+
+
+\subsection{More Error Types}\label{ssec:generalize3d}
+We now extend the graph-based decoding described above to deal with measurement errors and to approximate indirect errors, such as Pauli Y error.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.8\linewidth]{figures/error_3D/error_3D.pdf}
+    \caption{Decoding graph along with an error pattern on d = 3 surface code with 3 rounds of measurements. 
+    This includes measurement errors and X or Z errors in ancillas propagating to data qubits. Measurement errors as well as errors propagating from ancilla to data qubits are represented by edges connecting adjacent layers (rounds). The error pattern shown has an isolated X error, isolated Z error, isolated measurement error (shown by M), an isolated X error in an ancilla propagated to data qubits (shown as a diagonal X edge ) and an error chain of X error and a measurement error. Error chains spanning multiple rounds make decoding even more complicated. }
+    \label{fig:errors_3D}
+\end{figure}
+
+\textbf{Measurement errors}:~~Since ancilla qubits are error prone and the quantum gates to implement the stabilizer measurements are noisy, multiple rounds of ancilla measurements are required to perform decoding in a fault-tolerant manner.
+Thus, the syndrome can be represented by a sparsely populated 3D tensor, where first layer indicate the ancilla values from the first round of measurement and subsequent layers indicate the difference of ancilla values in each round of measurement compared to the previous round of measurements.
+The difference of ancilla values are chosen to ensure nontrivial measurements corresponding to each error is indicated only once in the 3D tensor.
+Due to measurement errors, error chains can spread over multiple measurement rounds, thus increasing the space of total possible error patterns for a given syndrome as shown in \autoref{fig:errors_3D}.
+This further complicates the decoding process, resulting in $2^{2d^3}$ different possible syndromes given $d$ noisy measurement rounds compared to $2^{2d^2}$ without these errors.
+
+
+\textbf{Indirect errors} are errors that each impact more than two ancillas but can be approximated by multiple independent errors.
+For example, Paul Y error in \autoref{fig:single_Y_error} can be decomposed as Pauli X error and Pauli Z error in \autoref{fig:single_X_error} and \autoref{fig:single_Z_error}, and thus can be decoded using the existing graph.
+This decomposition implies that the probability of an indirect error is the product probabilities of its decomposed parts, which leads to inaccurate decoding results.
+In the example above, if we assume the depolarizing error model where $P(X) = P(Y) = P(Z) = p$, the assigned probability $P'(Y) = P(X)P(Z) = p^2$ can be substantially smaller than the actual $P(Y)=p$ for small $p$.
+As a result, graph-based decoding can only approximately solve the most likely error pattern in the existence of indirect errors.

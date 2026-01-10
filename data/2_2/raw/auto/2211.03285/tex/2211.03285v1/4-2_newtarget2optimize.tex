@@ -1,0 +1,52 @@
+\subsection{Optimizing Batch Size}
+\label{sec:newtarget}
+
+Given a seed, mutation-based fuzzers modify it by applying mutations several times.
+In the case of AFL, the number of mutations applied to a seed is determined by \( 2^t \) where \( t \) is a random number. 
+We denote \( t \) as the \emph{batch exponent} and \( 2^t \) as the \emph{batch size}.  
+
+Wu et al.\ suggested that optimizing the batch exponent for each PUT could accelerate fuzzers \cite{HavocMAB}.
+We also focus on the batch size but our idea is different in that when we optimize the batch size, we consider not only the difference of PUTs but also 
+the size of the seed to be mutated and the mutation method to be applied.
+
+\begin{figure*}
+  \centering
+  \includegraphics[width=0.9\linewidth]{figure/repetition_observation.png}
+  \caption{Ratio between batch sizes of the number of seeds saved during a fuzzing campaign by AFL++ for different PUTs and different groups of seed sizes. The label `[x, y)' in a bar means that this bar is the summary of the ratio for the seeds whose size is between \( 2^x \) and \( 2^y \). The number specified by \( n \) is how many seeds are in this bucket as a whole.}
+  \label{fig:reptition-observations}
+\end{figure*}
+
+First, we hypothesize that the best batch size is dependent on the seed size.
+To validate this hypothesis, we collected seeds saved during fuzzing campaigns with AFL++\footnote{AFL++ saves a seed when an input using the seed discovers a new execution path.}, grouped them by the sizes of their parent seeds, and analyzed how many times mutations were applied to produce them.
+We executed AFL++ 30 times against PUTs taken from FuzzBench for 24h, and the results are summarized in Figure~\ref{fig:reptition-observations}.
+Even though AFL++ chooses batch sizes randomly
+\footnote{To be precise, batch exponents greater than 4 are not candidates until AFL++ find no new execution path for a long time.
+However, this heuristic would not spoil the discussion because it is still random enough and we actually see different distributions.
+},
+the distributions of effective batch sizes are different, depending on seed sizes even in the same PUT.
+This implies that, rather than assigning the same probability to all batch sizes without considering seed sizes, we should weight them appropriately based on the sizes to find a new execution path efficiently.
+Hence, we prepare different bandit problem instances for different seed sizes.
+
+As a side note, it is interesting that, in half of the PUTs, as the seed size increases, the ratio of batch size \( 2^2 \) decreases, which indicates that the possibility of triggering a new execution path with \( 2^2 \) times of mutations decreases as the seed to be mutated becomes larger. 
+This phenomenon may be interpreted from the perspective of \textit{batch processing} as explained in Section~\ref{sec:mutationscheme}; the bigger the number of mutation operators applied in parallel gets, the more efficient the random mutation becomes.
+On the other hand, mutating too many positions of a seed can easily break the whole structure of the seed by destroying its important parts (e.g., magic number).
+Larger seed size progressively lowers such possibility by relatively decreasing the probability of the important parts being selected as mutated positions.
+However, this is just a possible explanation and this phenomenon requires further investigation, considering that it is not applicable to the other half of the PUTs.
+
+In addition, when optimizing the batch size, we should be aware of the differences in mutation operators selected.
+Various mutation operators have been developed to find new code blocks efficiently. 
+For example, AFL-based fuzzers contain the mutation operators named `flip\_bit' and `clone\_bytes';
+the former only modifies one byte of the original seed while the latter appends a possibly great number of bytes to it.
+To precisely control the number of positions to be modified, we should prepare different bandit problem instances for each mutation operator.
+
+Based on these viewpoints, we designed \OurMethodName{} to determine the batch exponent using the following mechanism: instead of using one fixed batch exponent or a random number, we introduce our bandit algorithm suitable for fuzzing, as explained in Section~\ref{sec:banditcomparison}, to optimize the batch exponent for each PUT.
+We prepared different bandit problem instances for different seed sizes and mutation operators. 
+Because the seed sizes can be arbitrary non-negative numbers and are too many to prepare different bandit instances for each of them,  
+we prepare five groups for seeds with sizes of \( [0, 10^2) \), \( [10^2, 10^3) \), \( [10^3, 10^4) \), \( [10^4, 10^5) \), and \( [10^5, \infty) \). 
+Even though there is room for tuning, our observations indicated that these groups work well for capturing the overall tendency of seed sizes.
+
+Because a batch exponent in the original AFL++ can only be at most seven, we prepare seven bandit arms for each instance; the \( t \)-th arm corresponds to the batch exponent \( t \).
+Given a source seed to be mutated and a mutation operator to be applied to the seed, \OurMethodName{} fetches the bandit instance corresponding to the seed size and the mutation operator.
+Then, it pulls an arm of the bandit instance to obtain the batch exponent \( t \).
+After that, it mutates the seed \( 2^t \) times and tests if the execution with the mutated seed discovers a new execution path.
+If so, it gives a reward to the arm.

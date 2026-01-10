@@ -1,0 +1,45 @@
+\section{Related Work}
+
+\subsection{Improvements on Mutation-Based Fuzzer}
+
+Various components of mutation-based fuzzers have been refined from different perspectives to improve their efficiency, that is, increase code coverage, particularly after the advent of the representative feedback-driven fuzzer AFL \cite{AFL}.
+Some studies achieved efficiency purely by speeding up the execution of PUTs and the acquisition of feedback from that execution \cite{forkserver, PTfuzz, PTrix, UnTracer}.
+Other studies aimed to generate inputs that are more likely to find new code blocks by supplying extra information into feedback with binary instrumentation, taint inference, or emulators, and/or by integrating other techniques to solve constraints such as the SMT solver \cite{VUzzer, REDQUEEN, Eclipser, Angora, KLEE, Driller, QSym}.
+However, these technologies often have non-negligible additional costs to deploy; they usually reduce the execution speed of PUTs and thus lower the throughput of a fuzzer.
+They may also support a limited range of program execution environments, narrowing the range of PUTs that can be fuzzed.
+
+Because of this concern, a series of studies have explored optimizations to make existing feedback-based fuzzers work efficiently against any PUTs without additional information.
+Most studies focused on either seed selection or mutation because they are essential parts of mutation-based fuzzers, which simply repeat the loop of selecting a seed, modifying it to create new inputs, and executing a PUT with them.
+For example, AFLFast optimized a parameter called \textit{energy}, which denotes the number of times a seed is used to generate new inputs by modeling fuzzing as a Markov chain \cite{AFLFast}.
+Similarly, B\"{o}hme et al.\ employed information theory \cite{Entropic} and Patil and Kanade adopted reinforcement learning \cite{GreyFuzzAsContextual} to regulate the energy parameter.
+In another direction, Rebert et al.\ optimized seeds to be kept in a seed set as a minimal set cover problem \cite{OptimizSeedSelection}. 
+FairFuzz introduced a mutation mask to limit the positions in the input to be modified, thereby increasing the likelihood that new inputs will trigger rare execution paths \cite{FairFuzz}.
+Our study has the same motivation as these studies to achieve PUT-agnostic optimization; however, we focus on applying bandit algorithms because they can be further leveraged by introducing our bandit-friendly scheme.
+
+\subsection{Online Optimization of Mutation Operator}
+
+When we consider applying online optimization to fuzzing, there are several options for selecting optimization targets.
+Although some studies have employed bandit problems to optimize seed scheduling and other components in fuzzing \cite{ScheduleBlackBox, EcoFuzz, HierarSeed}, previous studies applying online optimization to the selection of mutation operators are the most relevant to our work.
+For example, MOpt optimized the probability distribution of choosing mutation operators during runtime with its original heuristics that resemble Particle Swarm Optimization, based on the observation that different PUTs have different mutation operators that are likely to produce interesting seeds \cite{MOpt}.
+However, as shown in Section~\ref{sec:evaluation}, MOpt often results in worse performance than before the optimization and therefore can be unsatisfactory as an online method for optimizing the distribution in a PUT-agnostic manner.
+
+Karamcheti et al.\ integrated Thompson sampling into a random mutation in AFL, called havoc, and confirmed its effectiveness \cite{AdaptiveFuzzTS}.
+Although they modified only AFL, their mutation scheme is generally applicable to other fuzzers.
+However, unlike our scheme, their scheme is troubled by the credit assignment problem.
+They attached Thompson sampling to their scheme without modifying the havoc, resulting in the need to select multiple mutation operators in one step.
+In principle, this is clearly intractable with classical stochastic bandit problems because the algorithms can select only one arm in one step in those problems.
+They bypassed this issue by heuristically fixing the number of mutation operators to be selected at a time (referred to as \texttt{sample\_num\_mutations}, hereafter called \textit{batch size}).
+This leaves an open problem regarding the application of bandit algorithms with arbitrary batch size.
+In Section~\ref{sec:mutationscheme}, we show that by slightly changing the traditional scheme that havoc follows, we can avoid the credit assignment problem and solve this open problem.
+
+CMFuzz extended the mutation scheme of Karamcheti et al.\ by treating the seeds to be mutated as a context \cite{CMFuzz}. 
+It then modeled the choice of the mutation operator as a contextual bandit problem and used LinUCB to optimize it.
+This is promising because the contextual bandit problem can consider the differences between seeds.
+However, like the scheme of Karamcheti et al., the mutation scheme of CMFuzz is also affected by the credit assignment problem; thus, the batch size must be set to a small constant.
+
+Wu et al. empirically examined the characteristics of havoc and sublimed their discoveries into a new mutation scheme that allows bandit algorithms to adaptively optimize the selection of mutation operators and batch sizes \cite{HavocMAB}. While their proposed algorithm, \HavocMAB{}, is the most similar to ours, there are two major differences. First, \HavocMAB{} uses a single instance of the bandit problem to optimize a parameter, whereas our algorithm chooses one from multiple instances depending on the length of the seed to be mutated. Our design is based on the observation that the optimal choice of parameters is conditioned by length, as described in Section~\ref{sec:newtarget}. Second, unlike ours, \HavocMAB{} simultaneously applies different types of mutation operators to a single input, similar to the algorithms of Karamcheti et al. and CMFuzz. With such algorithms, it is difficult to analyze which mutation operator is effective when a generated input increases the code coverage, which can hinder fuzzers from making precise choices.
+
+SIVO introduced various contrivances, such as taint inference engine, symbolic constraint solver, and customized instrumentation, and optimized all optimizable parameters using a bandit algorithm \cite{SIVO}.
+Notably, it employed non-stationary bandit algorithms to mitigate the fact that, in most cases, rewards monotonically decrease when fuzzing is formulated as a bandit problem.
+Still, the bandit algorithm employed in SIVO is discounted Boltzmann exploration, which was originally invented by SIVO, to the best of our knowledge, by applying the technique of discounting \cite{dUCB, dTS} to Boltzmann exploration.
+As discussed in Section~\ref{sec:banditcomparison}, there can be room for further performance improvement by adopting other non-stationary bandit algorithms.

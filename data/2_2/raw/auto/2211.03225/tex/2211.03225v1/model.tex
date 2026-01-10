@@ -1,0 +1,660 @@
+\section{Model} \label{sec:model}
+
+We first present our model of cryptographic protocols and use it to
+model the security of the Private Authentication Protocol as a running
+example~\cite{AF04}.  Our framework is based on the applied pi
+calculus~\cite{ABF17} and follows the tradition of symbolic models
+rooted in the seminal work of Dolev and Yao \cite{DY81}.  In these
+models, the low-level details of cryptography are abstracted by a term
+algebra describing the ideal behaviour of cryptographic primitives,
+whereas secret data such as cryptographic keys or nonces are
+represented by symbolic values called \emph{names}.
+
+\subsection{Messages and cryptography}
+
+  \paragraph{Protocol messages}
+    Cryptographic operations are modelled by a set \(\sig\) of symbols of fixed arity denoted \(\sig = \{\ffun/n, \gfun/m, \ldots\}\), called a \emph{signature}.
+    In this paper, it is always partioned into:
+    \begin{itemize}
+      \item The infinite set of \emph{constants} (\(\sig_0\)) that are the functions of arity 0 of \(\sig\), thus modelling the public values of the protocol such as identities, IP addresses or public communication channels.
+      \item The finite set of \emph{constructors} (\(\sigc\)) modelling cryptographic operations used to build messages, typically encryption, signature, concatenation or hash.
+      \item The finite set of \emph{destructors} (\(\sigd\)) modelling inversions or operations that may fail depending on the structure of their argument, typically decryption, signature verification or projection.
+    \end{itemize}
+
+    \begin{example}
+      \label{ex:standard-signature}
+      The following signature captures most of the cryptographic primitives that are used in our examples and benchmarks.
+      We will use them throughout Section~\ref{sec:model} in examples.
+      \begingroup
+        \renewcommand*\box[1]{\parbox[top][1cm][c]{2cm}{\centering \footnotesize #1}}
+        \renewcommand*\arraystretch{1.3}
+        \[\begin{array}{c@{\qquad}ccccc}
+          & \box{concatenation / pairs}
+          & \box{symmetric encryption}
+          % & \box{random. sym. encryption}
+          & \box{asymmetric encryption}
+          % & \box{random. asym. encryption}
+          & \box{digital signature}
+          & \box{one-way hash}
+          \\\hline
+          \sigc
+            & \pair {\cdot, \cdot}/2
+            & \senc/3
+            & \pk/1, \aenc/3
+            & \vpk/1, \sign/3
+            & \hfun/1
+          \\\hline
+          \sigd
+            & \fst/1, \snd/2
+            & \sdec/3
+            & \adec/3
+            & \checksign/2
+            & \emptyset
+        \end{array}\]
+      \endgroup
+      
+      For example \(\aenc(m,r,\pk(k))\) models a plaintext \(m\) encrypted with public key \(\pk(k)\) and a randomness \(r\).
+      The corresponding decryption key would be \(k\).
+      A similar description can be made for symmetric encryption, except that the encryption and decryption keys are identical.
+      %
+      The model of hash functions contains no destructors on purpose, thus modelling an assumption that \(\hfun\) is a random oracle, i.e., no identities can be derived from \(\hfun\).
+      %
+      Notation-wise, we also often use a tuple notation \(\pair{x_1, \ldots, x_n}\) instead of the nested \(n-1\) pairs \(\pair{x_1, \pair {x_2, \ldots \pair {x_{n-1}, x_n}}}\). 
+      %
+      % Our experiments also include more involved primitives, not detailed here, for weeding and several forms of zero-knowledge proofs.
+    \end{example}
+
+    A protocol message \(m\) is then modelled by a \emph{term} over this signature, i.e. \(m\) is obtained by applying function symbols to other terms or \emph{names}.
+    The infinite set of \emph{names} \(\Nall\) can be seen as a symbolic abstraction of private values such as encryption keys or nonces.
+    The set of names occurring in a term \(t\) is written \(\names(t)\).
+    In some models
+    % (including the short version \cite{CKR18})
+    names are partitioned into public and private names, where the set of public names essentially plays the same role as \(\sig_0\).
+    Since constants and public names have a similar role (and are even treated identically in our tool implementation) we decided to merge them into the single set \(\sig_0\) similarly to other formalisations, e.g. \cite{CCD15b}.
+    %
+    We write \(\termset(S)\), \(S \subseteq \sig \cup \Nall\), the set of terms built from functions, names, and constants of \(S\).
+
+  \paragraph{Specifying cryptographic assumptions}
+    The behaviour of the primitives of the signature is modelled by a \emph{rewriting system}.
+    For that we assume an infinite set of \emph{variables} \(\X = \{x, y, z, \ldots\}\) that may be used in terms, and write \(\vars(t)\) the set of variables occurring in a term \(t\).
+    Mappings \(\sigma\) from variables to terms are called \emph{substitutions} and are homomorphically extended to mappings from terms to terms implicitly.
+    We use the postfix notation \(t\sigma\) for \(\sigma(t)\), and \(\sigma\sigma'\) for the composition of subtitution \(\sigma'\circ\sigma\) (that is, \(t \sigma \sigma' = (t\sigma) \sigma'\)).
+    We call the \emph{domain} of \(\sigma\) the set \(\dom(\sigma) = \{x \in \X \mid x \sigma \neq x\}\).
+    For convenience we also use set notations, defining a substitution \(\sigma\) such that \(\dom(\sigma) \subseteq \{x_1, \ldots, x_n\}\) with the notation
+    \(\sigma = \{x_1 \mapsto \sigma(x_1), \ldots, x_n \mapsto \sigma(x_n)\}\).
+    Going further we may refer to the substitution \(\sigma \cup \sigma'\) (provided \(\sigma\) and \(\sigma'\) coincide on \(\dom(\sigma) \cap \dom(\sigma')\)) or write \(\sigma \subseteq \sigma'\) to mean that \(\sigma'\) extends \(\sigma\).
+    %
+    A \emph{rewriting system} \(\R\) is then a finite binary relation on terms.
+    All pairs of \(\R\) are called \emph{rewrite rules} and are assumed to be of the form
+    \begin{align*}
+      f(\ell_1, \ldots, \ell_n) & \to r & \mbox{for some }\ f/n\, \in \sigd\ \mbox{ and }\ \ell_1, \ldots, \ell_n, r \in \termset(\sig_c \cup \sig_0 \cup \X)
+    \end{align*}
+    Such rewriting systems are usually qualified as \emph{constructor destructor} in the literature.
+    By extension we also use notation \(t \to s\) (``\emph{\(t\) rewrites to \(s\)}'') when \(t\) and \(s\) are related by the closure of \(\R\) under application of substitution and term context.
+    The reflexive transitive closure of this relation is written \(\to^*\).
+
+    \begin{example} \label{ex:standard-theory}
+      We give the rewrite rules for the primitives introduced in Example~\ref{ex:standard-signature}.
+      \begin{align*}
+        & \text{\em sym. encryption:} & &
+          \sdec(\senc(x,y,z),z) \to x \\
+        & \text{\em pairs:} & &
+          \fst(\pair {x,y}) \to x \quad \text{\em and} \quad \snd(\pair{x,y}) \to y \\
+        & \text{\em asym. encryption:} & &
+          \adec(\aenc(x,y,\pk(z)),z) \to x \\
+        & \text{\em signatures:} & &
+          \checksign(\sign(x,y,z), \vpk(z)) \to x
+      \end{align*}
+      For example here one can decrypt (apply \(\adec\)) a ciphertext \(\aenc(x,y,\pk(z))\) with the corresponding key \(z\) to recover the plaintext \(x\).
+      The rule for signature verification is the opposite, recovering the signed message \(x\) using the public verification key \(\vpk(z)\).
+      The behaviour of these primitives is idealised by the absence of other rules, for example modelling an assumption that no information can be extracted from a ciphertext or a signature without access to the secret or verification keys.
+      This idealisation can be partially lifted by adding more rewrite rules modelling specific imperfections of the cryptography.
+      For example we can add the following new symbols and rewrite rules:
+      \begin{align*}
+        \testaenc(\aenc(x,y,\pk(z))) & \to \okfun &
+        \getkey(\aenc(x,y,\pk(z))) & \to \pk(y)
+      \end{align*}
+      model two assumptions that
+      \begin{enumerate*}
+        \item it is possible to distinguish a correctly encrypted message from a random bitstring, and
+        \item it is possible to retrieve the encryption key from the ciphertext itself (i.e. the scheme is not \emph{key concealing}).
+      \end{enumerate*}
+      Naturally even if a protocol is considered secure without these two rewrite rules, a security violation may arise upon adding them.
+      It is therefore important to keep in mind the assumptions underlying the model when interpreting the result of an analysis.
+    \end{example}
+
+    We observe that the rewrite rules introduced in the example above verify a classical property, \emph{subterm convergence}, introduced in \cite{AC06} and benefitting from several decidability results in the context of protocol analysis \cite{AC06,CCD13}.
+    It means that \(\R\) is convergent (i.e. confluent and strongly terminating) and that its rules \(\ell \to r\) verify that \(r\) is either a strict subterm of \(\ell\) or a \emph{ground term} (i.e. a term without variables) in \emph{normal form} (i.e. irreducible w.r.t. \(\to\)).
+    The results of this paper only apply to cryptographic primitives modelled by a constructor destructor subterm convergent rewriting systems.
+    Imposing such restrictions is inevitable when aiming for decidability, since the problems we investigate are undecidable for arbitrary convergent rewriting systems \cite{AC06}.
+
+    In particular, by convergence, all terms \(t \in \termset(\sig \cup \Nall)\) have a unique normal form w.r.t. \(\R\) that we will write \(t \norm\).
+    It is also common to identify messages whose destructors failed to be applied.
+    For that we define a predicate \(\msg\) on terms:
+    we say that \(t\) is a \emph{message}, written \(\msg(t)\), when for all subterms \(u\) of \(t\), \(u\norm\) does not contain any destructors.
+    For example if \(m \in \sig_0\) and \(k \neq k'\), \(\adec(\aenc(m,\pk(k)), k)\) is a message but not \(\fst(\pair {m, t})\) with \(t = \sdec(\senc(m,k),k')\).
+
+\subsection{Protocols} \label{sec:processes}
+
+  \paragraph{Processes}
+    Security protocols are modelled by \emph{(plain) processes} in a concurrent process calculus defined by the following grammar:
+    \[\begin{array}{rl@{\qquad}r}
+      P,Q := & 0 & \text{null}\\
+      & P \mid Q & \text{parallel}\\
+      & \IfP\ u = v\ \ThenP\ P\ \ElseP\ Q& \text{conditional}\\
+      & \OutP u v.P & \text{output}\\
+      & \InP u x.P & \text{input}\\
+      \end{array}
+    \]
+    where \(u,v\) are terms and \(x \in \X\).
+    Intuitively the \(0\) models a terminated process (and is often omitted for succinctness), a conditional \(\IfP\ u = v\ \ThenP\ P\ \ElseP\ Q \) executes either \(P\) or \(Q\) depending on whether the terms \(u\) and \(v\) are messages and have the same normal form, and \(P \mid Q\) models two concurrent processes.
+    Inter-process communications are performed with \(\InP {u} {x}.P\) and \(\OutP {u} {v}.P\) which are, respectively, inputs and outputs on a communication channel \(u\).
+    When \(u\) is known to the attacker, for example when it belongs to \(\sig_0\), executing an output on \(u\) adds it to the adversary's knowledge, whereas an input on \(u\) is fetched from the adversary possibly forwarding a previously stored message, or computing a new message from previous outputs.
+    Otherwise the communication is performed silently without adversarial interferences.
+    %
+    The main difference with the calculus of \cite{ABF17} is the absence of replication, thus bounding the number of instructions of a process.
+    This restriction does \emph{not} make protocol analysis trivially decidable:
+    although the number of instructions are finite, the number of their possible executions is not, since the attacker can fetch arbitrary messages to public inputs.
+
+    \begin{example} \label{ex:process}
+      We define a process modelling the protocol for private authentication described in \cite{AF04} as a running example through the paper.
+      Denoting by \(\sk_X,\pks_X\) the secret and public keys of an agent
+      \(X\), and by \(r_X\) fresh nonces, its control flow can be described as follows using an informal Alice-Bob notation:
+      \begin{align*}
+        X \to B:\ & \aenc(\pair {N_X, r_X, \pks_X}, \pks_B) \\
+        B \to X:\ & \aenc(\pair {N_X , N_B, \pks_B}, r_A, \pks_A) && \mbox{if \(X = A\)}\\
+        & \aenc(N_B,r_B,\pks_B) && \mbox{if the decryption fails or \(X \neq A\)}
+      \end{align*}
+      where \(N_X,N_B\) are two freshly generated nonces.
+      Here the agent \(B\) accepts authentication requests from the agent \(A\) but not from other parties.
+      Among the security goals stated in \cite{AF04} are
+      \begin{enumerate}
+        \item \emph{Secrecy:}
+        At the end of a successful instance of the protocol between \(A\) and \(B\), \(N_A\) and \(N_B\) are secrets (i.e. the attacker cannot get information about them).
+        \item \emph{Anonymity:}
+        The attacker cannot tell whether the protocol is run by \(A\) and \(B\) or other agents.
+        \item \emph{Private authentication:}
+        The attacker cannot tell whether \(B\) accepts connections from \(A\) or not.
+      \end{enumerate}
+      The last two security goals explain in particular the decoy message \(\aenc(N_B,\pks_B)\) that \(B\) sends upon decryption failure or connection refusal:
+      thus from an outside observer there is no observable difference between the situations where \(B\) answers or not.
+      %
+      The roles of \(X\) and \(B\) can be specified as follows in the applied pi calculus;
+      each process takes as an argument its secrey key \(s\), the public key \(p\) of the agent it aims at communicating with, its fresh session nonces \(n,r\) and we write \(t = \adec(x,s)\):
+      \[\begin{array}{l@{\ }l@{\qquad}l@{\ }l}
+        X(s, p, n, r) = & \OutP c {\aenc(\pair {n,\pk(s)},r,p)}. &
+        B(s, p, n, r) = & \InP c x.\\
+        & \InP {c} {x} & & \IfP\, \snd(t) = p\, \ThenP\\
+        & & & \phantom{\ElseP}\, \OutP c {\aenc(\pair {\fst(t), n, \pk(s)}, r, p)}\\
+        & & & \ElseP\, \OutP c {\aenc(n,r,\pk(s))}
+      \end{array}\]
+      where \(c \in \sig_0\).
+      % Each process takes as an argument its secret key and the public key of the agent it aims at communicating with.
+      % In practice \(\pks_A,\pks_B\) are instanciated by \(\pk(\sk_A)\) and \(\pk(\sk_B)\) for \(\sk_A,\sk_B \in \Nall\).
+      The security goals are formalised in Section~\ref{sec:equivalence}.
+    \end{example}
+
+  % \subsubsection{Semantics in an adversarial environment}
+
+    \paragraph{Attacker's knowledge}
+      In the next paragraphs we formalise how processes may be executed in an active adversarial environement.
+      The first step is to model the capabilities of the underlying attacker that spies on the communication network and actively interferes with communications.
+      %
+      For that we refine the set of variables to \(\X = \Xfst \uplus \AX\), thus introducing a new type of variables \(\AX = \{\ax_1, \ax_2, \ax_3, \ldots\}\) called \emph{axioms} that will serve as handles to make reference to attacker's observations.
+      Concretely a term \(\xi \in \termset(\sig \cup \AX)\) is called a \emph{recipe} and is intuitively an algorithm for the attacker to construct a term from their prior observations.
+      For example upon observing the messages \(\aenc(m,r,\pk(k))\) and \(k\) in this order, an attacker can use the recipe \(\xi = \adec(\ax_1,\ax_2)\) to retrieve \(m\) although it has not been observed directly.
+      We observe in particular that by definition a recipe cannot contain names, modelling that they are assumed to be private and as such cannot be used directly by the adversary.
+      % Still, as demonstrated by the example above, they can be used by reference through axioms after being observed.
+
+      On the other hand, the variables of \(\Xfst\), called \emph{first-order variables} for distinction, stick to the initial role of variables---namely, being used as binders for protocol inputs.
+      For this reason, we call a term \(t \in \termset(\sig \cup \Nall \cup \Xfst)\) a \emph{protocol term}.
+      However, we often more specifically consider \emph{constructor terms} \(\termset(\sigc \cup \sig_0 \cup \Nall \cup \Xfst)\) that are protocol terms whose destructors have all been successfully computed, that is, reduced by a rewrite rule.
+      We also write \(\varsfst(t) = \vars(t) \cap \Xfst\) the set of \emph{first-order variables} of \(t\).
+      %
+      Using all these notions we define \emph{extended processes},
+      representing a set of processes executed in parallel together
+      with the knowledge aggregated by the attacker interacting with the protocol:
+
+      \begin{definition}
+        \label{def:extended process}
+        An extended process is a pair \(A = (\P,\Phi)\) with \(\P\) a multiset of ground processes and \(\Phi = \{ \ax_1 \mapsto u_1, \ldots, \ax_n \mapsto u_n\} = \Phi(A)\) is called a \emph{frame} that is a substitution from axioms to ground constructor terms.
+      \end{definition}
+
+      Formalising the example above, if the frame \(\Phi = \{\ax_1 \mapsto \aenc(m,r,\pk(k)), \ax_2 \mapsto k\}\) models the attacker's observations during the execution of a protocol, the fact that \(m\) can be retrieved with the recipe \(\xi = \adec(\ax_1,\ax_2)\) is expressed by the fact that \(\msg(\xi \Phi)\) and \(\xi \Phi \norm = m\).
+      A typical security problem is to decide, given a frame \(\Phi\) and a term \(t\), whether \(t\) is \emph{deducible} by the attacker from \(\Phi\);
+      that is, whether there exists a recipe \(\xi\) such that \(\msg(\xi \Phi)\) and \(\xi \Phi \norm = t \norm\).
+
+    \paragraph{Operational semantics}
+      We now formalise the semantics of processes.
+      By manipulating extended processes this semantics carries the knowledge the attacker aggregates by spying on the communication outputs. %whereas any term deducible by the attacker can be fetched to inputs.
+      Besides, in our constructor destructor setting we assume that the agents only send and accept meaningful messages, namely terms that verify the \(\msg\) predicate.
+      While this assumption is realistic for authenticated encryption for example, it may not hold for schemes with weaker security guarantees.
+      %
+      In practice the semantics takes the form of a transition relation
+      between extended processes labelled by so-called \emph{actions}:
+      \begin{enumerate}[label=\emph{\arabic*.}]
+        \item \emph{Input actions} \(\InP {\xi_c} {\xi_t}\), where \(\xi_c\) and \(\xi_t\) are recipes, model an input from the attacker of a message (crafted using recipe \(\xi_t\)) on some channel (known to the attacker using recipe \(\xi_c\))
+        \item \emph{Output actions} \(\OutP {\xi_c} {\ax_n}\), where \(\xi_c\) is a recipe, model an output on a channel (known by the attacker using recipe \(\xi_c\)), recorded into the frame (at pointer \(\ax_n \in \AX\)).
+        \item \emph{Silent actions} \(\tau\) that model actions that
+          are unobservable by the attacker such as synchronous private
+          communications or evaluation of a conditional.
+      \end{enumerate}
+
+      We call \(\A\) the alphabet of actions, and transitions are of the form \(A \cstep {a} B\), \(a \in \A\).
+      More generally, we write \(A \Cstep{w} B\) when $A \cstep{a_1} \ldots \cstep{a_n} B$ and \(w \in \A^*\) is the word obtained after removing the \(\tau\) actions from the word \(a_1 \cdots a_n\).
+      The transition relation is defined by the rules given in Figure~\ref{fig:semantics}.
+
+      \begin{figure*}[ht]
+        \begingroup
+          \newcommand\skipspace{\hspace{3cm}}
+          \centering
+          \begin{align}
+            \tag{\mbox{\textsc{In}}} \label{rule:in}
+            & (\multi {\InP {u} {x}.P} \cup \P, \Phi)
+              \cstep {\InP {\xi_c} {\xi_t}} (\multi {P\{x \mapsto \xi_t \Phi \norm\}} \cup \P, \Phi) &
+            & \mbox{\small if \(\msg(\xi_c \Phi)\), \(\msg(\xi_t \Phi)\), \(\msg(u)\)} \\
+            \nonumber
+            & & & \mbox{\small and \(\xi_c \Phi \norm = u \norm\)}\\
+            %
+            \tag{\mbox{\textsc{Out}}} \label{rule:out}
+            & (\multi {\OutP {u} {v}.P} \cup \P, \Phi)
+              \cstep {\OutP {\xi_c} {\ax_n}} (\multi {P} \cup \P, \Phi \cup \{\ax_n \mapsto v\norm\}) &
+            & \mbox{\small if \(\msg(\xi_c \Phi)\), \(\msg(u)\), \(\msg(v)\)} \\
+            \nonumber
+            & & & \mbox{\small \(\xi_c \Phi \norm = u \norm\) and \(n = |\dom(\Phi)|+1\)}\\
+            %
+            \tag{\mbox{\textsc{Comm}}} \label{rule:comm}
+            & (\multi {\OutP {u} {v}.P, \InP {u'} {x}.Q} \cup \P, \Phi)
+              \cstep {\tau} (\multi {P, Q\{x \mapsto v\}} \cup \P, \Phi) &
+            & \mbox{\small if \(\msg(u)\), \(\msg(v)\), \(\msg(u')\)} \\
+            \nonumber
+            & & & \mbox{\small and \(u \norm = u' \norm\)}\\
+            %
+            \tag{\mbox{\textsc{Then}}} \label{rule:then}
+            & (\multi {\IfP\ u = v\ \ThenP\ P\ \ElseP\ Q} \cup \P, \Phi)
+              \cstep {\tau} (\multi {P} \cup \P, \Phi) &
+            & \mbox{\small if \(\msg(u)\), \(\msg(v)\) and \(u \norm = v \norm\)}\\
+            %
+            \tag{\mbox{\textsc{Else}}} \label{rule:else}
+            & (\multi {\IfP\ u = v\ \ThenP\ P\ \ElseP\ Q} \cup \P, \Phi)
+              \cstep {\tau} (\multi {Q} \cup \P, \Phi) &
+            & \mbox{\small if \(\neg \msg(u)\), \(\neg \msg(v)\) or \(u \norm \neq v \norm\)}\\
+            %
+            \tag{\mbox{\textsc{Par}}} \label{rule:par}
+            & (\multi {P \mid Q} \cup \P, \Phi)
+              \cstep {\tau} (\multi {P, Q} \cup \P, \Phi)
+          \end{align}
+        \endgroup
+        % \Description{Semantics of the calculus}
+        \caption{Semantics of the calculus}
+        \label{fig:semantics}
+      \end{figure*}
+
+      Apart from the absence of replication, this semantics aims at being as close as possible to the original semantics of the applied pi calculus \cite{ABF17} although using a different formalism.
+      % For this reason it is sometimes called the \emph{classical semantics}.
+      % There exist several possible variants, all related to the mechanism of internal communications:
+      % \begin{itemize}
+      %   \item The \emph{private semantics} that restricts the application of \eqref{rule:comm} to cases where the channel \(u\) cannot be deduced by the attacker.
+      %   This models an attacker that systematically spies on compromised channels, rather than the classical attacker that simply has the capability to do so.
+      %   This semantics is for example used in \cite{BDH15,CCD15,CCD15b,CKR20}.
+      %   \item The \emph{eavesdrop semantics} that allows internal communication on any channel, but the attacker gets knowledge the underlying message if the channel is compromised.
+      %   This semantics has been introduced in \cite{BCK20}.
+      % \end{itemize}
+      % These variations may seem unimportant in that they preserves reachability properties.
+      % However the equivalence properties studied in this paper are directly impacted by the choice of the semantics, as discussed in \cite{BCK20}.
+      % Still, all of our complexity results and decision procedures can be adapted to the three semantics and our tool implementation includes an option to choose which one to use during the analysis.
+      % For simplicity we stick the classical semantics in this paper since it was the one used in the short version \cite{CKR18}.
+
+      % \steve{Do we really want to discuss the different semantics?Maybe a bit confusing.}
+      
+      \begin{example} \label{ex:semantics}
+        We now illustrate how our running example can be executed in the operational semantics.
+        We let two agents of respective secret keys \(\sk_A,\sk_B \in \Nall\).
+        An instance of the protocol between \(A\) and \(B\) is thus modelled, using the notations of Example~\ref{ex:process}, by the process \(P = \bar {A} \mid \bar{B}\) where, given fresh names \(r_A,r_B\):
+        \begin{align*}
+          \bar{A} & = X(\sk_A, \pk(\sk_B), N_A, r_A) &
+          \bar{B} & = B(\sk_B, \pk(\sk_A), N_B, r_B)
+        \end{align*}
+        In order to lighten the presentation we use the same notations as in Example~\ref{ex:process} and name the three messages of the protocol as follows:
+        \begin{align*}
+          m_A & = \aenc(\pair {N_A, \pk(\sk_A)}, r_A, \pk(\sk_B)) \\
+          m_B & = \aenc(\pair {\fst(t), N_B, \pk(\sk_B)}, r_B, \pk(\sk_A)) \\
+          m_B' & = \aenc(N_B, r_B, \pk(\sk_B))
+        \end{align*}
+        We assume that the public keys \(\pk(\sk_A)\) and \(\pk(\sk_B)\) are known to the attacker, which can be modelled by an initial frame \(\Phi_0 = \{\ax_1 \mapsto \pk(\sk_A), \ax_2 \mapsto \pk(\sk_B)\}\).
+        Another possibility is to prefix the process \(P\) with two outputs of \(\pk(\sk_A)\) and \(\pk(\sk_B)\) respectively, which will produce the frame \(\Phi_0\) after two applications of rule \eqref{rule:out}.
+        The normal execution of the process is the following sequence of reduction steps:
+        \[\begin{array}{lll}
+          (\multi {P}, \Phi_0)
+            & \cstep {\tau} (\multi {\bar {A}, \bar{B}}, \Phi_0) \\
+            & \cstep {\OutP {c} {\ax_3}} (\multi {\InP {c} {x}, \bar {B}}, \Phi_1)
+              & \mbox{with } \Phi_1 = \Phi_0 \cup \{\ax_3 \mapsto m_A\} \\
+            & \Cstep {\InP {c} {\ax_3}} (\multi {\InP {c} {x}, \OutP {c} {m_B}}, \Phi_1) \\
+            & \cstep {\OutP {c} {\ax_4}} (\multi {\InP {c} {x},0}, \Phi_2)
+              & \mbox{with } \Phi_2 = \Phi_1 \cup \{\ax_4 \mapsto m_B\} \\
+            & \cstep {\InP {c} {\ax_4}} (\multi {0,0}, \Phi_2)
+        \end{array}\]
+        In this execution the attacker only forwards messages, that is, each input action uses the last axiom added to the frame as a recipe.
+        However the adversary may actively engage in the protocol, for example for guessing whether \(B\) accepts communications from a third agent \(C\).
+        For that they could generate fresh nonces \(N,R \in \sig_0\)
+        (attacker-generated nonces are modelled by fresh constants)
+        and send the message \(m_A' = \aenc(\pair {N, R, \pk(\sk_C)},
+        \pk(\sk_B))\)  to check how \(B\) responds.
+        Note that the message \(m_A'\) can indeed be crafted by the attacker assuming \(\Phi_0' = \Phi_0 \cup \{\ax_3 \mapsto \pk(\sk_C)\}\) as an initial frame.
+        This scenario corresponds to the following sequence of transitions:
+        \[\begin{array}{lll}
+          (\multi {P}, \Phi_0')
+            & \cstep {\tau} (\multi {\bar {A}, \bar {B}}, \Phi_0') \\
+            & \Cstep {\InP {c} {\aenc(\pair {N, \ax_3}, R, \ax_2)}} (\multi {\bar {A}, \OutP {c} {m_B'}}, \Phi_0') \\
+            & \cstep {\OutP {c} {\ax_4}} (\multi {\bar {A}, 0}, \Phi_0' \cup \{\ax_4 \mapsto m_B'\})
+        \end{array}\]
+        This does not leak information to the attacker, assuming they cannot distinguish the messages \(m_B\) and \(m_B'\).
+        All in all, the set of \emph{traces} of the process, i.e. the set of all possible sequences of reductions, characterises all possible executions of the protocol in an active adversarial environment.
+      \end{example}
+
+      As a final note, let us observe that the original pi calculus \cite{MPW92} (referred as the \emph{pure pi calculus} in this paper) can be seen as a special case of our model.
+      Indeed the fragment without replication is retrieved when \(\sigc\), \(\sigd\) and \(\R\) are empty.
+      This restriction makes the transition relation finitely branching up to bijective renaming of attacker-generated constants.
+
+\subsection{Security properties} \label{sec:equivalence}
+
+  % Given a process \(P\) of the applied pi calculus modelling a given protocol, it remains to model the security properties that it is expected to verify.
+  % In this paper we are interested in properties that can be expressed by equivalence relations.
+
+    \paragraph{Against a passive attacker}
+      We first define the notion of \emph{static equivalence} that is often used to model security against a passive attacker in that it is only an equivalence of frames, i.e. it does not involve the operational semantics.
+      It expresses that the knowledge obtained by eavesdropping in two different situations does not permit the attacker to distinguish them.
+      For example no differences can be observed between \(\{\ax_1 \mapsto k\}\) and \(\{\ax_1 \mapsto k'\}\) if \(k,k' \in \Nall\) because, intuitively, two fresh nonces look like random bitstrings from an external observer's point of view.
+      However the situation is different with the frames
+      \begin{align*}
+        \Phi & = \{\ax_1 \mapsto k, \ax_2 \mapsto k\} &
+        \Psi & = \{\ax_1 \mapsto k', \ax_2 \mapsto k\} &
+        \mbox{with } & k \neq k'
+      \end{align*}
+      % with \(k \neq k'\).
+      Indeed, even if no differences can be made between \(k\) and \(k'\) in isolation, the attacker observed two identical messages in the first situation but two different messages in the second situation.
+      In particular we say that the equality test ``\(\ax_1 = \ax_2\)'' distinguishes the two frames (because it holds in \(\Phi\) but not in \(\Psi\)).
+      Besides, in our constructor destructor algebra it is also possible to observe destructor failures.
+      For example the following frames can be distinguished:
+      \begin{align*}
+        \Phi & = \{\ax_1 \mapsto k, \ax_2 \mapsto \aenc(m,r,\pk(k))\} &
+        \Psi & = \{\ax_1 \mapsto k', \ax_2 \mapsto \aenc(m,r,\pk(k))\}
+      \end{align*}
+      Indeed crafting the recipe \(\adec(\ax_2, \ax_1)\) (i.e. decrypting the last observed message with the first one) succeeds in the first situation but triggers a decryption failure in the second.
+      Static equivalence has been extensively studied in the literature (see e.g. \cite{AC06,CDK12,BCD13,CBC11}).
+      Formally:
+
+      \begin{definition} \label{def:static-equivalence}
+        Two frames \(\Phi\) and \(\Psi\) of same domain are \emph{statically equivalent}, written \(\Phi \StatEq \Psi\), when for all recipes \(\xi,\zeta\):
+        \begin{enumerate}
+          \item \(\msg(\xi \Phi)\) if and only if \(\msg(\xi \Psi)\)
+          \item assuming \(\msg(\xi \Phi)\) and \(\msg(\zeta \Phi)\), \(\xi \Phi \norm = \zeta \Phi \norm\) if and only if \(\xi \Psi \norm = \zeta \Psi \norm\).
+        \end{enumerate}
+        This definition is lifted to extended processes by writing \(A \StatEq B\) instead of \(\Phi(A) \StatEq \Phi(B)\).
+      \end{definition}
+
+      \begin{example}
+        The fact that the two frames
+        \begin{align*}
+          \Phi & = \{\ax_1 \mapsto \aenc(m,r,\pk(k))\} &
+          \Psi & = \{\ax_1 \mapsto k'\} &
+          \mbox{with }\ m \in \sig_0\ \mbox{ and }\ k,k',r \in \Nall
+        \end{align*}
+        are statically equivalent intuitively models that encryption makes messages unintelligible (in that the attacker cannot distinguish a ciphertext from a fresh nonce).
+        Naturally this does not hold anymore once the decryption key is revealed.
+        Formally:
+        \(\Phi \cup \{\ax_2 \mapsto k\} \ \not \StatEq\ \Psi \cup \{\ax_2 \mapsto k\}\)
+        as witnessed by the recipe \(\xi = \sdec(\ax_1, \ax_2)\) whose computation succeeds in the first frame but triggers a decryption failure in the second.
+        Without going to the extreme extent of revealing the key, the two situations are also distinguishable if we weaken the cryptographic assumptions on \(\aenc\).
+        For example, recalling the considerations of
+        Example~\ref{ex:standard-signature}, if we do not suppose the
+        encryption scheme to be  \emph{key concealing} anymore by adding the rule
+        \[\getkey(\aenc(x,y,\pk(z))) \to \pk(z)\]
+        then \(\Phi\) and \(\Psi\) are distinguished by the recipe \(\getkey(\ax_1)\) whose destructor succeeds in \(\Phi\) but fails in \(\Psi\).
+        The same fact would arise using the weaker rewrite rule \(\testaenc(\aenc(x,y,\pk(z))) \to \okfun\) that tests whether a bitstring is a ciphertext.
+      \end{example}
+
+    \paragraph{Against an active attacker}
+      Dynamic extensions of static equivalence consider distinguishability for an attacker interacting actively with protocols.
+      Consider for example a protocol modelled by a process \(P\) manipulating a nonce \(k\).
+      A possible model of the secrecy of \(k\) can be formalised by a non interference statement:
+      there is no observable difference in the behaviour of the protocol when \(k\) is replaced by an other term.
+      In this paper we study several relations modelling the underyling notion of indistinguishability.
+      % \emph{trace equivalence} and \emph{labelled bisimilarity}.
+      For completeness, we also present their associated pre-orders that can be useful modelling tools in situations where only inclusion relations are to be expressed.
+
+      \begin{definition}[Trace equivalence] %\label{def:equivalences}
+        If \(A\) and \(B\) are extended processes, we write \(A \TraceIncl B\) when for all traces \(A \Cstep{\tr} A'\), there exists a trace \(B \Cstep {\tr} B'\) such that \(A' \StatEq B'\).
+        We say that \(A\) and \(B\) are \emph{trace equivalent}, written \(A \TraceEq B\), when \(A \TraceIncl B\) and \(B \TraceIncl A\).
+      \end{definition}
+      \begin{definition}[Simulation, (Bi)similarity]
+        A \emph{labelled simulation} (or simply \emph{simluation}) is a relation \(\R\) is a relation such that for all extended processes \(A,B\), \(A \R B\) entails
+        \begin{enumerate}
+          \item \(A \StatEq B\)
+          \item for all transitions \(A \cstep {\alpha} A'\), there exists a trace \(B \Cstep {\alpha} B'\) such that \(A' \R B'\)
+        \end{enumerate}
+        We call \(\Simu\) (\emph{simulation preorder}) the largest simulation, and \(\Simi\) (\emph{labelled similarity}, or simply \emph{similarity}) the relation $\Simu \cap \Simuinv$.
+        \emph{Bisimilarity} \(\LabBis\) is the largest symmetric simulation.
+      \end{definition}
+
+      Note in particular that
+      \[\LabBis {\subset} \Simi {\subset} \TraceEq\]
+      i.e. two bisimilar processes are always similar, and two similar processes are always trace equivalent.
+      These equivalences are well established as means to express security properties \cite{AG99,ABF17}.
+      Trace equivalence has been studied intensively for security protocols \cite{CCD11,ACK16,CCD13,CKR18} while, for example, labelled bisimilarity is used as a characterisation for \emph{observational equivalence}~\cite{ABF17}.
+      % in popular tools such as \proverif or \tamarin~\cite{manual-proverif,manual-tamarin}\steve{I don't think ProVerif relies on the bisimilarity characterization.}.
+
+      \begin{example}
+        We refer again to the processes modelling the Private Authentication protocol as described in Example~\ref{ex:process}.
+        We let for instance the processes \(P_a = B(\sk_B, \pk(\sk_A), N_B, r_B)\) and \(P_c = B(\sk_B, \pk(\sk_C), N_B, r_B)\) modelling the role of \(B\) accepting connections from \(A\) and \(C\), respectively.
+        We want to verify whether an adversary would be able to distinguish the two situations.
+        This could be modelled for example by
+        \begin{align*}
+          (\multi {P_a}, \Phi_0) & \TraceEq (\multi {P_c}, \Phi_0) &
+          \mbox{with } \Phi_0 & = \{\ax_1 \mapsto \pk(\sk_A), \ax_1 \mapsto \pk(\sk_B), \ax_1 \mapsto \pk(\sk_C)\}
+        \end{align*}
+        The initial frame \(\Phi_0\) models that the attacker knows the public keys of all agents.
+        It appears that this equivalence statement holds, the core argument being that for all messages \(u_1,u_2,r_1,r_2\) and \(\pks_1,\pks_2 \in \{\pk(\sk_A), \pk(\sk_B),\pk(\sk_C)\}\), the following frames are statically equivalent:
+        \begin{align*}
+          \Phi_0 \cup \{\ax_4 \mapsto \aenc(u_1, r_1, \pks_1)\} & &
+          \Phi_0 \cup \{\ax_4 \mapsto \aenc(u_2, r_2, \pks_2)\}
+        \end{align*}
+        In particular this equivalence statement still holds if we weaken the cryptographic assumptions on \(\aenc\) by assuming that a ciphertext is ditinguishable from an arbitrary term, which is modelled by adding the rewrite rule \(\testaenc(\aenc(x,y,\pk(z))) \to \okfun\).
+        However trace equivalence is violated if we add the rule \(\getkey(\aenc(x,\pk(y))) \to \pk(y)\).
+        A possible attack trace is, with \(N,R \in \sig_0\):
+        \[\begin{array}{@{}ll@{\qquad}l@{}}
+          (\multi {P_a}, \Phi_0)
+            & \Cstep {\InP {c} {\aenc(\pair {N,\ax_1},R,\ax_2)}} (\multi {\OutP {c} {u}}, \Phi_0)
+              & \mbox{with } u = \aenc(\pair {N, N_B, \pk(\sk_B)}, r_B, \pk(\sk_A))\\
+            & \cstep {\OutP {c} {\ax_4}} (\multi {0}, \Phi)
+              & \mbox{with } \Phi = \Phi_0 \cup \{\ax_4 \mapsto u\}
+        \end{array}\]
+        Indeed there is only one trace in the other process taking the same actions:
+        \[\begin{array}{ll@{\qquad}l}
+          (\multi {P_c}, \Phi_0)
+            & \Cstep {\InP {c} {\aenc(\pair {N,\ax_1},R,\ax_2)}} (\multi {\OutP {c} {v}}, \Phi_0)
+              & \mbox{with } v = \aenc(N_B, r_B, \pk(\sk_B))\\
+            & \cstep {\OutP {c} {\ax_4}} (\multi {0}, \Psi)
+              & \mbox{with } \Psi = \Phi_0 \cup \{\ax_4 \mapsto v\}
+        \end{array}\]
+        and \(\Phi \not\StatEq \Psi\) because the recipe \(\xi = \getkey(\ax_4)\) is evaluated to \(\pk(\sk_A)\) in \(\Phi\) and to \(\pk(\sk_B)\) in \(\Psi\).
+        That is, the recipes \(\xi\) and \(\zeta = \ax_1\) are equal in \(\Phi\) but not in \(\Psi\).
+      \end{example}
+
+  \paragraph{In practice: security goals for Private Authentication}
+
+    We now demonstrate in more details how equivalence properties can be used to model security in practical scenarios through a complete case study.
+    We model the three security goals of the Private Authentication Protocol described in Example~\ref{ex:process}.
+    For simplicity we present the simplest scenario of a single session of the protocol in this section (i.e. only one instance of the roles of \(A\) and \(B\) communicating in parallel).
+    Of course a more extensive analysis needs to consider more parallel sessions.
+    In the following we write \(\pks_X\) and \(\sk_X\) the public and private keys of an identity \(X\) and
+    \[P(A,C,N_A,r_A,B,D,N_B,r_B) =
+      X(\sk_A, \pks_C, N_A, r_A) \mid B(\sk_B, \pks_A, N_B, r_B)\]
+    the process that runs in parallel the roles of \(A\) attempting to initiate a communication with \(C\) and \(B\) accepting a connection from a unique identity \(D\).
+    We assume an initial frame \(\Phi_0\) that contains the public keys of all identities involved in the process.
+
+    % \paragraph{Privacy}
+      The security goals state that the protocol should conceal the identities of the participants (including \(C\) the recipient of \(A\) and \(D\) the connection accepted by \(B\)) and the values of the exchanged nonces.
+      %
+      A possible formalisation is that there should not be any observable difference in \(P(A,C,N_A,r_A,B,D,N_B,r_B)\) when replacing the identities by others and \(N_A,N_B\) by any other value.
+      That is, for all identities \(A,B,C,D,A',B',C',D'\), all terms
+      \(N_A,N_B,N_A',N_B'\), and fresh names \(r_A,r_B\),
+      \[(\multi {P(A,C,N_A,r_A,B,D,N_B,r_B)}, \Phi_0) \approx (\multi {P(A',C',N_A',r_A,B',D',N_B',r_B)}, \Phi_0)\]
+      where \(\approx\) is either \(\TraceEq\), \(\Simi\) or \(\LabBis\) and
+      \(\Phi_0\) is a frame whose image contains the public keys of all indentities involved.
+      %
+      This models a form of non-interference property and has been called \emph{strong secrecy} in \cite{B04}.
+      % It is possible to express a similar property as a compact equivalence statement in our model.
+      % This relies on the fact that the following two items are equivalent for all processes \(Q(x)\):
+      % \begin{enumerate}
+      %   \item for all \(u,v \in \termset(\sigc \cup \sig_0)\), \(Q(u) \approx Q(v)\)
+      %   \item \(\InP {c} {x}.Q(x) \approx \InP {c} {x}.Q(a)\) for some fixed \(a \in \sig_0\)
+      % \end{enumerate}
+      % That is, we model strong secrecy as the indistinguishability of the situations where the secret value is either replaced by a constant or an attacker-chosen term.
+      % To allow the attacker to choose an identity \(X\) this way without compromising the corresponding decryption key \(\sk_X\), we assume that \(\sk_X\) can be derived deterministically from the term \(X\) by the agent but not the attacker.
+      % This can be achieved for example by fixing a name \(k\) and writing \(\sk_X = (X,k)\) and \(\pks_X = \pk(\sk_X)\).
+      % Thus secrecy and anonymity can be expressed by the single equivalence \((\multi {P_L},\Phi_0) \approx (\multi {P_R}, \Phi_0)\) where
+      % \begin{align*}
+      %   P_L & = \InP {c} {x_A}. \InP {c} {x_C}. \InP {c} {x_{N_A}}. \InP {c} {x_B}. \InP {c} {x_D}.  \InP {c} {x_{N_B}}. P(x_A,x_C,x_{N_A},x_B,x_D,x_{N_B}) \\
+      %   P_R & = \InP {c} {x_A}. \InP {c} {x_C}. \InP {c} {x_{N_A}}. \InP {c} {x_B}. \InP {c} {x_D}. \InP {c} {x_{N_B}}. P(a,a,a,a,a,a)
+      % \end{align*}
+      % for some \(a \in \sig_0\) and \(\Phi_0\) is a fixed frame containing the public keys of \(a\) and of 4 other distinct identities.
+      % %
+      % We can draw several conclusions when experimenting with this equivalence under different cryptographic assumptions:
+      % \begin{itemize}
+      %   \item \emph{The encryption needs to be randomised} (experiment: trace equivalence is violated when using \(\aenc\) without randomness nonces).
+      %   This is however a completely standard assumption.
+      %   \item \emph{A ciphertext does not needs to be indistinguishable from an arbitrary bitstring} (experiment: equivalence still holds with the additional rewriting rule \(\testaenc(\raenc(x,y,\pk(z))) \to \okfun\)).
+      %   \item \emph{The encryption function needs to be which-key concealing} (experiment: trace equivalence is violated with the additional rewriting rule \(\getkey(\raenc(x,y,\pk(z))) \to \pk(z)\)).
+      %   The attack traces indeed use this rule to extract the recipient of the protocol messages, breaking anonymity:
+      %   for example, there is an observable difference between \(A\) attempting to communicate with \(B\) or \(C\).
+      %   \item \emph{The decoy message of \(B\) is necessary} (experiment: trace equivalence is violated when it is omitted).
+      %   This also holds if \(B\) only emits a decoy message when refusing a connection but not when failing to decrypt the received ciphertext.
+      %   The attack traces show that observing whether \(B\) responds to particular messages breaks the anonymity of \(B\) itself, among others.
+      % \end{itemize}
+
+      % As a summary this approach allows to detect structural flaws in security protocols, assuming a perfect cryptography up to weakening assumptions that can be added into the model.
+      % This permits to study the security of the protocol's logic and the necessity of specific cryptographic assumptions
+      % but is not intended to prove that a given set of assumptions is sufficient to achieve security.
+
+\subsection{Complexity and decision problems} \label{sec:complexity}
+  So far we detailed how process equivalences can be used to model privacy preservation in security protocols.
+  %
+  Our goal in this paper is to present decidability and complexity results for static equivalence, trace equivalence and labelled bisimilarity.
+
+  \paragraph{On sizes}
+    Before going further we need to clarify the notion of \emph{size} of the inputs since it plays a central role in complexity analyses.
+    This is particularly important for our purpose since there exist several conventions for representing terms.
+    %
+    The \emph{tree size} of term \(t\) refers to its number of symbols and is written \(\tsize {t}\).
+    It corresponds to a classical representation of a term as a tree.
+    On the other hand some of our complexity results are stated w.r.t. a succinct representation of terms as Directed Acyclic Graphs (DAG) with maximal sharing (which may be exponentially more concise).
+    If \(\subterms(t)\) is the set of subterms of \(t\), the \emph{DAG size} of \(t\) refers to the cardinality \(|\subterms(t)|\) and is written \(\dagsize {t}\).
+    This definition is lifted to sets and sequences of terms with the sharing common to all elements of the structure.
+    %
+    The size of a signature \(\sig\) is the sum of the arities of the symbols of \(\sig\) (which is finite since \(\sigc\) and \(\sigd\) are finite) and the size of a rewrite system \(\R\) is the sum of the sizes of the two hand sides of its rules.
+    The size of a process is the sum of the number of operators of the process and of the sizes of all terms appearing in the process (in conditionals, channels, and output terms).
+    %
+    We emphasise that
+    \begin{itemize}
+      \item A complexity upper bound stated w.r.t. the DAG size of the inputs is a stronger result than the same upper bound stated w.r.t. the tree size.
+      \item On the contrary a complexity lower bound stated in DAG size is a weaker result than the corresponding result in tree size.
+    \end{itemize}
+    In this paper we only adress the strongest configurations: lower bounds in the tree representation of terms, upper bounds in DAG.
+
+  \paragraph{Complexity classes}
+    We now shortly remind some background about complexity, mainly introducing our notations.
+    Given \(f : \N \to \N\), we define \(\mbox{\ctime}(f)\) (resp. \(\mbox{\cspace}(f)\)) the class of problems decidable by a deterministic Turing machine running in time (resp. in space) at most \(f(n)\) where \(n\) is the size of the parameters of the problem.
+    It is common to define the following classes:
+    \[\begin{array}{rclcrcl}
+    	\mbox{\logspace} & = & \displaystyle \bigcup_{p \in \N} \mbox{\cspace}(\log(n^p)) & & \mbox{\ptime} & = & \displaystyle \bigcup_{p \in \N} \mbox{\ctime}(n^p)\\[5mm]
+    	\mbox{\pspace} & = & \displaystyle \bigcup_{p \in \N} \mbox{\cspace}(n^p) & & \mbox{\complexityfont EXPTIME} & = & \displaystyle \bigcup_{p \in \N} \mbox{\ctime}(2^{n^p})
+    \end{array}\]
+    One can define their non-deterministic counterparts {\complexityfont NLOGSPACE} ({\complexityfont NL} for short), {\complexityfont NPTIME}, {\complexityfont NPSPACE} and {\complexityfont NEXPTIME}.
+    Given a (non-deterministic) class \(\C\), we call co-\(\C\) the class of problems whose negation is in \(\C\).
+    From now on we often omit the suffix \ctime in the name of time complexity classes for the sake of succinctness.
+    Then it is known that:
+    \[
+      \mbox{\logspace}
+        \subseteq \mbox{\complexityfont NL}
+        = \mbox{co{\complexityfont NL}}
+        \subseteq \mbox{\complexityfont P}
+        \subseteq \mbox{\np,co\np}
+        \subseteq \mbox{\pspace}
+        = \mbox{\complexityfont NPSPACE}
+        \subseteq \mbox{\complexityfont EXP}
+        \subseteq \mbox{\complexityfont NEXP,coNEXP}
+    \]
+
+    % By abuse of notation, we identify a class \(\C\) of decisions problems and the class \(F\C\) of functions (from string to string, in terms of Turing machines) computable within the resources of \(\C\).
+    To define complete problems for complexity classes above \ptime we use  classical \emph{many-to-one polytime reductions}.
+    We also mention the notion of \emph{oracle} reduction, deciding a problem with a constant-time black box for an other problem:
+    the class of problems decidable in \(\C\) with an oracle for a problem \(Q\) is noted \(\C^Q\).
+    When \(Q\) is complete for a class \(\D\) w.r.t. a notion of reduction executable in \(\C\), we may write \(\C^{\D}\) instead;
+    in particular \(\C^{\D} = \C^{\mbox{\scriptsize co}\D}\).
+    This kind of reduction is needed to define the last complexity classes we will use in this paper: the \emph{polynomial hierarchy}, which is a collection of complexity classes between \ptime and \pspace.
+    %
+    Indeed the difference between \np and \pspace lies in their capacity to express quantifier alternation;
+    the usual complete problems considered for these two complexity classes are, given a boolean formula \(\varphi\):
+    \begin{itemize}
+      \item \sat (\np complete): does \(\exists x_1, \ldots, x_n. \varphi(x_1, \ldots, x_n)\) hold?
+      \item \qbf (\pspace complete): does \(\forall x_1, \exists y_1, \ldots, \forall x_n, \exists y_n. \varphi(x_1,y_1, \ldots, x_n,y_n)\) hold?
+    \end{itemize}
+    The polynomial hierarchy characterises all classes corresponding to intermediate alternations.
+
+    \begin{definition}
+      The polynomial hierarchy {\complexityfont PH} consists of the classes \(\Sigma_n\) defined by \(\Sigma_0 = \mbox{\ptime}\) and \(\Sigma_{i+1} = \mbox{\np}^{\Sigma_i}\).
+      In particular, \(\Sigma_1= \mbox{\np}\).
+      We also write \polyh {i} for co\(\Sigma_i\).
+    \end{definition}
+
+    % We delay the introduction of complete problems for each complexity class to the first time each of them will be needed in Section~\ref{sec:lower}.
+
+  \paragraph{Problems studied in this paper}
+    % So far we detailed how process equivalences can be used to model privacy preservation in security protocols.
+    % %
+    % Our goal is this paper is to present decidability and complexity results for the decision of static equivalence, trace equivalence and labelled bisimilarity.
+    %
+    We thus study the following decision problems:
+
+    \problemdescr[\StaticEquiv]
+      {A rewriting system \(\R\), two frames \(\Phi\) and \(\Psi\).}
+      {\(\Phi \StatEq \Psi\) for \(E\)?}
+
+    \problemdescr[\TraceEquiv]
+      {A rewriting system \(\R\), two processes \(P\) and \(Q\).}
+      {\((\multi {P}, \emptyset) \TraceEq (\multi {Q}, \emptyset)\) for \(\R\)?}
+    
+    % \problemdescr[\Bisimilarity]
+    %   {A rewriting system \(\R\), two processes \(P\) and \(Q\).}
+    %   {\((\multi {P}, \emptyset) \LabBis (\multi {Q}, \emptyset)\) for \(\R\)?}
+    \medskip 
+
+    We also consider \TraceInclus, \Simulation, \Similarity, \Bisimilarity to be the analogue problems of \TraceEquiv, replacing trace equivalence by the relations \(\TraceIncl\), \(\Simu\), \(\Simi\), and \(\LabBis\), respectively.
+    As we explained previously these problems are undecidable in general and we need to put restrictions on the inputs, in addition to the restriction to a bounded number of sessions, which is inherent to our model.
+    Typically our results all include the restriction (inherent to our model) to constructor destructor theories and bounded processes.
+    When we say for example that ``\TraceEquiv is decidable for constructor destructor subterm convergent rewriting systems'' it means that we are studying the following decision problem:
+
+    \problemdescr
+      % {\TraceEquiv}
+      {A constructor destructor subterm convergent rewriting system \(\R\), two processes \(P\) and \(Q\).}
+      {Are \(P\) and \(Q\) trace equivalent (for \(\R\))?}
+
+    The way we state the problem implies that complexity analyses need to account for the size of all inputs, including the rewriting system.
+    However the treatment of this question is not uniform in the literature.
+    Complexity analyses in \cite{AC06,B07,CCD13} consider the rewriting system as a constant of the problem.
+    For the example above this means considering, for each constructor destructor subterm convergent rewriting system \(\R\), the following decision problem:
+
+    \problemdescr
+      % {\TraceEquiv(\(E\))}
+      {Two bounded processes \(P\) and \(Q\).}
+      {Are \(P\) and \(Q\) trace equivalent (for \(\R\))?}
+
+    For this formulation of the problem, generic completeness results w.r.t. complexity classes are not possible in general because different complexities may arise for each rewriting system \(\R\).
+    This is for example the case in \cite{AC06}, where \StaticEquiv is proven \ptime for any fixed subterm convergent rewriting system:
+    the problem is indeed \ptime-hard for some of them \cite{CKR20} but also \logspace for others as we prove it in this paper.
+    All existing procedures \cite{AC06,CDK12,CBC11} are actually exponential in the size of the rewriting system.
+    This is why we refer to this problem as \emph{parametric equivalence} and say by opposition that \emph{general equivalence} is the initial variant with the rewriting system considered as part of the input.
+    %
+    We argue that the latter is more relevant today as the rewriting system can now be specified by the user in many automated tools.
+    This motivated for example to prove in \cite{CKR20} that the complexity results of \cite{B07,CCD13} (stated in the parametric setting) were also valid in the general setting.

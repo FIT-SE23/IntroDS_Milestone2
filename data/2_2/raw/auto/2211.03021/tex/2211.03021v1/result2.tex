@@ -1,0 +1,181 @@
+\subsection{Case Studies}\label{sec:case-study}
+
+We next turn out attention to three case studies to further evaluate the performance of two GNN frameworks, regarding data pre-loading, GPU-based sampler, and full-batch model training. We focus on GraphSAGE for the case studies.
+
+\vspace{1mm}
+\noindent \textbf{Pre-loading entire graph and node features into GPU.} As shown in Section~\ref{sec:performance}, data movement can be a problem when we use CPU for sampling and GPU for model training. We here change the implementation strategy so as to pre-load the entire graph and its associated node features into the GPU \emph{upfront}, which can avoid the overhead of repeated data movement, i.e., the movement of the features of nodes chosen in each mini-batch. Both frameworks provide such a pre-loading option. With this option, the adjacency matrices of sampled subgraphs only need to be copied from CPU to GPU for each mini-batch periodically. Note that a mini-batch is composed of a number of sampled subgraphs in GraphSAGE, where the number of sampled subgraphs is the mini-batch size. We present the resulting performance of DGL and PyG with GraphSAGE in Figure~\ref{fig:breakdown-preloading} for runtime breakdown and in Figure~\ref{fig:speedup-preloading} for speedup results.
+
+\vspace{1mm}
+
+\noindent \textbf{Observation 6:} \textit{The data pre-loading can significantly reduce overall data movement time in both frameworks.}
+
+\vspace{1mm}
+
+As expected, the pre-loading strategy saves up to 20x data movement time, thereby leading to about 2x overall speedup. Nonetheless, \emph{it is only feasible when the GPU memory is large enough to hold the entire graph and its associated node features as well as the weight matrix of a GNN model.} It is often not the case in practice, especially for large graphs. An alternative yet effective strategy would be to cache the features of nodes that are most frequently used for model training, i.e., partial information of the graph, into GPU memory upfront, to reduce overall data movement time~\cite{dong2021global}.
+
+It is worth noting that DGL further provides an advanced feature called `pre-fetching' for asynchronous data movement and model computation. We observed that the performance of DGL can be further improved, albeit a little bit, with this feature. We omit the results here for brevity.
+
+
+\begin{figure}[t!]
+	\vspace{-2mm}
+	\captionsetup[subfloat]{captionskip=1pt}
+	\centering
+	\subfloat[Speedup of data movement]{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/CPUGPU-preloading-Speedup-movement}
+	}
+	\vspace{0mm}
+	\subfloat[Speedup of total runtime]{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/CPUGPU-preloading-Speedup}
+	}
+	\hspace{0mm}
+	\caption{Speedup of GraphSAGE when pre-loading the input graph and node features into GPU.}
+	\label{fig:speedup-preloading}
+	\vspace{-2mm}
+\end{figure}
+
+\begin{figure}[t!]
+	\captionsetup[subfloat]{captionskip=1pt}
+	\centering
+	\subfloat[DGL-CPUGPU]{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/graphsage-breakdown-DGL-CPUGPU1}
+	}
+	\vspace{0mm}
+	\subfloat[PyG-CPUGPU]{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/graphsage-breakdown-PyG-CPUGPU1}
+	}
+	\vspace{0mm}
+	\caption{Runtime breakdown of GraphSAGE with data pre-loading.}
+	\label{fig:breakdown-preloading}
+	\vspace{-2mm}
+\end{figure}
+
+
+
+\begin{figure*}[t!]
+	\captionsetup[subfloat]{captionskip=1pt}
+	\centering
+	\subfloat[Speedup over DGL-CPUGPU]{%
+		\includegraphics[width=0.3\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/GPU-Speedup-CPUGPU}
+	}
+	\hspace{0mm}
+	\subfloat[Powerup over DGL-CPUGPU]{%
+		\includegraphics[width=0.3\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/GPU-Powerup-CPUGPU}
+	}
+	\hspace{0mm}
+	\subfloat[Greenup over DGL-CPUGPU]{%
+		\includegraphics[width=0.3\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/GPU-Greenup-CPUGPU}
+	}
+	\vspace{0mm}
+	\caption{GPS-UP metrics of GraphSAGE with DGL's GPU-based sampler and UVA-based sampler.}
+	\label{fig:uvagpu-speedup}
+\end{figure*}
+
+\begin{figure}[t!]
+	\vspace{-2mm}
+	\captionsetup[subfloat]{captionskip=1pt}
+	\centering
+	\subfloat[DGL-GPU]{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/graphsage-breakdown-DGL-GPU}
+	}
+	\vspace{0mm}
+	\subfloat[DGL-UVAGPU]{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/graphsage-breakdown-DGL-UVAGPU}
+	}
+	\vspace{0mm}
+	\caption{Runtime breakdown of GraphSAGE with DGL's GPU-based sampler and UVA-based sampler.}
+	\label{fig:uvagpu}
+\end{figure}
+
+\vspace{1mm}
+\noindent \textbf{GPU-based sampler.} As mentioned before, the GPU-based neighborhood sampler, i.e., the sampler in GraphSAGE, is available in DGL to accelerate its sampling operation and eliminate the need of moving sampled subgraphs from CPU to GPU for each mini-batch. If the GPU-based sampler is used together with the pre-loading option, it can also eliminate the repeated data transfer of node features, corresponding to sampled subgraphs for each mini-batch. This combination is, however, infeasible for the cases with large graphs and/or high-dimensional feature data that do not fit into GPU memory.
+
+In addition, DGL supports another sampler for GraphSAGE, which is the CUDA-Unified Virtual Addressing (UVA)-based sampler. It uses GPU to perform the sampling operation on the input graph and node features pinned on CPU memory via zero-copy access. This UVA support allows DGL to deal with much larger graphs with the benefits of using GPU for sampling and model training. Note that both UVA-based sampler and GPU-based sampler are currently only available for GraphSAGE in DGL.
+
+We evaluate the performance of the GPU-based sampler (`DGL-GPU') and UVA-based sampler (`DGL-UVAGPU') to see how much improvement they can achieve. For the former, we also use the data pre-loading option. Their runtime-breakdown results are reported in Figure~\ref{fig:uvagpu}. Here the data movement for DGL-GPU contains two parts, which are (1) copying the input graph and node features to GPU for sampling and (2) moving the initial GNN model from CPU to GPU for training. For DGL-UVAGPU, the data movement is only for the initial model.
+
+
+\vspace{1mm}
+
+\noindent \textbf{Observation 7:} \textit{The portion of the sampling operation in total runtime becomes smaller compared with the one with DGL-CPUGPU. However, even with GPU for sampling, it can still take up to 40\% of total runtime for DGL-GPU and 60\% for DGL-UVAGPU. This indicates the non-trivial overhead of the sampling operation and the potential benefit of further accelerating the sampler.}
+
+\vspace{1mm}
+
+We next use GPS-UP (Speedup, Greenup, and Powerup) metrics introduced in~\cite{abdulsalam2015using} for further efficiency analysis. The metrics are designed for comparing two different implementations. One of them is an non-optimized version (i.e. baseline) and the other is an optimized version for better performance. Specifically, they are defined as
+\begin{equation*}
+\setlength{\abovedisplayskip}{5pt}
+\setlength{\belowdisplayskip}{5pt}
+\text{Speedup} = \frac{T_{\phi}}{T_o}, \quad \text{Greenup} = \frac{E_{\phi}}{E_o},
+\end{equation*}
+\begin{equation*}
+\setlength{\abovedisplayskip}{5pt}
+\setlength{\belowdisplayskip}{5pt}
+\text{Powerup} = \frac{P_o}{P_{\phi}} = \frac{E_o/T_o}{E_{\phi}/T_{\phi}} = \frac{\text{Speedup}}{\text{Greenup}},
+\end{equation*}
+where $T_{\phi}$, $E_{\phi}$, and $P_{\phi}$ are the runtime, energy consumption, and average power of the non-optimized version, respectively, and $T_o$, $E_o$, and $P_o$ are the corresponding values of the optimized one, respectively. We here use DGL-CPUGPU as baseline and report Speedup, Greenup, and Powerup results achieved by DGL-GPU and DGL-UVAGPU over DGL-CPUGPU in Figure~\ref{fig:uvagpu-speedup}.
+
+
+\vspace{1mm}
+
+\noindent \textbf{Observation 8:} \textit{The use of GPU for sampling saves both time and power in most cases, leading to significant energy saving.}
+
+\vspace{1mm}
+
+As can be seen from Figure~\ref{fig:uvagpu-speedup}(a), DGL-GPU achieves up to 5.5x speedup over DGL-CPUGPU. DGL-UVAGPU is sightly slower than DGL-GPU, because the former uses zero-copy access to CPU memory, which is generally slower than having access to GPU onboard memory. From Figure~\ref{fig:uvagpu-speedup}(b), we also observe that Powerup is not always above one, which implies that the power consumption of using GPU for the sampler can be higher than the CPU counterpart. It happens, especially when there are a large number of edges for each node, e.g., the case of Reddit, making the sampling computation on GPU heavier. Nonetheless, as shown in Figure~\ref{fig:uvagpu-speedup}(c), we observe that Greenup is always above one. In other words, it is \emph{more energy-efficient} using GPU for the sampler. While GPU can consume more power than CPU for the sampling operation, it significantly reduces the total runtime, which translates into smaller overall energy consumption.
+
+Our observations indicate the benefits of using GPU for the sampler of GNNs. Nonetheless, this GPU support is currently only limited to GraphSAGE in DGL, and there is no such support in PyG. Note that there is a recent study~\cite{jangda2021accelerating} that leverages GPUs to accelerate graph sampling for GNNs.
+
+
+\begin{figure}[t]
+	\vspace{-2mm}
+	\captionsetup[subfloat]{captionskip=1pt}
+	\centering
+	\subfloat{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/fullbatch-training-1}
+	}
+	\hspace{0mm}
+	\subfloat{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/fullbatch-training-2}
+	}
+	\vspace{-1mm}
+	\caption{One epoch training time of full-batch GraphSAGE.}
+	\label{fig:fullbatch}
+	\vspace{-3mm}
+\end{figure}
+
+\begin{figure}[t!]
+	\captionsetup[subfloat]{captionskip=1pt}
+	\centering
+	\subfloat{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/fullbatch-power-1}
+	}
+	\hspace{0mm}
+	\subfloat{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/fullbatch-power-2}
+	}
+	\vspace{-1mm}
+	\caption{Average power consumption of full-batch GraphSAGE while training.}
+	\label{fig:fullbatch-power}
+	\vspace{-3mm}
+\end{figure}
+
+\begin{figure}[t!]
+	\captionsetup[subfloat]{captionskip=1pt}
+	\centering
+	\subfloat{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/fullbatch-energy-1}
+	}
+	\hspace{0mm}
+	\subfloat{%
+		\includegraphics[width=0.47\linewidth, trim=0cm 0cm 0cm 0cm, clip]{fig/fullbatch-energy-2}
+	}
+	\vspace{-1mm}
+	\caption{One epoch energy consumption of full-batch GraphSAGE.}
+	\label{fig:fullbatch-energy}
+	\vspace{-3mm}
+\end{figure}
+
+
+\vspace{1mm}
+\noindent \textbf{Full-batch training.} We have focused on three sampling-based GNNs with mini-batch training to evaluate the performance of the frameworks. For a comprehensive evaluation, we here consider \emph{full-batch} training to train a GraphSAGE model, which is done based on the entire graph \emph{without} neighborhood sampling. Specifically, we use a GraphSAGE model with two layers having mean-aggregator and train the model on CPU and GPU using DGL and PyG separately. We present the experiment results, which are the average results of 100 runs for one training epoch, in runtime, power consumption, and energy consumption in Figures~\ref{fig:fullbatch}--\ref{fig:fullbatch-energy}, respectively.
+
+We observe that DGL-CPU is much faster than PyG-CPU for full-bath model training. DGL-GPU training is slower than its PyG counterpart on the smallest graph PPI, while it is faster for the other five datasets. The results are consistent with our functional test results as reported above. We also observe that there is no clear difference in the average power consumption between the frameworks for model training. That is, the differences in energy consumption between the frameworks mainly come from their differences in training time.

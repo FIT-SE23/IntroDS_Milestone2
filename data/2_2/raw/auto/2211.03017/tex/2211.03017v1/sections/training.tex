@@ -1,0 +1,32 @@
+
+\section{Training}
+
+We train our network models with the supervision of ground truth $\{I,A,N,D,R,M,L\}$ from our synthetic \textsc{InteriorVerse} dataset, where $A,N,D,R,M$ denote albedo, normal, depth, roughness, and metallic, respectively, and $L$ denotes spatially-varying lighting ground truth.
+
+For geometry and material reconstruction, we use direct supervision to calculate the error between ground truth and network prediction. For lighting estimation, inspired by prior work~\cite{li2020inverse,wang2021learning}, to encourage photorealistic scene appearance reconstruction, we additionally use a differentiable in-network rendering layer to re-render the image according to the predicted material, geometry, and lighting, and try to recover the original input image through an image loss. Note that, unlike prior work, our render layer incorporates physically-based Monte Carlo sampling via screen space ray tracing, which explicitly regularizes the physical parameter space with GGX importance sampling. As we will demonstrate later, this makes our method significantly more robust to handle specular reflections in the interior scene. 
+
+\subsection{Material-Geometry Network}
+
+We train $\mathbf{MGNet}$ with the weighted combination of material losses (albedo loss $\mathcal{L}_{\mathrm{albedo}}$, roughness-metallic loss $\mathcal{L}_{\mathrm{material}}$) and geometry losses (normal loss $\mathcal{L}_{\mathrm{normal}}$ and depth loss $\mathcal{L}_{\mathrm{depth}}$):
+
+\begin{equation}
+    \mathcal{L}_\mathbf{MGNet} = \lambda_a\mathcal{L}_{\mathrm{albedo}} + \lambda_n\mathcal{L}_{\mathrm{normal}} + \lambda_m\mathcal{L}_{\mathrm{material}} + \lambda_d\mathcal{L}_{\mathrm{depth}}.
+\end{equation}
+
+We add perceptual loss~\cite{johnson2016perceptual} in the albedo, normal and material term, which helps to recognize the semantic boundaries in the image. The detailed definitions of separate losses and weights are presented in the supplemental material.
+
+\subsection{Lighting Network}
+
+We train $\mathbf{LightNet}$ with the weighted combination of direct light supervision loss $\mathcal{L}_\mathrm{light}$ and re-rendering loss $\mathcal{L}_{\mathrm{re-render}}$:
+
+\begin{equation}
+    \mathcal{L}_\mathbf{LightNet} = \mathcal{L}_\mathrm{light} + \lambda_r\mathcal{L}_{\mathrm{re-render}}
+\end{equation}
+where $\mathcal{L}_\mathrm{light}$ is the HDR supervision loss function proposed by \cite{mildenhall2021nerf}, while $\mathcal{L}_{\mathrm{re-render}}$ is an $L_2$ loss between the re-rendered image and the original image.
+Please refer to supplementary material for the detailed definition of $\mathcal{L}_\mathrm{light}$ and $\mathcal{L}_{\mathrm{re-render}}$.
+
+We find that re-rendering loss can significantly improve the lighting prediction, especially on specular surfaces. This benefit comes from enforcing the network to learn correct pixel brightness in $\hat{I}$, thus producing accurate lighting supervision in the scene and preventing blurry or spot artifacts in the re-rendered image. Ablation studies on the usage of re-rendering loss are presented in the supplementary material.
+
+\subsection{Training Scheme}
+
+We use a progressive training scheme to train our model in the order of data dependencies between different components of our framework. We first train material-geometry module to ensure correct predictions of albedo, normal, roughness, metallic and depth. This is because our lighting network depends on these properties (e.g., SSRT depends on depth, and MLP decoder depends on G-Buffers). Then we train lighting module with re-rendering loss.

@@ -1,0 +1,45 @@
+\vspace{-0.2cm}
+\section{Method}
+\label{sec:method}
+\vspace{-0.1cm}
+Inspired by previous work~\cite{kreuk2022audiogen, dhariwal2020jukebox}, the proposed system has three main components: (i) a discrete audio encoder-decoder which encodes and decodes audio to and from a discrete representation; (ii) a pre-trained image encoder; and (iii) an audio language model which operates over the discrete audio representation. 
+
+Formally, we are given an audio-images dataset $\{\mathbf{\x}^{i}, \mathbf{\y}^{i}\}_{i=1}^N$ where $\mathbf{\x}^{i}$ is an audio sample and $\mathbf{\y}^{i}$ is its corresponding sequence of images. Our goal is to learn a function which generates an audio file given a sequence of images (i.e., video). To do so, we first train a VQ-VAE model which allows to represent audio as a discrete sequence of tokens sampled at lower frequency. Then, we train a Transformer-decoder language model over the discrete tokens conditioned on an image representation. During inference time, we sample from the Transformer-decoder to generate a new set of tokens semantically relevant to the input image sequence. We refer to the audio as a $T$ long sequence $\mathbf{\x}^{i} = \langle x^{i}_{t}\rangle_{t=1}^T \in A$.
+
+\subsection{Audio Encoder \& Decoder.}
+We use a one dimensional hierarchical VQ-VAE architecture, similar to the one proposed by~\cite{VQ-VAE-2} to encode audio into a discrete space $Z$. The VQ-VAE consists of an encoder $E: A \mapsto H$ which encodes $\mathbf{\x}\in A$ into a sequence of latent vectors $\mathbf{h} = \langle {\mathbf{h}}_{s}\rangle_{s=1}^{S} \in H$. A bottleneck $Q: H \mapsto Z$ that quantizes $\mathbf{h}$ by mapping each $\mathbf{h}_{s}$ to its nearest vector $\mathbf{c}_{j}$, from a codebook $\mathbf{C} = \{\mathbf{c}_{k}\}_{k=1}^{K}$, resulting in a discrete sequence 
+% $\mathbf{h}_{q} = \langle\mathbf{h}_{s}\rangle_{s=1}^{S} \in C^{S}$. 
+% We note that 
+$\vz$ = $\langle z_{s}\rangle_{s=1}^{S} \in Z, z_{s}\in 1,\ldots, K$. Then, a decoder $D: Z \mapsto A$ employs the codebook look-up table and decodes the latent vectors back to a time domain signal. The VQ-VAE is trained with the VQ-VAE loss functions as described in~\cite{VQ-VAE-2}, together with a STFT spectral loss similar to the one proposed by~\cite{dhariwal2020jukebox}.
+
+As in \cite{VQ-VAE-2, dhariwal2020jukebox}, we train a single encoder and decoder but break up the latent sequence $\mathbf{h}$ into a multi-level representation $\mathbf{h}=[\langle \mathbf{h}^{(1)}_{s}\rangle_{s=1}^{S^{(1)}},\ldots, \langle \mathbf{h}^{(L)}_{s}\rangle_{s=1}^{S^{(L)}}]$ with decreasing sequence lengths $S^{(l+1)} < S^{(l)}$, each learning its own codebook $\mathbf{C}^{(l)}$. 
+\subsection{Image Encoder.}
+\label{sec:clip}
+We use a pre-trained CLIP \cite{CLIPradford2021learning} model as our image encoder. The CLIP model was trained to maximize the similarity between corresponding text and image inputs. The premise behind using CLIP embedding instead of a pre-trained image classification model, as done in prior work~\cite{SpecVQGAN_Iashin_2021}, is to leverage the semantic information obtained from multi-modal learning. We hypothesize that similar to bilinguals showing advantages over monolinguals when acquiring an additional language~\cite{bilingualism}, modeling an additional modality (audio tokens) may be easier when considering representations from encoders that were optimized with multi-modal data.
+In order to convert a sequence of images to a single vector representation denoted as $\tilde{\mathbf{\y}}^{i}$, we average the extracted image features $\langle \mathbf{f}^{i}_{m}\rangle_{m=1}^{\#frames}$ along the time axis and pass it through three MLP layers with ReLU activations.
+\subsection{Sequence Modeling.} 
+We train two auto-regressive models, denoted as \textsc{Low} and \textsc{Up} in order to learn a prior $p(\vz)$ over the discrete space at two different time resolutions. We utilize an auto-regressive Sparse Transformer Decoder \cite{sparse, allyouneed, dhariwal2020jukebox} causal language model that predicts future audio tokens, conditioned on $\tilde{\mathbf{\y}}^{i}$. 
+At every time step, we condition the \textsc{Low} model on the image representation corresponding to the same temporal position $\mathbf{f}^{i}_{\hat{m}}$, together with a positional embedding of the current token offset. For the \textsc{Up} model, we follow a similar setup as in~\cite{dhariwal2020jukebox}, and employ the same Transformer architecture to reconstruct the higher resolution \textsc{Up} level tokens, conditioned on the corresponding \textsc{Low} level generated tokens together with $\tilde{\mathbf{\y}}^{i}$. 
+
+Thus, our objective can be described as maximum-likelihood estimation over the discrete spaces learned by the VQ-VAE as follows,
+\begin{equation}
+    \label{eq:Transformer}
+    \begin{aligned}
+    &\max_{\theta_{Low}}\sum_{i=1}^{N} \sum_{s=1}^{S^{(2)}} \log p_{\theta_{Low}}(z^{i}_{s} \mid \tilde{\mathbf{\y}}^{i}, \mathbf{f}^{i}_{\hat{m}}, z^{i}_{1}, \ldots, z^{i}_{s-1}),\\
+    &\max_{\theta_{Up}}\sum_{i=1}^{N} \sum_{s=1}^{S^{(1)}} \log p_{\theta_{Up}}(u^{i}_{s} \mid \tilde{\mathbf{\y}}^{i}, \hat{z}^{i}_{s}, u^{i}_{1}, \ldots, u^{i}_{s-1}),
+    \end{aligned}
+\end{equation}
+where $\hat{z}^{i}_{s}, \mathbf{f}^{i}_{\hat{m}}$ are the \textsc{Low} level token and image representation which are mapped to the same temporal position in the input space as the $u^{i}_{s}, z^{i}_{s}$ respectively, and $\theta_{Low}$ and $\theta_{Up}$ are the parameters of the \textsc{Low} and \textsc{Up} auto-regressive models, respectively. Intuitively, as the \textsc{Low} level encodes longer audio per token, it abstractly determines the semantic foundations of the generated audio, while the \textsc{Up} level completes the fine details in higher resolution. Notice, we assume evenly spaced frames to support an arbitrary number of images as input. 
+
+\subsection{Classifier Free Guidance.} 
+To further improve the generation performance, and steer the generation process towards the input images, we apply the Classifier-Free Guidance (CFG) method. It was recently shown by the authors in~\cite{ho2021classifier, nichol2021glide} that using the CFG method is an effective mechanism for controlling the trade-off between sample quality and diversity. We follow the same setup as in~\cite{kreuk2022audiogen} in which during training for each sample in the batch with probability $p=0.5$ we replace $\mathbf{\y}^{i} = \langle \mathbf{f}^{i}_{m}\rangle_{m=1}^{\#frames}$ with a learned-null embedding of the same size  $\mathbf{\y}^{\emptyset}=\langle \mathbf{f}^{\emptyset}\rangle_{m=1}^{\#frames}$.
+We empirically found that applying CFG to the \textsc{Low} model only is enough to greatly improve the performance. During inference we produce token distributions with and without visual conditioning, and we sample from the following,
+\begin{equation}
+    \label{eq:cfg}
+    \begin{aligned}
+    &\log p_{\theta_{Low}}(z^{i}_{s}) = \lambda_{\mathbf{\y}^{\emptyset}} + \eta \cdot (\lambda_{\mathbf{\y}^{i}} - \lambda_{\mathbf{\y}^{\emptyset}}), \\
+    &\lambda_{\mathbf{\y}^{i}} = \log p_{\theta_{Low}}(z^{i}_{s} \mid \tilde{\mathbf{\y}}^{i}, \mathbf{f}^{i}_{\hat{m}}, z^{i}_{1}, \ldots, z^{i}_{s-1}), \\
+    &\lambda_{\mathbf{\y}^{\emptyset}} = \log p_{\theta_{Low}}(z^{i}_{s} \mid \tilde{\mathbf{\y}}^{\emptyset}, \mathbf{f}^{\emptyset}, z^{i}_{1}, \ldots, z^{i}_{s-1}), \\
+    \end{aligned}
+\end{equation}
+where $\eta\geq1$ is the guidance scale that determines the trade-off between diversity and quality of the generated audio characteristics. We use $\eta=3$ which showed to perform the best in prior works in the fields of text-to-image generation~\cite{nichol2021glide} and text-to-audio generation~\cite{kreuk2022audiogen}.

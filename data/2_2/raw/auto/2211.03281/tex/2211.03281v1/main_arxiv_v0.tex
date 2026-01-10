@@ -1,0 +1,1577 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[utf8]{inputenc}
+
+%\usepackage{tmlr}
+% If accepted, instead use the following line for the camera-ready submission:
+%\usepackage[accepted]{tmlr}
+% To de-anonymize and remove mentions to TMLR (for example for posting to preprint servers), instead use the following:
+\usepackage[preprint]{tmlr_arxiv}
+
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{makeidx}
+\usepackage{multirow}
+
+\usepackage{subfigure}
+\usepackage{caption}
+\usepackage{proof}
+\usepackage{amsthm}
+\usepackage{chngpage}
+% \usepackage[numbers]{natbib}
+\usepackage[title]{appendix}
+
+\setlength{\marginparwidth }{2cm}\usepackage{todonotes}
+\usepackage{algorithm,algpseudocode}
+\usepackage{tikz}
+% \usetikzlibrary{shapes,arrows,positioning}
+% \PassOptionsToPackage{usenames}{xcolor}
+% \definecolor{grey}{RGB}{229,229,229}
+% \definecolor{medium-grey}{RGB}{152,152,152}
+% \definecolor{dark-grey}{RGB}{122,122,122}
+\usepackage{graphicx}
+\usepackage{wrapfig}
+% \usepackage{lineno} % adding line numbers
+
+% \addtolength{\hoffset}{-1.3in}
+% \addtolength{\textwidth}{2.6in}
+% \addtolength{\topmargin}{-1in}
+% \addtolength{\textheight}{1.5in}
+
+\theoremstyle{plain}
+\newtheorem{observation}{Observation}
+\newtheorem{remark}{Remark}
+\newtheorem*{important}{Important}
+
+\theoremstyle{definition}
+\newtheorem{claim}{Claim}
+\newtheorem{example}{Example}
+\newtheorem{property}{Property}
+\newtheorem{thm}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{asmpt}{Assumption}
+\newtheorem{proposition}{Proposition}
+\newtheorem{definition}{Definition}
+\newtheorem{question}{Question}
+\newtheorem{answer}{Answer}
+
+\newcommand{\argmax}{\operatornamewithlimits{argmax}}
+\newcommand{\norm}[1]{\left|\left|#1\right|\right|}
+\newcommand\todoinline[2][]{\todo[inline, caption={todo}, #1]{
+\begin{minipage}{\textwidth}#2\end{minipage}}}
+\newcommand\noteinline[2][]{\todo[inline, caption={todo}, color=light-blue, #1]{
+\begin{minipage}{\textwidth}#2\end{minipage}}}
+
+\title{
+    Reward-Predictive Clustering
+}
+% Authors must not appear in the submitted version. They should be hidden
+% as long as the tmlr package is used without the [accepted] or [preprint] options.
+% Non-anonymous submissions will be rejected without review.
+\author{\name Lucas Lehnert \email lucas.lehnert@outlook.com \\
+        \addr Mila - Quebec AI Institute \\
+        D\'epartement d’informatique et Recherche Op\'erationnelle \\
+        Universit\'e de Montr\'eal
+        \AND
+        \name Michael J. Frank \email michael\_frank@brown.edu \\ 
+        \addr Department of Cognitive, Linguistic \& Psychological Sciences \\
+        Carney Institute for Brain Science \\
+        Brown University
+        \AND
+        \name Michael L. Littman \email michael\_littman@brown.edu \\
+        \addr Department of Computer Science\\
+        Brown University
+}
+
+% The \author macro works with any number of authors. Use \AND 
+% to separate the names and addresses of multiple authors.
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+% % TODO remove this when removing line numbers from the document.
+% \let\oldequation\equation
+% \let\oldendequation\endequation
+% \renewenvironment{equation}
+%   {\linenomathNonumbers\oldequation}
+%   {\oldendequation\endlinenomath}
+% \let\oldalign\align
+% \let\oldendalign\endalign
+% \renewenvironment{align}
+%   {\linenomathNonumbers\oldalign}
+%   {\oldendalign\endlinenomath}
+
+\def\month{MM}  % Insert correct month for camera-ready version
+\def\year{YYYY} % Insert correct year for camera-ready version
+\def\openreview{\url{https://openreview.net/forum?id=XXXX}} % Insert correct link to OpenReview for camera-ready version
+
+\begin{document}
+
+% \linenumbers
+
+\maketitle
+
+\begin{abstract}
+    Recent advances in reinforcement-learning research have demonstrated impressive results in building algorithms that can out-perform humans in complex tasks.
+    Nevertheless, creating reinforcement-learning systems that can build abstractions of their experience to accelerate learning in new contexts still remains an active area of research.
+   % By building efficient abstractions, an intelligent system can re-use what it has learned before to make fewer mistakes in performing novel tasks.
+    Previous work showed that reward-predictive state abstractions fulfill this goal, but have only be applied to tabular settings. 
+    Here, we provide a clustering algorithm that enables the application of such state abstractions to deep learning settings, providing compressed representations of an agent's inputs that preserve the ability to predict sequences of reward.
+    A convergence theorem and simulations show that the resulting reward-predictive deep network maximally compresses the agent's inputs, significantly speeding up learning in high dimensional visual control tasks.
+    Furthermore, we present different generalization experiments and analyze under which conditions a pre-trained reward-predictive representation network can be re-used without re-training to accelerate learning---a form of systematic out-of-distribution transfer.
+    % Would "transfer" be a more recognizable name? --- yes
+\end{abstract}
+
+\section{Introduction}
+
+Recent advances in reinforcement learning (RL)~\citep{sutton2018rlbook} have demonstrated impressive results, outperforming humans on a range of different tasks~\citep{silver2016alphago,silver2017alghagozero,minh2013dqn}.
+Despite these advances, the problem of building systems that can re-use knowledge to accelerate learning---a characteristic of human intelligence---still remains elusive.
+By incorporating previously learned knowledge into the process of finding a solution for a novel task, intelligent systems can speed up learning and make fewer mistakes.
+Therefore, efficient knowledge re-use is a central, yet under-developed, topic in RL research.
+
+We approach this question through the lens of representation learning.
+Here, an RL agent constructs a representation function to compress its high-dimensional observations into a lower-dimensional latent space.
+This representation function allows the system to simplify complex inputs while preserving all information relevant for decision-making.
+By abstracting away irrelevant aspects of task, an RL agent can efficiently generalize learned values across distinct observations, leading to faster and more data-efficient learning~\citep{abel2018sa,franklin2018compositional,momennejad2017successor}.
+Nevertheless, a representation function can become specialized to a specific task, and the information that needs to be retained often differs from task to task.
+In this context, the question of how to compute an efficient and \emph{re-usable} representation emerges.
+% function that compresses high-dimensional representations as much as possible emerges.
+
+In this article, we introduce a clustering algorithm that computes a reward-predictive representation~\citep{lehnert2020reward,lehnert2020lsfm} from a fixed data set of interactions---a setting commonly known as \emph{offline RL}~\citep{levine2020offlinerl}.
+A reward-predictive representation is a type of function that compresses high-dimensional inputs into lower-dimensional latent states.
+These latent states are constructed such that they can be used to predict future rewards without having to refer to the original high dimensional input.
+To compute such a representation, the clustering algorithm processes an interaction data set that is sampled from a single \emph{training task}.
+First, every state observation is assigned to the same latent state index.
+Then, this single state cluster is iteratively refined by introducting additional latent state indices and re-assigning some state observations to them.
+At the end, the assignment between state observations and latent state cluster indices can be used to train a representation network that classifies high-dimensional states into one of the computed latent state cluster.
+Later on, the output of this representation network can be used to predict future reward outcomes without referring to the original high-dimensional state.
+Therefore, the resulting representation network is a reward-predictive representation.
+% The clustering algorithm outputs a reward-predictive representation network mapping high-dimensional observations, for example images, to a finite set of latent states.
+The presented clustering algorithm is generic: Besides constraining the agent to decide between a finite number of actions, no assumptions about rewards or state transitions are made.
+We demonstrate that these reward-predictive representation networks can be used to accelerate learning in \emph{test tasks} that differ in both transition and reward functions from those used in the training task.
+The algorithm demonstrates a form of out-of-distribution generalization because the test tasks require learning a task solution that is novel to the RL agent and does not follow the training data's distribution.
+The simulation experiments reported below demonstrate that reward-predictive representation networks comprise a form of abstract knowledge re-use, accelerating learning to new tasks.
+To unpack how reward-predictive representation networks can be learned and transferred, we first illustrate the clustering algorithm using different examples and prove a convergence theorem.
+Lastly, we present transfer experiments illuminating the question of when the learned representation networks generalize to test tasks that are distinct from the training task in a number of different properties.
+
+\section{Reward-predictive representations}
+\label{sec:reward-predictive-representations}
+
+\begin{figure}
+    \centering
+    \subfigure[
+        Column World task
+    ]{
+        \label{fig:column-world-map}
+        \includegraphics[scale=1.]{figure/column_world_map.pdf}
+    }
+    \hspace{1cm}
+    \subfigure[
+        Reward-predictive representation
+    ]{
+        \label{fig:column-world-colouring}
+        \includegraphics[scale=1.]{figure/column_world_abstraction.pdf}
+    }
+    \subfigure[
+        Clustering Successor Features
+    ]{
+        \label{fig:column-world-sf}
+        \includegraphics[scale=1.]{figure/column_world_sf.pdf}
+    }
+    \hspace{1cm}
+    \subfigure[
+        Cluster refinement sequence constructed by algorithm
+    ]{
+        \label{fig:column-world-refinement}
+        \includegraphics[scale=1.]{figure/column_world_cluster_tree.pdf}
+    }
+    \caption{
+        Reward-predictive clustering in the Column World task.
+        \subref{fig:column-world-map}: 
+        In the Column World task the agent can transition between adjacent grid cells by selecting from one of four available actions: move up, down, left, or right.
+        A reward of one is given if a green cell is given, otherwise rewards are zero.
+        All transitions are deterministic in this task.
+        \subref{fig:column-world-colouring}: 
+        By colouring every column in a distinct colour, every state of the same column is assigned the same latent state resulting in a $4 \times 1$ abstracted grid world task.
+        In this example, an agent only needs to retain which column it is in to predict future rewards and can therefore only use the abstracted task to predict reward sequences for every possible trajectory.
+        \subref{fig:column-world-sf}: 
+        Matrix plot of all SF vectors $\pmb{\psi}^\pi(s,a)$ for the move ``move right'' action an a policy $\pi$ that selects actions uniformly at random.
+        Every row corresponds to the four-dimensional vector for each grid position, as indicated by the y-axis labels.
+        For this calculation, the colour of a state $s$ is encoded as a colour index $c(s)$ that ranges from one through four and the state-representation vector is a one-hot bit vector $\pmb{e}_{c(s)}$ where the entry $c(s)$ is set to one and all other entries are set to zero.
+        \subref{fig:column-world-refinement}: 
+        Colour function sequence $c_0,c_1,c_2,c_3$ generated by the reward-predictive clustering algorithm.
+        Initially, all states are merged into a single partition and this partitioning is refined until a reward-predictive representation is obtained.
+        The first clustering $c_1$ is obtained by associating states with equal one-step rewards with the same colour (latent state vector).
+        Then, the SF matrix shown in~\subref{fig:column-world-sf} is computed for a state representation that associates state with the blue-green colouring as specified by $c_1$.
+        The row space of this SF matrix is then clustered again leading to the clustering $c_2$.
+        Subsequently, the SF matrix is computed again for the blue-orange-green colouring and the clustering procedure is repeated.
+        This method iteratively refines a partitioning of the state space until a reward-predictive representation is obtained.
+    }
+    \label{fig:column-world-example}
+\end{figure}
+
+Mathematically, a reward-predictive representation is a function $\pmb{\phi}$ that maps an RL agent's observations to a vector encoding the compressed latent state.
+Figure~\ref{fig:column-world-example} illustrates a reward-predictive representation with an example.
+In the Column World task (Figure~\ref{fig:column-world-map}), an RL agent navigates through a grid and receives a reward every time a green cell (right column) is entered.
+Formally, this task is modelled as a Markov Decision Process (MDP) $M = \langle \mathcal{S}, \mathcal{A}, p, r \rangle$, where the set of observations or \emph{states} is denoted with $\mathcal{S}$ and the finite set of possible \emph{actions} is denoted with $\mathcal{A}$.
+The transitions between adjacent grid cells are modelled with a transition function $p(s,a,s')$ specifying the probability or density function of transitioning from state $s$ to state $s'$ after selecting action $a$.
+Rewards are specified by the reward function $r(s,a,s')$ for every possible transition.
+
+To solve this task optimally, the RL agent needs to know which column it is in and can abstract away the row information from each grid cell. 
+(For this example we assume that the abstraction is known; the clustering algorithm below will show how it can be constructed from data).
+Figure~\ref{fig:column-world-colouring} illustrates this abstraction as a state colouring:
+By assigning each column a distinct colour, the $4 \times 4$ grid can be abstracted into a $4 \times 1$ grid.
+A representation function then maps every state in the state space $\mathcal{S}$ to a latent state vector (a colour).
+Consequently, a trajectory (illustrated by the black squares and arrows in Figure~\ref{fig:column-world-colouring}) is then mapped to a trajectory in the abstracted task.
+The RL agent can then associate colours with decisions or reward predictions instead of directly operating on the higher-dimensional $4 \times 4$ grid.
+
+This colouring is a reward-predictive representation, because for any arbitrary start state and action sequence it is possible to predict the resulting reward sequence using only the abstracted task.
+Formally, this can be described by finding a function $f$ that maps a start latent state and action sequence to the expected reward sequence:
+\begin{equation}
+    f(\pmb{\phi}(s),a_1,...,a_n) = \mathbb{E}_p \left[ (r_1,...,r_n) \middle| s, a_1,...,a_n \right]. \label{eq:reward-sequence-prediction}
+\end{equation}
+The right-hand side of Equation~\eqref{eq:reward-sequence-prediction} evaluates to the expected reward sequence observed when following the action sequence $a_1,...,a_n$ starting at state $s$ in the original task.
+The left-hand side of Equation~\eqref{eq:reward-sequence-prediction} predicts this reward sequence using the action sequence $a_1,...,a_n$ and only the latent state $\pmb{\phi}(s)$---the function $f$ does not have access to the original state $s$.
+This restricted access to latent states constrains the representation function $\pmb{\phi}$ to be reward-predictive in a specific task: 
+Given the representation's output $\pmb{\phi}(s)$ and not the full state $s$, it is possible to predict an expected reward sequence for any arbitrary action sequence using a latent model $f$.
+Furthermore, once an agent has learned how to predict reward-sequences for one state, it can re-use the resulting function $f$ to immediately generalize predictions to other states that map to the same latent state, resulting in faster learning.
+Of course, a reward-predictive representation always encodes some abstract information about the task in which it was learned; if this information is not relevant in a subsequent task, an RL agent would have to access the original high-dimensional state and learn a new representation. 
+We will explore the performance benefits of re-using reward-predictive representations empirically in Section~\ref{sec:experiments}.
+The colouring in Figure~\ref{fig:column-world-colouring} satisfies the condition in Equation~\eqref{eq:reward-sequence-prediction}:
+By associating green with a reward of one and all other colours with a reward of zero, one can use only a start colour and action sequence to predict a reward sequence and this example can be repeated for every possible start state and action sequence of any length.
+
+\subsection{Improving learning efficiency with successor representations}
+
+To improve an RL agent's ability to generalize its predictions across states, the Successor Representation (SR) was introduced by~\citet{dayan1993successor}.
+Instead of explicitly planning a series of transitions, the SR summarizes the frequencies with which an agent visits different future states as it behaves optimally and maximizes rewards.
+Because the SR models state visitation frequencies, this representation implicitly encodes the task's transition function and optimal policy.
+Consequently, the SR provides an intermediate between model-based RL, which focuses on learning a full model of a task's transition and reward functions, and model-free RL, which focuses on learning a policy to maximize rewards~\citep{momennejad2017successor,russek2017predictive}.
+\citet{barreto2017sf} showed that the SR can be generalized to Successor Features (SFs), which compress the high dimensional state space into a lower dimensional one that can still be used to predict future state occupancies. 
+They demonstrated how SFs can be re-used across tasks with different reward functions to speed up learning. 
+Indeed, SFs---like the SR---only reflect the task's transition function and optimal policy but are invariant to any specifics of the reward function itself.
+Because of this invariance, SFs provide an initialization allowing an agent to adapt a previously learned policy to tasks with different reward functions, leading to faster learning in a life-long learning setting~\citep{barreto2018deepsf,barreto2020fastsf,lehnert2017sf,nemecek2021policycaches}. 
+
+However, such transfer requires the optimal policy in the new task to be similar to that of the previous tasks~\citep{lehnert2020lsfm,lehnert2020reward}. 
+For example, even if only the reward function changes, but the agent had not typically visited states near the new reward location in the old task, the SR/SF is no longer useful and must be relearned from scratch~\citep{lehnert2017sf}. 
+To further improve the invariance properties of SFs,~\citet{lehnert2020lsfm} presented a model that makes use of SFs solely for establishing which states are equivalent to each other for the sake of predicting future reward sequences, resulting in a reward-predictive representation.
+Because reward-predictive representations only model state equivalences, removing the details of exactly how (i.e., they are invariant to the specifics of transitions, rewards, and the optimal policy), they provide a mechanism for a more abstract form of knowledge transfer across tasks with different transition and reward functions~\citep{lehnert2020lsfm,lehnert2020reward}.
+Formally, SFs are defined as the expected discounted sum of future latent state vectors and
+\begin{equation}
+    \pmb{\psi}^\pi(s,a) = \mathbb{E}_{a,\pi} \left[ \sum_{t=1}^\infty \gamma^{t-1} \pmb{\phi}(s_t) \middle| s_1=s \right], \label{eq:sf-definition}
+\end{equation}
+where the expectation in Equation~\eqref{eq:sf-definition} is calculated over all infinite length trajectories that start in state $s$ with action $a$ and then follow the policy $\pi$.
+The connection between SFs and reward-predictive representations is illustrated in Figure~\ref{fig:column-world-sf}.
+Every row in the matrix plot in Figure~\ref{fig:column-world-sf} shows the SF vector $\pmb{\psi}^\pi(s,a)$ for each of the 16 states of the Column World task.
+% Here, the policy $\pi$ explores the Column World tasks and selects actions uniformly at random.
+One can observe that states belonging to the same column have equal SFs.
+\citet{lehnert2020lsfm} prove that states that are mapped to the same reward-predictive latent state (and have therefore equal colour) also have equal SFs.
+In other words, there exists a bijection between two states that are equivalent in terms of their SF vectors and two states belonging to the same reward-predictive latent state.
+
+% As such, previous work demonstrates that reward-predictive representations accelerate learning in more general transfer settings across a range of tasks compared to simply reusing SFs themselves or model-free learning algorithms~\citep{lehnert2020reward}. 
+% However, that work focused on tabular settings and the mechanism for compression required considering a large number of possible abstractions that were evaluated and optimised with gradient descent. 
+% This approach would be infeasible in much larger state spaces such as those associated with deep learning. 
+% Here, we present a clustering algorithm that starts with a parsimonious representation in which all states are merged into a single cluster and iteratively improves the state representation by minimizing a temporal difference error defined for SF vectors. 
+% In this sense, our algorithm is similar to value iteration or temporal-difference learning, whereby values are assumed to be all zero but then adjusted iteratively, but here we apply this idea to refining the state abstraction (Figure~\ref{fig:column-world-refinement}).
+% We present a theoretical analysis to study under which assumptions this refinement method converges to a reward-predictive representation that uses as few latent states as possible.
+% This stands in contrast to prior work~\citep{lehnert2018modelfeatures,lehnert2020lsfm,lehnert2020reward}, where the compression was established using a loss objective optimized via gradient descent, and where the degree of compression was specified as a hyper-parameter, leading to either constructing too many latent states or learning representation functions with high reward sequence prediction errors.
+% %In this paper, we present a clustering algorithm that uses this property to compute a reward-predictive representation.
+
+As such, previous work~\citep{lehnert2020reward,lehnert2020lsfm,lehnert2018modelfeatures} computes a reward-predictive representation for finite MDPs by optimizing a linear model using a least-squares loss objective.
+This loss objective requires the representation function $\pmb{\phi}$ to be linear in the SFs and reward function.
+Furthermore, it scores the accuracy of SF predictions using a mean-squared error.
+These two properties make it difficult to directly use this loss objective for complex control tasks, because SFs may become very high dimensional and it may be difficult to predict individual SF vectors with near perfect accuracy while also obtaining a representation function that is linear in these predictions.
+This issue is further exacerbated by the fact that in practice better results are often obtained by training deep neural networks as classifiers rather than regressors of complex or sparse functions.
+Additionally, in this prior approach the degree of compression was specified using a hyper-parameter by a human expert.
+Here, we present a clustering algorithm that remedies these three limitations by designing a cluster-refinement algorithm instead of optimizing a parameterized model with end-to-end gradient descent.
+Specifically, the refinement algorithm implicitly solves the loss objective introduced by~\citet{lehnert2020lsfm} in a manner similar to temporal-difference learning or value iteration.
+Initially, the algorithm starts with a parsimonious representation in which all states are merged into a single latent state cluster and then the state representation is iteratively improved by minimizing a temporal difference error defined for SF vectors. 
+This is similar to value iteration or temporal-difference learning, whereby values are assumed to be all zero initially but then adjusted iteratively, but here we apply this idea to refining a state representation (Figure~\ref{fig:column-world-refinement}).
+Through this approach, we avoid having to optimize a model with a linearity constraint as well as using a least-squared error objective to train a neural network.
+Instead, the clustering algorithm only trains a sequence of state classifiers to compute a reward-predictive representation.
+Furthermore, the degree of compression---the correct number of reward-predictive latent states---is automatically discovered.
+This is accomplished by starting with a parsimonious representation in which all states are merged into a single latent state cluster and iteratively improving the state representation until a reward-predictive representation is obtained without adding any additional latent states in the process.
+In the following section, Section~\ref{sec:partition-refinement}, we will formally outline how this algorithm computes a reward-predictive state representation and discuss a convergence proof.
+Subsequently, we demonstrate how the clustering algorithm can be combined with deep learning methods to compute a reward-predictive representation for visual control tasks (Section~\ref{sec:experiments}).
+Here, we analyze how approximation errors contort the resulting state representation.
+Lastly, we demonstrate how reward-predictive representation networks can be used to accelerate learning in tasks where an agent encounters both novel state observations and transition and reward functions.
+% In this sense, our algorithm is similar to value iteration or temporal-difference learning, whereby values are assumed to be all zero initially but then adjusted iteratively, but here we apply this idea to refining a state representation (Figure~\ref{fig:column-world-refinement}).
+
+% In the following Section~\ref{sec:partition-refinement}, we will formally outline how this algorithm processes a fixed data set and discuss a convergence proof.
+% Subsequently, Section~\ref{sec:experiments} demonstrates how the clustering algorithm computes a reward-predictive representation network on different RL tasks and how the resulting representation networks can be used to accelerate learning on a range of different tasks.
+
+\section{Iterative partition refinement}
+\label{sec:partition-refinement}
+
+The reward-predictive clustering algorithm receives a fixed trajectory data set
+\begin{equation}
+    \mathcal{D} = \{ (s_{i,0},a_{i,0},r_{i,0},s_{i,1},a_{i,1},...,s_{i,L_i}) \}_{i=1}^D \label{eq:transition-data-set}
+\end{equation}
+as input.
+Each data point in $\mathcal{D}$ describes a trajectory of length $L_i$.
+While we assume that this data set $\mathcal{D}$ is fixed, we do not make any assumptions about the action-selection strategy used to generate this data set.
+The clustering algorithm then generates a cluster sequence $c_0,c_1,c_2,...$ that associates every observed state $s_{i,t}$ in $\mathcal{D}$ with a cluster index.
+This cluster sequence is generated with an initial reward-refinement step and subsequent SF refinement steps until two consecutive clustering are equal. 
+These steps are described next.
+
+\subsection{Reward refinement}
+
+To cluster states by their one-step reward values, a function $f_r$ is learned to predict one-step rewards.
+This function is obtained through Empirical Risk Minimization (ERM)~\citep{vapnik1992empiricalriskminimization} by solving the optimization problem
+\begin{equation}
+    f_r = \arg\min_{f} \sum_{(s,a,r,s') \in \mathcal{D}} | f(s,a) - r |, \label{eq:reward-optimization}
+\end{equation}
+where the summation ranges over all transitions between states in the trajectory data set $\mathcal{D}$.
+This optimization problem could be implemented by training a deep neural network using any variation of the backprop algorithm~\citep{goodfellow2016deeplearning}.
+Because rewards are typically sparse in an RL task and because deep neural networks  often perform better as classifiers rather than regressors, we found it simpler to first bin the reward values observed in the transition data set $\mathcal{D}$ and train a classifier network that outputs a probability vector over the different reward bins.
+Instead of using the absolute value loss objective stated in Equation~\eqref{eq:reward-optimization}, this network is trained using a cross-entropy loss function~\citep{goodfellow2016deeplearning}.
+Algorithm~\ref{alg:cluster} outlines how this change is implemented.
+The resulting function $f_r$ is then used to cluster all observed states by one-step rewards, leading to a cluster assignment such that, for two arbitrary state observations $s$ and $\tilde{s}$,
+\begin{equation}
+    c_1(s) = c_1(\tilde{s}) \implies \sum_{a \in \mathcal{A}} | f_r(s,a) - f_r(\tilde{s},a) | \le \varepsilon_r. \label{eq:reward-clustering}
+\end{equation}
+Figure~\ref{fig:function-approximation} illustrates why function approximation is needed to compute the one-step reward clustering in line~\eqref{eq:reward-clustering}.
+In this example, states are described as positions in $\mathbb{R}^2$ and all points lying in the shaded area belong to the same partition and latent state.
+Specifically, selecting action $a$ from within the grey square results in a transition to the right and a reward of zero, while selecting action $b$ results in a transition to the top and a reward of one. 
+We assume that the transition data set only contains the two transitions indicated by the blue arrows. 
+In this case, we have $r(p, a) = 0$ and $r(q, b) = 1$, because $(p, a)$ and $(q, a)$ are state-action combinations contained in the transition data set and a rewards of zero and one were given, respectively. 
+To estimate one-step rewards for the missing state-action combinations $(p, b)$ and $(q, a)$,
+we solve the function approximation problem in line~\eqref{eq:reward-optimization} and then use the learned function $f_r$ to predict one-step reward values for the missing state-action combinations $(p, b)$ and $(q, a)$.
+For this reward-refinement step to accurately cluster states by one-step rewards, the optimization problem in line~\eqref{eq:reward-optimization} needs to be constrained, for example by picking an appropriate neural network architecture, such that the resulting function $f_r$ generalizes the same prediction across the shaded area in Figure~\ref{fig:function-approximation}.
+
+\begin{figure}
+    \centering
+    \includegraphics[scale=1.]{figure/function_approximation.pdf}
+    \caption{
+        Function approximation is needed to generalize one-step reward predictions and SF predictions for state-action combinations not observed in the transition data set.
+        In this example, the state space consists of points in $\mathbb{R}^2$ and the action space consists of actions $a$ and $b$. 
+        We assume that a maximally compressed reward-predictive representation merges all points in the grey square into one latent state. 
+        Selecting the action $a$ from within the grey square results in a transition to the right and generates a reward of $0$. 
+        Selecting the action $b$ from within the grey square results in a transition to the top and generates a reward of $1$.
+        If the dataset only contains the two transitions indicated by the blue arrows and the transitions indicated by the orange arrows are missing, then function approximation is used to predict one-step reward predictions and SF for the missing state and action combinations $(p, b)$ and $(q, a)$. 
+        These function approximators need to be constrained such that they output the same one-step rewards and SF vectors for points that fall within the shaded square.
+    }
+    \label{fig:function-approximation}
+\end{figure}
+
+\subsection{Successor feature refinement}
+
+After reward refinement, the state partitions are further refined by first computing the SFs, as defined in Equation~\eqref{eq:sf-definition}, for a state representation that maps individual state observations to a one-hot encoding of the existing partitions.
+Specifically, for a clustering $c_i$ the state representation 
+\begin{equation}
+    \pmb{\phi}_i: s \mapsto \pmb{e}_{c_i(s)} \label{eq:one-hot-construction}
+\end{equation}
+is used, where $\pmb{e}_{c_i(s)}$ is a one-hot vector with entry $c_i(s)$ set to one.
+The individual SF vectors $\pmb{\psi}^{\pi}_i(s,a)$ can be approximated by first computing a Linear Successor Feature Model (LSFM)~\citep{lehnert2020lsfm}.
+The computation results in obtaining a square matrix $\pmb{F}$ and
+\begin{equation}
+    \pmb{\psi}^\pi_i(s,a) \approx \pmb{e}_{c_i(s)} + \gamma \pmb{F} \mathbb{E}_p \left[ \pmb{e}_{c_i(s')} \middle| s,a \right]. \label{eq:sf-one-step}
+\end{equation}
+% and for every observed transition $(s,a,r,s') \in \mathcal{D}$ the SF vectors are approximated with 
+% \begin{equation}
+%     \pmb{\psi}^{\pi}_i(s,a) \approx \pmb{\phi}_i(s) + \gamma \overline{\pmb{F}}^\top \pmb{\phi}_i(s'). \label{eq:sf-approximation}
+% \end{equation}
+Appendix~\ref{app:lsfm} outlines the details of this calculation.
+Consequently, if a function $\pmb{f}_i$ predicts the expected next latent state $\mathbb{E}_p \left[ \pmb{e}_{c_i(s')} \middle| s,a \right]$, then Equation~\eqref{eq:sf-one-step} can be used to predict the SF vector $\pmb{\psi}^\pi_i(s,a)$.
+Similar to the reward-refinement step, a vector-valued function $\pmb{f}_i$ is obtained by solving\footnote{Here, the L2 norm of a vector $\pmb{v}$ is denoted with $|| \pmb{v} ||$.} 
+\begin{equation}
+    \pmb{f}_i = \arg \min_{\pmb{f}} \sum_{(s,a,r,s') \in \mathcal{D}} || \pmb{f}(s,a) - \pmb{e}_{c_i(s')} ||. \label{eq:sf-optimization}
+\end{equation}
+Similar to learning the approximate reward function, we found that it is more practical to train a classifier and to replace the mean squared error loss objective stated in line~\eqref{eq:sf-optimization} with a cross entropy loss objective and train the network $\pmb{f}_i$ to predict a probability vector over next latent states.
+This change is outlined in Algorithm~\ref{alg:cluster}.
+The next clustering $c_{i+1}$ is then constructed such that for two arbitrary states $s$ and $\tilde{s}$, 
+\begin{equation}
+    c_{i+1}(s) = c_{i+1}(\tilde{s}) \implies \sum_{a \in \mathcal{A}} || \hat{\pmb{\psi}}^\pi_i(s,a) - \hat{\pmb{\psi}}^\pi_i(\tilde{s},a) || \le \varepsilon_\psi.
+\end{equation}
+This SF refinement procedure is repeated until two consecutive clusterings $c_i$ and $c_{i+1}$ are identical.
+
+Algorithm~\ref{alg:cluster} summarizes the outlined method.
+In the remainder of this section, we will discuss under which assumptions this method computes a reward-predictive representation with as few latent states as possible.
+
+\begin{algorithm}
+\caption{Iterative reward-predictive representation learning}
+\label{alg:cluster}
+\begin{algorithmic}[1]
+\State \textbf{Input:} A trajectory data set $\mathcal{D}$, $\varepsilon_r, \varepsilon_\psi > 0$.
+
+\State Bin reward values and construct a reward vector $\pmb{w}_r(i) = r_i$. 
+\State Construct the function $i(r)$ that indexes distinct reward values and $\pmb{w}_r(i(r)) = r$.
+\State Solve $\pmb{f}_r = \arg \min_f \sum_{(s,a,r,s') \in \mathcal{D}} H(\pmb{f}(s,a), \pmb{e}_{i(r)})$ via gradient descent \label{alg-line:erm-reward}
+\State Compute reward predictions $f_r(s,a) = \pmb{w}_r^\top \pmb{f}_r(s,a)$
+\State Construct $c_1$ such that $c_1(s) = c_1(\tilde{s}) \implies \sum_{a \in \mathcal{A}} | f_r(s,a) - f_r(\tilde{s},a) | \le \varepsilon_r$ \label{alg-line:cluster-reward}
+
+\For{$i=2,3,...,N$ until $c_{i+1} = c_i$} 
+    \State Compute $\pmb{F}_a$ for every action.
+    \State Construct $\pmb{\phi}_i: s \mapsto \pmb{e}_{c_i(s)}$
+    \State Solve $\pmb{f}_i = \arg \min_{\pmb{f}} \sum_{(s,a,r,s') \in \mathcal{D}} H(\pmb{f}(s,a), \pmb{e}_{c_i(s')})$ via gradient descent \label{alg-line:erm-sf}
+    \State Compute $\widehat{\pmb{\psi}}^\pi_i(s,a) = \pmb{e}_{c_i(s)} + \gamma \pmb{F} \pmb{f}_i(s,a)$
+    \State Construct $c_{i+1}$ such that $c_{i+1}(s) = \hat{c}_{i+1}(\tilde{s}) \implies \sum_{a \in \mathcal{A}} || \hat{\pmb{\psi}}^\pi_i(s,a) - \hat{\pmb{\psi}}^\pi_i(\tilde{s},a) || \le \varepsilon_\psi$ \label{alg-line:cluster-sf}
+\EndFor
+
+\State \Return $\pmb{\phi}_N$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Convergence to maximally compressed reward-predictive representations}
+
+
+% MLL: Where is the proof? (Appendix B, right?) Is this section summarizing it? Or is this the proof? (If the latter, I feel like it should be written in theorem/proof style.) I'm a little uneasy here. Is the result known or new? If known, we should make sure to give credit. If unknown... what did Dean and Givens do differently? If it's that we're doing an epsilon version then (1) we should acknowledge that what we're doing is related and (2) I'm very skeptical that a greedy method is guaranteed to produce minimum-size clustering. (It very strongly feels like the kind of situation where you can get  an advantage by optimizing globally.)
+
+The idea behind Algorithm~\ref{alg:cluster} is similar to the block-splitting method introduced by~\citet{givan2003bisimulation}.
+While~\citeauthor{givan2003bisimulation} focus on the tabular setting and refine partitions using transition and reward tables, our clustering algorithm implements a similar refinement method but for data sets sampled from MDPs with perhaps (uncountably) infinite state spaces.
+Instead of assuming access to the complete transition function, Algorithm~\ref{alg:cluster} learns SFs and uses them to iteratively refine state partitions.
+For this refinement operation to converge to a correct and maximally-compressed-reward-predictive representation, the algorithm needs to consider all possible transitions between individual state partitions.
+This operation is implicitly implemented by clustering SFs, which predict the frequency of future state partitions and therefore implicitly encode the partition-to-partition transition table.\footnote{The state-to-state transition table is never computed by our algorithm.}
+
+Convergence to a correct maximally-compressed-reward-predictive representation relies on two properties that hold at every iteration (please refer to Appendix~\ref{app:proofs} for a formal statement of these properties):
+\begin{enumerate}
+    \item State partitions are refined and states of different partitions are never merged into the same partition.
+    \item Two states that lead to equal expected reward sequences are never split into separate partitions.
+\end{enumerate}
+The first property ensures that Algorithm~\ref{alg:cluster} is a partition refinement algorithm, as illustrated by the tree schematic in Figure~\ref{fig:column-world-refinement} (and does not merge state partitions).
+If such an algorithm is run on a finite trajectory data set with a finite number of state observations, the algorithm is guaranteed to terminate and converge to some state representation because one can always assign every observation into a singleton cluster.
+However, the second property ensures that the resulting representation is reward-predictive while using as few state partitions as possible:
+If two states $s$ and $\tilde{s}$ lead to equal expected reward sequences and $\mathbb{E}_p \left[ (r_1,...,r_n) \middle| s, a_1,...,a_n \right] = \mathbb{E}_p \left[ (r_1,...,r_n) \middle| \tilde{s}, a_1,...,a_n \right]$ (for any arbitrary action sequence $a_1,...,a_n$), then they will not be split into separate partitions.
+If Algorithm~\ref{alg:cluster} does not terminate early (which we prove in Appendix~\ref{app:proofs}), the resulting representation is reward-predictive and uses as few state partitions as possible.
+
+The reward-refinement step satisfies both properties:
+The first property holds trivially, because $c_1$ is the first partition assignment.
+The second property holds because two states with different one-step rewards cannot be merged into the same partition for any reward-predictive representation.
+
+To see that both properties are preserved in every subsequent iteration, we consider the partition function $c^*$ of a correct maximally compressed reward-predictive representation.
+Suppose $c_i$ is a sub-partitioning of $c^*$ and states that are assigned different partitions by $c_i$ are also assigned different partitions in $c^*$.
+(For example, in Figure~\ref{fig:column-world-refinement} $c_0$, $c_1$, and $c_3$ are all valid sup-partitions of $c_4$.)
+Because of this sub-partition property, we can define a projection matrix $\pmb{\Phi}_i$ that associates partitions defined by $c^*$ with partitions defined by $c_i$.
+Specifically, the entry $\pmb{\Phi}_i(k,j)$ is set to one if for the same state $s$, $c^*(s)=j$ and $c_i(s)=k$.
+In Appendix~\ref{app:proofs} we show that this projection matrix can be used to relate latent states induced by $c^*$ to latent states induced by $c_i$ and
+\begin{equation}
+    \pmb{\Phi}_i \pmb{e}_{c^*(s)} = \pmb{e}_{c_i(s)}. \label{eq:latent-projection}
+\end{equation}
+Using the identity in line~\eqref{eq:latent-projection}, the SFs at an intermediate refinement iteration can be expressed in terms of the SFs of the optimal reward-predictive representation and
+\begin{align}
+    \pmb{\psi}^\pi_i(s,a) &= \mathbb{E}_{a,\pi} \left[ \sum_{t=1}^\infty \gamma^{t-1} \pmb{e}_{c_i(s_t)} \middle| s_1=s,a_1=a \right] \label{eq:sf-c-i} \\
+    &= \mathbb{E}_{a,\pi} \left[ \sum_{t=1}^\infty \gamma^{t-1} \pmb{\Phi}_i \pmb{e}_{c^*(s)} \middle| s_1=s,a_1=a \right] &(\text{by substitution with~\eqref{eq:latent-projection}}) \\
+    &= \pmb{\Phi}_i \mathbb{E}_{a,\pi} \left[ \sum_{t=1}^\infty \gamma^{t-1} \pmb{e}_{c^*(s)} \middle| s_1=s,a_1=a \right] &(\text{by linearity of expectation}) \\
+    &= \pmb{\Phi}_i \pmb{\psi}^\pi_*(s,a). \label{eq:sf-projection}
+\end{align}
+As illustrated in Figure~\ref{fig:column-world-sf},~\citet{lehnert2020lsfm} showed that two states $s$ and $\tilde{s}$ that are assigned the same partition by a maximally compressed reward-predictive clustering $c^*$ also have equal SF vectors and therefore 
+\begin{equation}
+    \pmb{\psi}^\pi_i(s,a) - \pmb{\psi}^\pi_i(\tilde{s},a) = \pmb{\Phi}_i \pmb{\psi}^\pi_*(s,a) - \pmb{\Phi}_i \pmb{\psi}^\pi_*(\tilde{s},a) = \pmb{\Phi}_i \underbrace{(\pmb{\psi}^\pi_*(s,a) - \pmb{\psi}^\pi_*(\tilde{s},a))}_{=\pmb{0}} = \pmb{0}. \label{eq:equal-sf}
+\end{equation}
+By line~\eqref{eq:equal-sf}, these two states $s$ and $\tilde{s}$ also have equal SFs at any of the refinement iterations in Algorithm~\ref{alg:cluster}.
+Consequently, these two states will not be split into two different partitions (up to some approximation error) and the second property holds.
+
+Similarly, if two states are assigned different partitions, then the first term in the discounted summation in line~\eqref{eq:sf-c-i} contains two different one-hot bit vectors leading to different SFs for small enough discount factor and $\varepsilon_\psi$ settings.
+In fact, in Appendix~\ref{app:proofs} we prove that this is the case for all possible transition functions if
+\begin{equation}
+    \gamma < \frac{1}{2}~\text{and}~\frac{2}{3} \left( 1 - \frac{\gamma}{1 - \gamma} \right) > \varepsilon_\psi > 0. \label{eq:matching-condition}
+\end{equation}
+% However, in Section~\ref{sec:experiments} we empirically demonstrate that this condition need not always hold.
+While this property of SFs ensures that Algorithm~\ref{alg:cluster} always refines a given partitioning for any arbitrary transition function, we found that significantly higher discount factor settings can be used in our simulations.
+
+\begin{figure}
+    \centering
+    \includegraphics{figure/epsilon_cluster.pdf}
+    \caption{
+        The cluster thresholds $\varepsilon_\psi$ and $\varepsilon_r$ must be picked to account for prediction errors while ensuring that states are not merged into incorrect clusters.
+        For example, suppose the clustered SF vectors are the three black dots in $\mathbb{R}^2$ and the function $\pmb{f}_i$ predicts values close to these dots, as indicated by the colored dots.
+        For the clustering to be correct (and computable in polynomial time), the prediction errors---the distance between the predictions and the correct value---has to be $\varepsilon_\psi / 2$.
+        At the same time, $\varepsilon_\psi$ has to be small enough to avoid overlaps between the different coloured clusters.
+    }
+    \label{fig:epsilon-cluster}
+\end{figure}
+
+Because function approximation is used to predict the quantities used for clustering, prediction errors can corrupt this refinement process.
+If prediction errors are too high, the clustering steps in Algorithm~\ref{alg:cluster} may make incorrect assignments between state observations and partitions.
+To prevent this, the prediction errors of the learned function $f_r$ and $\pmb{\psi}^\pi_i$ must be bounded by the thresholds used for clustering, leading to the following assumption.
+
+\begin{asmpt}[$\varepsilon$-perfect]\label{asmpt:perfect}
+For $\varepsilon_\psi, \varepsilon_r > 0$, the ERM steps in Algorithm~\ref{alg:cluster} lead to function approximators that are near optimal such that for every observed state-action pair $(s,a)$,
+\begin{equation}
+    \Big| f_r(s,a) - \mathbb{E}[r(s,a,s') | s,a] \Big| \le \frac{\varepsilon_r}{2} ~\text{and}~ \Big|\Big| \widehat{\pmb{\psi}}^\pi_i(s,a) - \pmb{\psi}^\pi_i(s,a) \Big|\Big| \le \frac{\varepsilon_\psi}{2}.
+\end{equation}
+\end{asmpt}
+
+%In this case the convergence proof assumes that prediction errors are significantly lower than the chosen clustering thresholds $\varepsilon_\psi$ and $\varepsilon_r$.
+Figure~\ref{fig:epsilon-cluster} illustrates why this assumption is necessary and why predictions have to fall to the correct value in relation to $\varepsilon_\psi$ and $\varepsilon_r$.
+In Section~\ref{sec:experiments} we will discuss that this assumption is not particularly restrictive in practice and when not adhering to this assumption can still lead to a maximally-compressed-reward-predictive representation.
+Under Assumption~\ref{asmpt:perfect}, Algorithm~\ref{alg:cluster} converges to a maximally compressed reward-predictive representation.
+
+\begin{thm}[Convergence]\label{thm:convergence}
+If Assumption~\ref{asmpt:perfect} and the matching condition in line~\eqref{eq:matching-condition} hold, then Algorithm~\ref{alg:cluster} returns an approximate maximally-compressed-reward-predictive representation for a trajectory data set sampled from any MDP.
+\end{thm}
+
+A formal proof of Theorem~\ref{thm:convergence} is presented in Appendix~\ref{app:proofs}.
+
+In practice, one cannot know if prediction errors are small enough, a principle that is described by~\citet{vapnik1992empiricalriskminimization}.
+However, recent advances in deep learning~\citep{belkin2019doubledescent} have found that increasing the capacity of neural networks often makes it possible to interpolate the training data and still perform almost perfectly on independently sampled test data.
+In the following section we present experiments that illustrate how this algorithm can be used to find a maximally compressed reward-predictive representation.
+
+\section{Learning reward-predictive representation networks}
+\label{sec:experiments}
+
+In this section, we first illustrate how the clustering algorithm computes a reward-predictive representation on the didactic Column World example.
+Then, we focus on a more complex visual control task---the Combination Lock task,  where inputs are a set of MNIST images from pixels---and discuss how function approximation errors lead to spurious latent states and how they can be filtered out.
+Lastly, we present a set of experiments highlighting how initializing a DQN agent with a reward-predictive representation network improves learning efficiency, demonstrating in which cases reward-predictive representations are suitable for out-of-distribution generalization.
+
+\begin{figure}
+    \centering
+    \subfigure[
+        Point Observation Column World task
+    ]{
+        \label{fig:column-world-position-map}
+        \hspace{0.5cm}
+        \includegraphics[scale=1.]{figure/column_world_position_map.pdf}
+        \hspace{0.5cm}
+    }
+    ~
+    \subfigure[
+        Reward-predictive clustering
+    ]{
+        \label{fig:column-world-clustering}
+        \hspace{0.8cm}
+        \includegraphics[scale=1.]{figure/column_world_clustering.pdf}
+        \hspace{0.8cm}
+    }
+    ~
+    \subfigure[
+        Reward sequence prediction errors
+    ]{
+        \label{fig:column-world-reward-sequence-errors}
+        \hspace{0.7cm}
+        \includegraphics[scale=1.]{figure/column_world_reward_sequence_errors.pdf}
+        \hspace{0.7cm}
+    }
+    \caption{
+        Reward-predictive clustering of the Point Observation Column World task.
+        \subref{fig:column-world-position-map}:
+        The Point Observation Column World task is a variant of the Column World task where instead of providing the agent with a grid cell index it only observes a real valued point $(x,y) \in (0,4)^2$.
+        When the agent is in a grid cell, for example cell the top left cell, a point is sampled uniformly at random from the corresponding cell, for example the point $(0.83, 3.22)$.
+        \subref{fig:column-world-clustering}:
+        The computed cluster function $c_3$ assigns each state observation (a point in the shown scatter plot) with a different latent state index (a different color).
+        \subref{fig:column-world-reward-sequence-errors}:
+        The box plot shows the reward sequence prediction error for each trajectory at each iteration (iteration 0 shows the initial cluster function).
+        At each iteration a different representation network was trained and then evaluated on a separately sampled 100-trajectory test data set.
+        The full details of this experiment are listed in Appendix~\ref{app:experiments}.
+    }
+    \label{fig:column-world-experiment}
+\end{figure}
+% MLL: The plot looks like it's improving from c0 to c3. That's just random, right? The clusterings are completely independent, aren't they? Oh, maybe not. Maybe label the x axis "iteration"?
+
+Figure~\ref{fig:column-world-experiment} illustrates a reward-predictive clustering for a variant of the Column World task where state observations are real-valued points.
+This variant is a block MDP~\citep{du2019bmdp}:
+Instead of observing a grid cell index, the agent observes a real-valued point $(x,y)$ (Figure~\ref{fig:column-world-position-map}) but still transitions through a $4 \times 4$ grid.
+%In the point observation variant of the Column World task (Figure~\ref{fig:column-world-position-map}), the agent still transitions through a $4 \time 4$ grid but instead of observing a grid cell index the agent observes a real-valued point $(x,y)$.
+This point is sampled uniformly at random from a square that corresponds to the grid cell the agent is in, as illustrated in Figure~\ref{fig:column-world-position-map}.
+% MLL: Does that mean it's a "block MDP"? Might be worth citing, if so.
+Therefore, the agent does not (theoretically) observe the same $(x,y)$ point twice and transitions between different states become probabilistic.
+For this task, a two-layer perceptron was used to train a reward and next latent state classifier (Algorithm~\ref{alg:cluster}, lines~\ref{alg-line:erm-reward} and~\ref{alg-line:erm-sf}).
+Figure~\ref{fig:column-world-clustering} illustrates the resulting clustering as colouring of a scatter plot.
+Each dot in the scatter plot corresponds to a state observation point $(x,y)$ in the training data set and the colouring denotes the final latent state assignment $c_3$.
+Figure~\ref{fig:column-world-reward-sequence-errors} presents a box-plot of the reward-sequence prediction errors as a function of each refinement iteration.
+One can observe that after performing the second refinement step and computing the cluster function $c_2$, all reward-sequence prediction errors drop to zero.
+This is because the clustering algorithm initializes the cluster function $c_0$ by first merging all terminal states into a separate partition (and our implementation of the clustering algorithm is initialized at the second step in Figure~\ref{fig:column-world-refinement}).
+Because the cluster functions $c_2$ and $c_3$ are identical in this example, the algorithm is terminated after the third iteration.
+
+\subsection{Clustering with function approximation errors}
+
+\begin{figure}
+    \centering
+    \begin{minipage}[b]{0.4\linewidth}
+    \begin{center}
+        \subfigure[Combination Lock Task, right dial invariant]{
+            \hspace{0.2cm}
+            \label{fig:combination-lock-train}
+            \includegraphics[scale=1.]{figure/combination_lock_train.pdf}
+            \hspace{0.2cm}
+        }
+        \subfigure[Reward sequence prediction error distribution]{
+            \hspace{0.2cm}
+            \label{fig:combination-lock-reward-errors}
+            \includegraphics[scale=1.]{figure/combination_lock_histogram.pdf}
+            \hspace{0.2cm}
+        }
+    \end{center}
+    \end{minipage}
+    \begin{minipage}[b]{0.58\linewidth}
+        \begin{center}
+            \subfigure[
+                Latent state confusion matrix
+            ]{
+                \label{fig:combination-lock-clustering}
+                \includegraphics[scale=1.]{figure/combination_lock_confusion.pdf}
+            }
+        \end{center}
+    \end{minipage}
+    \caption{
+        Reward-predictive clustering of the Combination Lock task.
+        \subref{fig:combination-lock-train}:
+        In the Combination Lock task, the agent decides which dial(s) to rotate to move toward a rewarding combination.
+        The agent has to learn that only the first two dials are relevant for unlocking the combination: a reward is given once the left and center dials both arrive at the digit nine and the lock matches the pattern $(9,9,*)$.
+        The right (shaded) dial is ``broken'' and spins at random when the third action is selected, and thus all digits on it should be equally reward-predictive.
+        Each state consists of an image that is assembled using the MNIST data set.
+        The fixed trajectory data set provided to the clustering algorithm uses images from the MNIST training dataset.
+        The resulting model was evaluated using an independently sampled test trajectory data set using images from the MNIST test data set.
+        \subref{fig:combination-lock-reward-errors}:
+        The histogram plots the distribution reward sequence errors for 1000 test trajectories for five different refinement stages of the clustering algorithm on a log-scale.
+        The distribution of the 1000 samples is plotted as a rug plot above the histogram.
+        For each trajectory the absolute difference between predicted and true reward value was computed and averaged along the trajectory.
+        The predictions where made by training a separate representation network for each cluster function.
+        \subref{fig:combination-lock-clustering}: 
+        Matrix plot illustrating how different number combinations are associated with different latent states.
+        Each row plots the distribution across latent states of images matching a specific number pattern.
+        Each column of the matrix plot corresponds to a specific latent state index and which combination is associated with which index is determined arbitrarily by the clustering algorithm.
+        Terminal states that are observed at the end of each trajectory are merged into latent state zero by default.
+        The ignore column indicates the fraction of state images that were identified as belonging to a spurious latent state and are excluded from the final clustering.
+    }
+    \label{fig:combination-lock-experiment}
+\end{figure}
+
+As illustrated in Figure~\ref{fig:epsilon-cluster}, for the cluster algorithm to converge to a maximally compressed representation, the predictions made by the neural networks must be within some $\varepsilon$ of the true prediction target.
+Depending on the task and training data set, this objective may be difficult to satisfy.
+\citet{belkin2019doubledescent} presented the double-descent curve, which suggests that it is possible to accurately approximate any function with large enough neural network architectures.
+In this section we test the assumption that all predictions must be $\varepsilon$ accurate by running the clustering algorithm on a data set sampled from the Combination Lock task (Figure~\ref{fig:combination-lock-experiment}).
+In this task, the agent decides which dial to rotate on each step to unlock a numbered combination lock (schematic in Figure~\ref{fig:combination-lock-train}).
+Here, state observations are assembled using training images from the MNIST data set~\citep{lecun1998mnist} and display three digits visualizing the current number combination of the lock.
+To compute a reward-predictive representation for this task, we adapt our clustering algorithm to process images using the ResNet18 architecture~\citep{pytorch,he2016resnet} for approximating one-step rewards and next latent states.
+For all experiments we initialize all network weights randomly and do not provide any pre-trained weights.
+The full details of this experiment are documented in Appendix~\ref{app:experiments}.
+
+In this task, a reward-predictive representation network has to not only generalize across variations in individual digits, but also learn to ignore the rightmost digit.
+The matrix plot in Figure~\ref{fig:combination-lock-clustering} illustrates how the reward-predictive representation network learned by the clustering algorithm generalizes across the different state observations.
+Intuitively, this plot is similar to a confusion matrix: 
+Each row plots the distribution over latent states for all images that match a specific combination pattern.
+For example, the first row plots the latent state distribution for all images that match the pattern $(0,0,*)$ (left and middle dial are set to zero, the right dial can be any digit), the second row plots the distribution for the pattern $(0,1,*)$, and so on.
+In total the clustering algorithm correctly inferred 100 reward-predictive latent states and correctly ignores the rightmost digit, abstracting it away from the state input.
+Prediction errors can contort the clustering in two ways:
+\begin{enumerate}
+    \item If prediction errors are high, then a state observation can be associated with the wrong latent state. 
+    For example, an image with combination $(0,1,4)$ could be associated with the latent state corresponding to the pattern $(0,7,*)$.
+    \item If prediction errors are low but still larger than the threshold $\varepsilon_\psi$ or $\varepsilon_r$, then some predictions can be assigned into their own cluster and a spurious latent state is created.
+    These spurious states appear as latent states that are associated with a small number of state observations.
+\end{enumerate}
+Figure~\ref{fig:combination-lock-clustering} indicates that the first prediction error type does not occur because all off-diagonal elements are exactly zero.
+This is because a large enough network architecture is trained to a high enough accuracy.
+However, the second prediction error type does occur.
+In this case, latent states that are associated with very few state observations are masked out of the data set used for training the neural network (line~\ref{alg-line:erm-sf} in Algorithm~\ref{alg:cluster}).
+These states are plotted in the ignore column (right-most column) in Figure~\ref{fig:combination-lock-clustering}.
+In total, less than 0.5\% of the data set are withheld and the clustering algorithm has inferred 100 latent states.
+Consequently, the learned reward-predictive representation uses as few latent states as possible and is maximally compressed.
+
+Figure~\ref{fig:combination-lock-reward-errors} plots the reward-sequence error distribution for a representation network at different refinement stages.
+Here, 1000 independently sampled test trajectories were generated using images from the MNIST test set.
+One can see that initially reward sequence prediction errors are high and then converge towards zero as the refinement algorithm progresses.
+Finally, almost all reward sequences are predicted accurately but not perfectly, because a distinct test image set is used and the representation network occasionally predicts an incorrect latent state.
+This is a failure in the vision model---if the convolutional neural network would perfectly classify images into the latent states extracted by the clustering algorithm, then the reward sequence prediction errors would be exactly zero (similar to the Column World example in Figure~\ref{fig:column-world-reward-sequence-errors}).
+Furthermore, if the first transition of a 1000-step roll-out is incorrectly predicted, then all subsequent predictions are incorrect as well.
+Consequently, the reward sequence prediction error measure is sensitive to any prediction errors that may happen when predicting rewards for a long action sequence.
+However, the trend of minimizing reward sequence prediction errors with every refinement iteration is still plainly visible in Figure~\ref{fig:combination-lock-reward-errors}.
+
+\subsection{Improving learning efficiency}
+\label{sec:improving-learning-efficiency}
+
+\begin{figure}
+    \centering
+    \subfigure[
+        Transfer task variants
+    ]{
+        \label{fig:combination-lock-transfer-tasks}
+        \includegraphics[scale=1.]{figure/combination_lock_transfer.pdf}
+    }
+    ~
+    \subfigure[
+        Q-network of reward-predictive agent
+    ]{
+        \label{fig:combination-lock-dqn}
+        \hspace{1cm}
+        \includegraphics[scale=1.]{figure/combination_lock_dqn.pdf}
+        \hspace{1cm}
+    }
+    ~
+    \subfigure[
+        Performance comparison of DQN variants
+    ]{
+        \label{fig:combination-lock-performance}
+        \includegraphics[scale=1.]{figure/combination_lock_performance_v2.pdf}
+    }
+    \caption{
+        Representation transfer in the Combination Lock task.
+        \subref{fig:combination-lock-transfer-tasks}:
+        In the swap digits variant, the transition function is changed such that the first action only swaps the digit between the left and middle dial.
+        Only the middle dial rotates as before and the right dial also does not have any effect on the obtained rewards.
+        Furthermore, the rewarding combination is changed to $(5,6,*)$.
+        The reversed dial variant differs from the training task in that the rotation direction of the middle dial is reversed and the rewarding combination is changed to $(7,4,*)$.
+        The left dial broken variant is similar to the training task but the left dial is broken and spins at random instead of the right dial.
+        Here, the transitions and reward association between different latent states are the same as in the training task with the difference being how different images are associated with different latent states and different action labels having different effects.
+        The rewarding combination is $(*,9,9)$.
+        To ensure that the state images of the test tasks are distinct from the training task, all test tasks construct the state images using the MNIST test image set.
+        \subref{fig:combination-lock-dqn}:
+        The reward-predictive agent replaces all except the top-most layer with the reward-predictive representation network computed by the clustering algorithm for the training task.
+        During training in the test task only the top-most layer receives gradient updates and the representation network's weights are not changed.
+        \subref{fig:combination-lock-performance}:
+        Each agent was trained for 20 different seeds in each task.
+        For each repeat, the pre-trained DQN agent was first trained on the training task and then on the test task.
+        Appendix~\ref{app:experiments} lists all details and additional plots of the experiment.
+    }
+    \label{fig:combination-lock-transfer}
+\end{figure}
+
+Ultimately, the goal of using reward-predictive representations is to speed up learning by re-using abstract task knowledge encoded by a pre-trained representation network.
+In contrast, established meta-learning algorithms such as MAML~\citep{finn2017maml} or the SF-based Generalized Policy Improvement (GPI) algorithm~\citep{barreto2018deepsf,barreto2020fastsf} rely on extracting either one or multiple network initializations to accelerate learning in a test task.
+To empirically test the differences between re-using a pre-trained reward-predictive representation network and using a previously learned network initialization, we now consider three variants of the Combination Lock task (Figure~\ref{fig:combination-lock-transfer-tasks}).
+All variants vary from the training task in their specific transitions, rewards, and optimal policy.
+Furthermore, the state images are generated using MNIST test images to test if a pre-trained agent can generalize what it has seen during pre-training to previously unseen variations of digits.\footnote{This experiment design is similar to using separately sampled training and test data in supervised machine learning.}
+The three task variants require an agent to process the state images differently in order to maximize rewards:
+In the swap digits and reversed dial variants (center and left schematic in Figure~\ref{fig:combination-lock-transfer-tasks}), an agent has to correctly recognize the left and center digit in order to select actions optimally.
+While the effect of different actions and the rewarding combinations differ from the training task, an agent initially processes state images in the same way as in the training task.
+Specifically, because the right dial is still broken and rotates at random, an agent needs to correctly identify the left and center digits and then use that information to make a decision. 
+These two transfer tasks test an agent's ability to adapt to different transitions and rewards while preserving which aspects of the state image---namely the left and center digits---are relevant for decision-making.
+The left dial broken variant (right schematic in Figure~\ref{fig:combination-lock-transfer}) differs in this particular aspect.
+Here, the center and right digits are relevant for reward-sequence prediction and decision-making because the left dial is broken and rotates at random.
+With this task, we test to what extent a pre-trained reward-predictive representation network can be used when state equivalences modelled by the representation network differ between training and test tasks.
+
+To test for positive transfer in a controlled experiment, we train three variants of the DQN algorithm~\citep{mnih2015dqn} and record the average reward per time step spent in each task.
+%A higher reward per time step value means that an agent learns how to maximize rewards faster using less trial-and-error transitions.
+Each DQN variant uses a different Q-network initialisation but all agents use the same network architecture, number of network weights, and hyper-parameters.
+Hyper-parameters were independently fine tuned on the training task in Figure~\ref{fig:combination-lock-train} so as to not bias the hyper-parameter selection towards the used test tasks (and implicitly using information about the test tasks during training).
+In Figure~\ref{fig:combination-lock-performance}, the DQN baseline (shown in blue) initializes networks at random (using Glorot initialization~\citep{glorot2010initialization}) similar to the original DQN agent.
+This agent's performance is used as a reference value in each task.
+The pre-trained DQN agent (shown in orange) first learns to solve the training task, and the learned Q-network weights are then used to initialize the network weights in each test task.
+By pre-training the Q-network in this way, the DQN agent has to adapt the previously learned solution to the test task.
+Here, the pre-trained DQN agent initially repeats the previously learned behaviour---which is not optimal in any of the test tasks---and then has to re-learn the optimal policy for each test task.
+This re-learning seems to negatively impact the overall performance of the agent and it would be more efficient to randomly initialize the network weights (Figure~\ref{fig:combination-lock-performance}).
+
+This approach of adapting a pre-trained Q-network to a test task is used by both MAML and SF-based GPI.
+While these methods rely on extracting information from multiple training tasks, the results in Figure~\ref{fig:combination-lock-performance} demonstrate that if training and test tasks differ sufficiently, then re-using a pre-trained Q-network to initialize learning may negatively impact performance and a new Q-network or policy may have to be learned from scratch~\citep{nemecek2021policycaches}.
+Reward-predictive representations enable a more abstract form of task knowledge re-use that is more robust in this case.
+This is illustrated by the reward-predictive agent in Figure~\ref{fig:combination-lock-performance} that outperforms the other two agents.
+The reward-predictive agent (shown in green in Figure~\ref{fig:combination-lock-performance}) sets all weights except for the top-most linear layer to the weights of the reward-predictive representation network learned by the clustering algorithm for the training task (Figure~\ref{fig:combination-lock-dqn}).
+Furthermore, no weight updates are performed on the representation network itself---only the weights of the top-most linear layer are updated during learning in the test task.
+By re-using the pre-trained representation network, the reward-predictive agent maps all state images into one of the 100 pre-trained latent states resulting in a significant performance improvement.
+This performance improvement constitutes a form of systematic out-of-distribution generalization, because the reward-predictive representation network is not adjusted during training and because trajectories observed when interacting with the test task are out-of-distribution of the trajectories observed during pre-training.
+
+Interestingly, in the left dial broken variant the performance improvement of the reward-predictive agent is even more significant.
+This result is unexpected, because in this case the state equivalences modelled by the transferred representation function differ between the training and the test tasks:
+In the training task, the right dial is irrelevant for decision-making and can be abstracted away whereas in the test task the left dial is irrelevant for decision-making and can be abstracted away instead.
+Consequently, a representation that is reward-predictive in the training task is not reward-predictive in the left dial broken test task and an RL agent would have to re-train a previously learned representation for it be reward predictive in the test task. % where the right dial becomes relevant for reward sequence prediction.
+Nevertheless, the reward-predictive representation network can still be used to maximize rewards in this task variant:
+The agent first learns to rotate the center dial to the rewarding digit ``9''.
+This is possible because the network can still leverage parts of the reward-predictive abstraction that remain useful for the new task. 
+In this case, the center digits are still important as they were in the original task and the reward-predictive representation network maps distinct center digits to distinct latent states, 
+although the combination $(1,9,*)$ and $(2,9,*)$ are mapped to different latent states given the representation learned in the training task.
+Once the center dial is set to the digit ``9'', the agent can simply learn a high Q-value for the action associated with rotating the third dial, and it does so until the rewarding combination is received.
+Because the reward predictive agent is a variant of DQN and initializes Q-values to be close to zero, the moment the algorithm increases a Q-value through a temporal-difference update, the agent keeps repeating this action with every greedy action selection step and does not explore all possible states, resulting in a significant performance improvement.\footnote{For all experiments we use a $\varepsilon$-greedy action selection strategy that initially selects actions uniformly at random but becomes greedy with respect to the predicted Q-values within the first 10 episodes.}
+While the reward-predictive representation network cannot be used to predict reward-sequences or event Q-values accurately, the Q-value predictions learned by the agent are sufficient to still find an optimal policy quickly in this test task.
+Of course, one could imagine test tasks where this is not the case and the agent would have to learn a new policy from scratch.
+
+This experiment highlights how reward-predictive representation networks can be used for systematic out-of-distribution generalization.
+Because the representation network only encodes state equivalences, the network can be used across tasks with different transitions and rewards.
+However, if different state equivalences are necessary for reward prediction in a test task, then it may or may not be possible to learn an optimal policy without modifying the representation network.
+The left dial broken test task in Figure~\ref{fig:combination-lock-experiment} presents a case where state equivalences differ from the training task but it is still possible to accelerate learning of an optimal policy significantly.
+
+% MLL: For the sake of honesty, should we have included a similar case where learning is NOT sped up?
+
+\section{Discussion}
+
+In this article, we present a clustering algorithm to compute reward-predictive representations that use as few latent states as possible.
+Unlike prior work~\citep{lehnert2020lsfm,lehnert2018modelfeatures}, which learns reward-predictive representations through end-to-end gradient descent, our approach is similar to the block splitting method presented by~\citet{givan2003bisimulation} for learning which two states are bisimilar in an MDP.
+By starting with a single latent state and then iteratively introducing additional latent states to minimize SF prediction errors where necessary, the final number of latent states is minimized.
+Intuitively, this refinement is similar to temporal-difference learning, where values are first updated where rewards occur and subsequently value updates are bootstrapped at other states.
+The clustering algorithm computes a reward-predictive representation in a similar way, by first refining a state representation around changes in one-step rewards and subsequently bootstrapping from this representation to further refine the state clustering.
+This leads to a maximally compressed latent state space, which is important for abstracting away information from the state input and enabling an agent to efficiently generalize across states (as demonstrated by the generalization experiments in Section~\ref{sec:improving-learning-efficiency}).
+Such latent state space compression cannot be accomplished by auto-encoder based architectures~\citep{ha2018worldmodel} or frame prediction architectures~\citep{oh2015frameprediction,leibfried2016modelplusr,weber2017imagination} because a decoder network requires the latent state to be predictive of the entire task state.
+Therefore, these methods encode the entire task state in a latent state without abstracting any part of the task state information away.
+
+Prior work~\citep{ferns2004bisimmetrics,comanici2015basis,gelada2019deepmdp,zhang2020bmdptransfer,zhang2021invariantrepresentations} has focused on using the Wasserstein metric to measure how bisimilar two states are.
+Computing the Wasserstein metric between two states is often difficult in practice, because it requires solving an optimization problem for every distance calculation and it assumes a measurable state space---an assumption that is difficult to satisfy when working with visual control tasks for example.
+Here, approximations of the Wasserstein metric are often used but these methods introduce other assumptions instead, such as a normally distributed next latent states~\citep{zhang2021invariantrepresentations} or a Lipschitz continuous transition function where the Lipschitz factor is $1/\gamma$~\citep{gelada2019deepmdp}\footnote{Here, $\gamma \in (0,1)$ is the discount factor.}.
+The presented refinement method does not require such assumptions, because the presented algorithm directly clusters one-step rewards and SFs for arbitrary transition and reward functions.
+SFs, which encode the frequencies of future states, provide a different avenue to computing which two states are bisimilar without requiring a distance function on probability distributions such as the Wasserstein metric.
+Nonetheless, using the Wasserstein metric to determine state bisimilarity may provide an avenue for over-compressing the latent state space at the expense of increasing prediction errors~\citep{ferns2004bisimmetrics,comanici2015basis} (for example, compressing the Combination Lock task into 90 latent states instead of 100).
+
+A key challenge in scaling model-based RL algorithms is the fact that these agents are evaluated on their predictive performance.
+Consequently, any approximation errors (caused by not adhering to the $\varepsilon$-perfection assumption illustrated in Figure~\ref{fig:epsilon-cluster}) impact the resulting model's predictive performance---a property common to model-based RL algorithms~\citep{talvitie2017approxmb,talvitie2018rewardsformisspecifiedmodel,asadi2018lipschitzmb}. 
+Evaluating a model's predictive performance is more stringent than what is typically used for model-free RL algorithms such as DQN.
+Typically, model-free RL algorithms are evaluated on the learned optimal policy's performance and are not evaluated on their predictive performance.
+For example, while DQN can learn an optimal policy for a task, the learned Q-network's prediction errors may still be high for some inputs~\citep{witty2018generalization}.
+Prediction errors of this type are often tolerated, because model-free RL algorithms are benchmarked based on the learned policy's ability to maximize rewards and not their accuracy of predicting quantities such as Q-values or rewards.
+This is the case for most existing deep RL algorithms that are effectively model-based and model-free hybrid architectures~\citep{oh2017value,silver2017predictron,gelada2019deepmdp,schrittwieser2019muzero,zhang2021invariantrepresentations}---these models predict reward-sequences only over very short horizons (for example,~\citet{oh2017value} use 10 time steps).
+In contrast, reward-predictive representations are evaluated for their prediction accuracy.
+To achieve low prediction errors, the presented results suggest that finding $\varepsilon$-perfect approximations becomes important.
+Furthermore, the simulations on the MNIST combination-lock task demonstrate that this goal can be accomplished by using a larger neural network architecture.
+
+To compute a maximally compressed representation, the presented clustering algorithm needs to have access to the entire trajectory training data set at once.
+How to implement this algorithm in an online learning setting---a setting where the agent observes the different transitions and rewards of a task as a data stream---is not clear at this point.
+To implement an online learning algorithm, an agent would need to assign incoming state observations to already existing state partitions.
+Without such an operation it would not be possible to compute a reward-predictive representation that still abstracts away certain aspects from the state itself.
+Because the presented clustering method is based on the idea of refining state partitions, it is currently difficult to design an online learning agent that does not always re-run the full clustering algorithm on the history of all transitions the agent observed.
+
+One assumption made in the presented experiments is that a task's state space can always be compressed into a small enough finite latent space.
+This assumption is not restrictive, because any (discrete time) RL agent only observes a finite number of transitions and states at any given time point.
+Consequently, all state observations can always be compressed into a finite number of latent states, similar to block MDPs~\citep{du2019bmdp}.
+Furthermore, the presented method always learns a fully conjunctive representation.
+In the combination-lock examples, the reward-predictive representation associates a different latent state (one-hot vector) with each relevant combination pattern.
+This representation is conjunctive because it does not model the fact that the dials rotate independently.
+A disjunctive or factored representation could map each of the three dials independently into three separate latent state vectors and a concatenation of these vectors could be used to describe the task's latent state.
+Such a latent representation is similar to factored representations used in prior work~\citep{guestrin2003factoredmdp,diuk2008oomdp} and these factored representations permit a more compositional form of generalization across different tasks~\citep{kansky2017schemarl,battaglia2016interactionnetworks,chang2016neuralphysicsengine}.
+How to extract such factored representations from unstructured state spaces such as images still remains a challenging problem.
+We leave such an extension to future work.
+
+Prior work on (Deep) SF transfer~\citep{barreto2018deepsf,barreto2020fastsf,kulkarni2016deep,zhang2017deepsucc}, meta-learning~\citep{finn2017maml}, or multi-task learning~\citep{rusu2015policydistillation,eramo2020sharingq} has focused on extracting an inductive bias from a set of tasks to accelerate learning in subsequent tasks.
+These methods transfer a value function or policy model to initialize and accelerate learning.
+Because these methods transfer a model of a task's policy, these models have to be adapted to each transfer task, if the transfer task's optimal policy differs from the previously learned policies.
+Reward-predictive representations overcome this limitation by only modelling how to generalize across different states.
+Because reward-predictive representations do not encode the specifics of how to transition between different latent states or how latent states are tied to rewards, these representations are robust to changes in transitions and rewards.
+Furthermore, the reward-predictive representation network is learned using a single task and the resulting network is sufficient to demonstrate positive transfer across different transitions and rewards.
+This form of transfer is also different from the method presented by~\citet{zhang2020bmdptransfer}, where the focus is on extracting a common task structure from a set of tasks instead of learning a representation from a single task and transferring it to different test tasks.
+% This property stands also in contrast to 
+% % MLL: I'm not sure how to fix this sentence. It seems like a type mismatch to me to compare a property to a paper. Is there a property in that paper that we're talking about? Or maybe it's the two approaches that are being compared?
+% \citet{zhang2020bmdptransfer}, where the focus is on extracting a common task structure from a set of tasks.
+Still, in a lifelong learning scenario, re-using the same reward-predictive representation network to solve every task may not be possible because an agent may have to generalize across different states (as demonstrated by the left dial broken combination lock variant in Section~\ref{sec:improving-learning-efficiency}).
+In this article, we analyze the generalization properties of reward-predictive representations through A-B transfer experiments.
+While~\citet{lehnert2020reward} already present a (non-parametric) meta-learning model that uses reward-predictive representations to accelerate learning in finite MDPs, we leave how to integrate the presented clustering algorithm into existing meta-learning frameworks commonly used in deep RL---such as~\citet{barreto2018deepsf} or~\citet{finn2017maml}---for future work.
+
+\section{Conclusion}
+
+We presented a clustering algorithm to compute reward-predictive representations that introduces as few latent states as possible.
+The algorithm works by iteratively refining a state representation using a temporal difference error that is defined on state features.
+Furthermore, we analyze under which assumptions the resulting representation networks are suitable for systematic out-of-distribution generalization and demonstrate that reward-predictive representation networks enable RL agents to re-use abstract task knowledge to improve their learning efficiency.
+
+\subsubsection*{Acknowledgments}
+We would like to thank Alana Jaskir for insightful discussions on this work.
+Lucas Lehnert performed most of this work at Brown University.
+At Brown University, he was funded in part by NIH T32MH115895 Training program for Interactionist Cognitive Neuroscience.
+
+
+\bibliographystyle{tmlr}
+% \bibliography{library}
+\begin{thebibliography}{55}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Abel et~al.(2018)Abel, Arumugam, Lehnert, and Littman]{abel2018sa}
+David Abel, Dilip Arumugam, Lucas Lehnert, and Michael Littman.
+\newblock State abstractions for lifelong reinforcement learning.
+\newblock In Jennifer Dy and Andreas Krause (eds.), \emph{Proceedings of the
+  35th International Conference on Machine Learning}, volume~80 of
+  \emph{Proceedings of Machine Learning Research}, pp.\  10--19,
+  Stockholmsm{\"a}ssan, Stockholm Sweden, 10--15 Jul 2018. PMLR.
+\newblock URL \url{http://proceedings.mlr.press/v80/abel18a.html}.
+
+\bibitem[Asadi et~al.(2018)Asadi, Misra, and Littman]{asadi2018lipschitzmb}
+Kavosh Asadi, Dipendra Misra, and Michael Littman.
+\newblock {L}ipschitz continuity in model-based reinforcement learning.
+\newblock In Jennifer Dy and Andreas Krause (eds.), \emph{Proceedings of the
+  35th International Conference on Machine Learning}, volume~80 of
+  \emph{Proceedings of Machine Learning Research}, pp.\  264--273,
+  Stockholmsm{\"a}ssan, Stockholm Sweden, 10--15 Jul 2018. PMLR.
+\newblock URL \url{http://proceedings.mlr.press/v80/asadi18a.html}.
+
+\bibitem[Barreto et~al.(2017)Barreto, Dabney, Munos, Hunt, Schaul, van Hasselt,
+  and Silver]{barreto2017sf}
+Andr{\'e} Barreto, Will Dabney, R{\'e}mi Munos, Jonathan~J Hunt, Tom Schaul,
+  Hado~P van Hasselt, and David Silver.
+\newblock Successor features for transfer in reinforcement learning.
+\newblock In \emph{Advances in Neural Information Processing Systems}, pp.\
+  4055--4065, 2017.
+
+\bibitem[Barreto et~al.(2018)Barreto, Borsa, Quan, Schaul, Silver, Hessel,
+  Mankowitz, Zidek, and Munos]{barreto2018deepsf}
+Andre Barreto, Diana Borsa, John Quan, Tom Schaul, David Silver, Matteo Hessel,
+  Daniel Mankowitz, Augustin Zidek, and Remi Munos.
+\newblock Transfer in deep reinforcement learning using successor features and
+  generalised policy improvement.
+\newblock In Jennifer Dy and Andreas Krause (eds.), \emph{Proceedings of the
+  35th International Conference on Machine Learning}, volume~80 of
+  \emph{Proceedings of Machine Learning Research}, pp.\  501--510,
+  Stockholmsm{\"a}ssan, Stockholm Sweden, 10--15 Jul 2018. PMLR.
+\newblock URL \url{http://proceedings.mlr.press/v80/barreto18a.html}.
+
+\bibitem[Barreto et~al.(2020)Barreto, Hou, Borsa, Silver, and
+  Precup]{barreto2020fastsf}
+Andr{\'e} Barreto, Shaobo Hou, Diana Borsa, David Silver, and Doina Precup.
+\newblock Fast reinforcement learning with generalized policy updates.
+\newblock \emph{Proceedings of the National Academy of Sciences}, 117\penalty0
+  (48):\penalty0 30079--30087, 2020.
+
+\bibitem[Battaglia et~al.(2016)Battaglia, Pascanu, Lai, Rezende, and
+  kavukcuoglu]{battaglia2016interactionnetworks}
+Peter Battaglia, Razvan Pascanu, Matthew Lai, Danilo~Jimenez Rezende, and Koray
+  kavukcuoglu.
+\newblock Interaction networks for learning about objects, relations and
+  physics.
+\newblock In \emph{Proceedings of the 30th International Conference on Neural
+  Information Processing Systems}, NIPS'16, pp.\  4509–4517, Red Hook, NY,
+  USA, 2016. Curran Associates Inc.
+\newblock ISBN 9781510838819.
+
+\bibitem[Belkin et~al.(2019)Belkin, Hsu, Ma, and
+  Mandal]{belkin2019doubledescent}
+Mikhail Belkin, Daniel Hsu, Siyuan Ma, and Soumik Mandal.
+\newblock Reconciling modern machine-learning practice and the classical
+  bias{\textendash}variance trade-off.
+\newblock \emph{Proceedings of the National Academy of Sciences}, 116\penalty0
+  (32):\penalty0 15849--15854, 2019.
+\newblock ISSN 0027-8424.
+\newblock \doi{10.1073/pnas.1903070116}.
+\newblock URL \url{https://www.pnas.org/content/116/32/15849}.
+
+\bibitem[Chang et~al.(2016)Chang, Ullman, Torralba, and
+  Tenenbaum]{chang2016neuralphysicsengine}
+Michael~B Chang, Tomer Ullman, Antonio Torralba, and Joshua~B Tenenbaum.
+\newblock A compositional object-based approach to learning physical dynamics.
+\newblock \emph{arXiv preprint arXiv:1612.00341}, 2016.
+
+\bibitem[Comanici et~al.(2015)Comanici, Precup, and
+  Panangaden]{comanici2015basis}
+Gheorghe Comanici, Doina Precup, and Prakash Panangaden.
+\newblock Basis refinement strategies for linear value function approximation
+  in {MDP}s.
+\newblock In \emph{Advances in Neural Information Processing Systems}, pp.\
+  2899--2907, 2015.
+
+\bibitem[Dayan(1993)]{dayan1993successor}
+Peter Dayan.
+\newblock Improving generalization for temporal difference learning: The
+  successor representation.
+\newblock \emph{Neural Computation}, 5\penalty0 (4):\penalty0 613--624, 1993.
+
+\bibitem[D'Eramo et~al.(2020)D'Eramo, Tateo, Bonarini, Restelli, and
+  Peters]{eramo2020sharingq}
+Carlo D'Eramo, Davide Tateo, Andrea Bonarini, Marcello Restelli, and Jan
+  Peters.
+\newblock Sharing knowledge in multi-task deep reinforcement learning.
+\newblock In \emph{International Conference on Learning Representations}, 2020.
+\newblock URL \url{https://openreview.net/forum?id=rkgpv2VFvr}.
+
+\bibitem[Diuk et~al.(2008)Diuk, Cohen, and Littman]{diuk2008oomdp}
+Carlos Diuk, Andre Cohen, and Michael~L. Littman.
+\newblock An object-oriented representation for efficient reinforcement
+  learning.
+\newblock In \emph{Proceedings of the 25th International Conference on Machine
+  Learning}, ICML '08, pp.\  240–247, New York, NY, USA, 2008. Association
+  for Computing Machinery.
+\newblock ISBN 9781605582054.
+\newblock \doi{10.1145/1390156.1390187}.
+\newblock URL \url{https://doi.org/10.1145/1390156.1390187}.
+
+\bibitem[Du et~al.(2019)Du, Krishnamurthy, Jiang, Agarwal, Dud{\'\i}k, and
+  Langford]{du2019bmdp}
+Simon~S Du, Akshay Krishnamurthy, Nan Jiang, Alekh Agarwal, Miroslav
+  Dud{\'\i}k, and John Langford.
+\newblock Provably efficient rl with rich observations via latent state
+  decoding.
+\newblock \emph{arXiv preprint arXiv:1901.09018}, 2019.
+
+\bibitem[Ferns et~al.(2004)Ferns, Panangaden, and
+  Precup]{ferns2004bisimmetrics}
+Norm Ferns, Prakash Panangaden, and Doina Precup.
+\newblock Metrics for finite markov decision processes.
+\newblock In \emph{Proceedings of the 20th conference on Uncertainty in
+  artificial intelligence}, pp.\  162--169. AUAI Press, 2004.
+
+\bibitem[Finn et~al.(2017)Finn, Abbeel, and Levine]{finn2017maml}
+Chelsea Finn, Pieter Abbeel, and Sergey Levine.
+\newblock Model-agnostic meta-learning for fast adaptation of deep networks.
+\newblock \emph{arXiv preprint arXiv:1703.03400}, 2017.
+
+\bibitem[Franklin \& Frank(2018)Franklin and Frank]{franklin2018compositional}
+Nicholas~T Franklin and Michael~J Frank.
+\newblock Compositional clustering in task structure learning.
+\newblock \emph{PLoS computational biology}, 14\penalty0 (4):\penalty0
+  e1006116, 2018.
+
+\bibitem[Gelada et~al.(2019)Gelada, Kumar, Buckman, Nachum, and
+  Bellemare]{gelada2019deepmdp}
+Carles Gelada, Saurabh Kumar, Jacob Buckman, Ofir Nachum, and Marc~G Bellemare.
+\newblock Deep{MDP}: Learning continuous latent space models for representation
+  learning.
+\newblock In \emph{International Conference on Machine Learning}, pp.\
+  2170--2179, 2019.
+
+\bibitem[Givan et~al.(2003)Givan, Dean, and Greig]{givan2003bisimulation}
+Robert Givan, Thomas Dean, and Matthew Greig.
+\newblock Equivalence notions and model minimization in {M}arkov decision
+  processes.
+\newblock \emph{Artificial Intelligence}, 147\penalty0 (1):\penalty0 163--223,
+  2003.
+
+\bibitem[Glorot \& Bengio(2010)Glorot and Bengio]{glorot2010initialization}
+Xavier Glorot and Yoshua Bengio.
+\newblock Understanding the difficulty of training deep feedforward neural
+  networks.
+\newblock In Yee~Whye Teh and Mike Titterington (eds.), \emph{Proceedings of
+  the Thirteenth International Conference on Artificial Intelligence and
+  Statistics}, volume~9 of \emph{Proceedings of Machine Learning Research},
+  pp.\  249--256, Chia Laguna Resort, Sardinia, Italy, 13--15 May 2010. JMLR
+  Workshop and Conference Proceedings.
+\newblock URL \url{http://proceedings.mlr.press/v9/glorot10a.html}.
+
+\bibitem[Goodfellow et~al.(2016)Goodfellow, Bengio, and
+  Courville]{goodfellow2016deeplearning}
+Ian Goodfellow, Yoshua Bengio, and Aaron Courville.
+\newblock \emph{Deep Learning}.
+\newblock MIT Press, 2016.
+\newblock \url{http://www.deeplearningbook.org}.
+
+\bibitem[Guestrin et~al.(2003)Guestrin, Koller, Parr, and
+  Venkataraman]{guestrin2003factoredmdp}
+Carlos Guestrin, Daphne Koller, Ronald Parr, and Shobha Venkataraman.
+\newblock Efficient solution algorithms for factored mdps.
+\newblock \emph{Journal of Artificial Intelligence Research}, 19:\penalty0
+  399--468, 2003.
+
+\bibitem[Ha \& Schmidhuber(2018)Ha and Schmidhuber]{ha2018worldmodel}
+David Ha and J{\"u}rgen Schmidhuber.
+\newblock World models.
+\newblock \emph{arXiv preprint arXiv:1803.10122}, 2018.
+
+\bibitem[He et~al.(2016)He, Zhang, Ren, and Sun]{he2016resnet}
+Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun.
+\newblock Deep residual learning for image recognition.
+\newblock In \emph{Proceedings of the IEEE conference on computer vision and
+  pattern recognition}, pp.\  770--778, 2016.
+
+\bibitem[Kansky et~al.(2017)Kansky, Silver, M{\'e}ly, Eldawy,
+  L{\'a}zaro-Gredilla, Lou, Dorfman, Sidor, Phoenix, and
+  George]{kansky2017schemarl}
+Ken Kansky, Tom Silver, David~A M{\'e}ly, Mohamed Eldawy, Miguel
+  L{\'a}zaro-Gredilla, Xinghua Lou, Nimrod Dorfman, Szymon Sidor, Scott
+  Phoenix, and Dileep George.
+\newblock Schema networks: Zero-shot transfer with a generative causal model of
+  intuitive physics.
+\newblock \emph{arXiv preprint arXiv:1706.04317}, 2017.
+
+\bibitem[Kingma \& Ba(2014)Kingma and Ba]{kingma2014adam}
+Diederik~P. Kingma and Jimmy Ba.
+\newblock Adam: {A} method for stochastic optimization.
+\newblock \emph{CoRR}, abs/1412.6980, 2014.
+\newblock URL \url{http://arxiv.org/abs/1412.6980}.
+
+\bibitem[Kulkarni et~al.(2016)Kulkarni, Saeedi, Gautam, and
+  Gershman]{kulkarni2016deep}
+Tejas~D Kulkarni, Ardavan Saeedi, Simanta Gautam, and Samuel~J Gershman.
+\newblock Deep successor reinforcement learning.
+\newblock \emph{arXiv preprint arXiv:1606.02396}, 2016.
+
+\bibitem[{Lecun} et~al.(1998){Lecun}, {Bottou}, {Bengio}, and
+  {Haffner}]{lecun1998mnist}
+Y.~{Lecun}, L.~{Bottou}, Y.~{Bengio}, and P.~{Haffner}.
+\newblock Gradient-based learning applied to document recognition.
+\newblock \emph{Proceedings of the IEEE}, 86\penalty0 (11):\penalty0
+  2278--2324, 1998.
+\newblock \doi{10.1109/5.726791}.
+
+\bibitem[Lehnert \& Littman(2018)Lehnert and Littman]{lehnert2018modelfeatures}
+Lucas Lehnert and Michael~L Littman.
+\newblock Transfer with model features in reinforcement learning.
+\newblock \emph{arXiv preprint arXiv:1807.01736}, 2018.
+
+\bibitem[Lehnert \& Littman(2020)Lehnert and Littman]{lehnert2020lsfm}
+Lucas Lehnert and Michael~L Littman.
+\newblock Successor features combine elements of model-free and model-based
+  reinforcement learning.
+\newblock \emph{Journal of Machine Learning Research}, 21\penalty0
+  (196):\penalty0 1--53, 2020.
+
+\bibitem[Lehnert et~al.(2017)Lehnert, Tellex, and Littman]{lehnert2017sf}
+Lucas Lehnert, Stefanie Tellex, and Michael~L Littman.
+\newblock Advantages and limitations of using successor features for transfer
+  in reinforcement learning.
+\newblock \emph{arXiv preprint arXiv:1708.00102}, 2017.
+
+\bibitem[Lehnert et~al.(2020)Lehnert, Littman, and Frank]{lehnert2020reward}
+Lucas Lehnert, Michael~L Littman, and Michael~J Frank.
+\newblock Reward-predictive representations generalize across tasks in
+  reinforcement learning.
+\newblock \emph{PLoS computational biology}, 16\penalty0 (10):\penalty0
+  e1008317, 2020.
+
+\bibitem[Leibfried et~al.(2016)Leibfried, Kushman, and
+  Hofmann]{leibfried2016modelplusr}
+Felix Leibfried, Nate Kushman, and Katja Hofmann.
+\newblock A deep learning approach for joint video frame and reward prediction
+  in atari games.
+\newblock \emph{arXiv preprint arXiv:1611.07078}, 2016.
+
+\bibitem[Levine et~al.(2020)Levine, Kumar, Tucker, and Fu]{levine2020offlinerl}
+Sergey Levine, Aviral Kumar, George Tucker, and Justin Fu.
+\newblock Offline reinforcement learning: Tutorial, review, and perspectives on
+  open problems.
+\newblock \emph{CoRR}, abs/2005.01643, 2020.
+\newblock URL \url{https://arxiv.org/abs/2005.01643}.
+
+\bibitem[Mnih et~al.(2013)Mnih, Kavukcuoglu, Silver, Graves, Antonoglou,
+  Wierstra, and Riedmiller]{minh2013dqn}
+Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Alex Graves, Ioannis
+  Antonoglou, Daan Wierstra, and Martin~A. Riedmiller.
+\newblock Playing atari with deep reinforcement learning.
+\newblock \emph{CoRR}, abs/1312.5602, 2013.
+\newblock URL \url{http://arxiv.org/abs/1312.5602}.
+
+\bibitem[Mnih et~al.(2015)Mnih, Kavukcuoglu, Silver, Rusu, Veness, Bellemare,
+  Graves, Riedmiller, Fidjeland, Ostrovski, et~al.]{mnih2015dqn}
+Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei~A Rusu, Joel Veness,
+  Marc~G Bellemare, Alex Graves, Martin Riedmiller, Andreas~K Fidjeland, Georg
+  Ostrovski, et~al.
+\newblock Human-level control through deep reinforcement learning.
+\newblock \emph{Nature}, 518\penalty0 (7540):\penalty0 529--533, 2015.
+
+\bibitem[Momennejad et~al.(2017)Momennejad, Russek, Cheong, Botvinick, Daw, and
+  Gershman]{momennejad2017successor}
+Ida Momennejad, Evan~M Russek, Jin~H Cheong, Matthew~M Botvinick, ND~Daw, and
+  Samuel~J Gershman.
+\newblock The successor representation in human reinforcement learning.
+\newblock \emph{Nature Human Behaviour}, 1\penalty0 (9):\penalty0 680, 2017.
+
+\bibitem[Nemecek \& Parr(2021)Nemecek and Parr]{nemecek2021policycaches}
+Mark Nemecek and Ronald Parr.
+\newblock Policy caches with successor features.
+\newblock In Marina Meila and Tong Zhang (eds.), \emph{Proceedings of the 38th
+  International Conference on Machine Learning}, volume 139 of
+  \emph{Proceedings of Machine Learning Research}, pp.\  8025--8033. PMLR,
+  18--24 Jul 2021.
+\newblock URL \url{https://proceedings.mlr.press/v139/nemecek21a.html}.
+
+\bibitem[Oh et~al.(2015)Oh, Guo, Lee, Lewis, and Singh]{oh2015frameprediction}
+Junhyuk Oh, Xiaoxiao Guo, Honglak Lee, Richard~L Lewis, and Satinder Singh.
+\newblock Action-conditional video prediction using deep networks in atari
+  games.
+\newblock In \emph{Advances in Neural Information Processing Systems}, pp.\
+  2863--2871, 2015.
+
+\bibitem[Oh et~al.(2017)Oh, Singh, and Lee]{oh2017value}
+Junhyuk Oh, Satinder Singh, and Honglak Lee.
+\newblock Value prediction network.
+\newblock \emph{arXiv preprint arXiv:1707.03497}, 2017.
+
+\bibitem[Paszke et~al.(2019)Paszke, Gross, Massa, Lerer, Bradbury, Chanan,
+  Killeen, Lin, Gimelshein, Antiga, Desmaison, Kopf, Yang, DeVito, Raison,
+  Tejani, Chilamkurthy, Steiner, Fang, Bai, and Chintala]{pytorch}
+Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory
+  Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban
+  Desmaison, Andreas Kopf, Edward Yang, Zachary DeVito, Martin Raison, Alykhan
+  Tejani, Sasank Chilamkurthy, Benoit Steiner, Lu~Fang, Junjie Bai, and Soumith
+  Chintala.
+\newblock Pytorch: An imperative style, high-performance deep learning library.
+\newblock In H.~Wallach, H.~Larochelle, A.~Beygelzimer, F.~d\textquotesingle
+  Alch\'{e}-Buc, E.~Fox, and R.~Garnett (eds.), \emph{Advances in Neural
+  Information Processing Systems}, volume~32. Curran Associates, Inc., 2019.
+\newblock URL
+  \url{https://proceedings.neurips.cc/paper/2019/file/bdbca288fee7f92f2bfa9f7012727740-Paper.pdf}.
+
+\bibitem[Russek et~al.(2017)Russek, Momennejad, Botvinick, Gershman, and
+  Daw]{russek2017predictive}
+Evan~M Russek, Ida Momennejad, Matthew~M Botvinick, Samuel~J Gershman, and
+  Nathaniel~D Daw.
+\newblock Predictive representations can link model-based reinforcement
+  learning to model-free mechanisms.
+\newblock \emph{PLoS computational biology}, 13\penalty0 (9):\penalty0
+  e1005768, 2017.
+
+\bibitem[Rusu et~al.(2015)Rusu, Colmenarejo, Gulcehre, Desjardins, Kirkpatrick,
+  Pascanu, Mnih, Kavukcuoglu, and Hadsell]{rusu2015policydistillation}
+Andrei~A Rusu, Sergio~Gomez Colmenarejo, Caglar Gulcehre, Guillaume Desjardins,
+  James Kirkpatrick, Razvan Pascanu, Volodymyr Mnih, Koray Kavukcuoglu, and
+  Raia Hadsell.
+\newblock Policy distillation.
+\newblock \emph{arXiv preprint arXiv:1511.06295}, 2015.
+
+\bibitem[Schrittwieser et~al.(2019)Schrittwieser, Antonoglou, Hubert, Simonyan,
+  Sifre, Schmitt, Guez, Lockhart, Hassabis, Graepel,
+  et~al.]{schrittwieser2019muzero}
+Julian Schrittwieser, Ioannis Antonoglou, Thomas Hubert, Karen Simonyan,
+  Laurent Sifre, Simon Schmitt, Arthur Guez, Edward Lockhart, Demis Hassabis,
+  Thore Graepel, et~al.
+\newblock Mastering atari, go, chess and shogi by planning with a learned
+  model.
+\newblock \emph{arXiv preprint arXiv:1911.08265}, 2019.
+
+\bibitem[Silver et~al.(2016)Silver, Huang, Maddison, Guez, Sifre, Van
+  Den~Driessche, Schrittwieser, Antonoglou, Panneershelvam, Lanctot,
+  et~al.]{silver2016alphago}
+David Silver, Aja Huang, Chris~J Maddison, Arthur Guez, Laurent Sifre, George
+  Van Den~Driessche, Julian Schrittwieser, Ioannis Antonoglou, Veda
+  Panneershelvam, Marc Lanctot, et~al.
+\newblock Mastering the game of go with deep neural networks and tree search.
+\newblock \emph{Nature}, 529\penalty0 (7587):\penalty0 484--489, 2016.
+
+\bibitem[Silver et~al.(2017{\natexlab{a}})Silver, Hasselt, Hessel, Schaul,
+  Guez, Harley, Dulac-Arnold, Reichert, Rabinowitz, Barreto,
+  et~al.]{silver2017predictron}
+David Silver, Hado Hasselt, Matteo Hessel, Tom Schaul, Arthur Guez, Tim Harley,
+  Gabriel Dulac-Arnold, David Reichert, Neil Rabinowitz, Andre Barreto, et~al.
+\newblock The predictron: End-to-end learning and planning.
+\newblock In \emph{International Conference on Machine Learning}, pp.\
+  3191--3199. PMLR, 2017{\natexlab{a}}.
+
+\bibitem[Silver et~al.(2017{\natexlab{b}})Silver, Schrittwieser, Simonyan,
+  Antonoglou, Huang, Guez, Hubert, Baker, Lai, Bolton,
+  et~al.]{silver2017alghagozero}
+David Silver, Julian Schrittwieser, Karen Simonyan, Ioannis Antonoglou, Aja
+  Huang, Arthur Guez, Thomas Hubert, Lucas Baker, Matthew Lai, Adrian Bolton,
+  et~al.
+\newblock Mastering the game of go without human knowledge.
+\newblock \emph{Nature}, 550\penalty0 (7676):\penalty0 354--359,
+  2017{\natexlab{b}}.
+
+\bibitem[Sutton \& Barto(2018)Sutton and Barto]{sutton2018rlbook}
+Richard~S Sutton and Andrew~G Barto.
+\newblock \emph{Reinforcement Learning: An Introduction}.
+\newblock MIT Press, 2018.
+
+\bibitem[Talvitie(2017)]{talvitie2017approxmb}
+Erik Talvitie.
+\newblock Self-correcting models for model-based reinforcement learning.
+\newblock In \emph{AAAI}, pp.\  2597--2603, 2017.
+
+\bibitem[Talvitie(2018)]{talvitie2018rewardsformisspecifiedmodel}
+Erik Talvitie.
+\newblock Learning the reward function for a misspecified model.
+\newblock In Jennifer Dy and Andreas Krause (eds.), \emph{Proceedings of the
+  35th International Conference on Machine Learning}, volume~80 of
+  \emph{Proceedings of Machine Learning Research}, pp.\  4838--4847,
+  Stockholmsm{\"a}ssan, Stockholm Sweden, 10--15 Jul 2018. PMLR.
+\newblock URL \url{http://proceedings.mlr.press/v80/talvitie18a.html}.
+
+\bibitem[Vapnik(1992)]{vapnik1992empiricalriskminimization}
+Vladimir Vapnik.
+\newblock Principles of risk minimization for learning theory.
+\newblock In \emph{Advances in neural information processing systems}, pp.\
+  831--838, 1992.
+
+\bibitem[Weber et~al.(2017)Weber, Racani{\`e}re, Reichert, Buesing, Guez,
+  Rezende, Badia, Vinyals, Heess, Li, et~al.]{weber2017imagination}
+Th{\'e}ophane Weber, S{\'e}bastien Racani{\`e}re, David~P Reichert, Lars
+  Buesing, Arthur Guez, Danilo~Jimenez Rezende, Adria~Puigdom{\`e}nech Badia,
+  Oriol Vinyals, Nicolas Heess, Yujia Li, et~al.
+\newblock Imagination-augmented agents for deep reinforcement learning.
+\newblock \emph{arXiv preprint arXiv:1707.06203}, 2017.
+
+\bibitem[Witty et~al.(2018)Witty, Lee, Tosch, Atrey, Littman, and
+  Jensen]{witty2018generalization}
+Sam Witty, Jun~Ki Lee, Emma Tosch, Akanksha Atrey, Michael Littman, and David
+  Jensen.
+\newblock Measuring and characterizing generalization in deep reinforcement
+  learning.
+\newblock \emph{arXiv preprint arXiv:1812.02868}, 2018.
+
+\bibitem[Zhang et~al.(2021{\natexlab{a}})Zhang, McAllister, Calandra, Gal, and
+  Levine]{zhang2021invariantrepresentations}
+Amy Zhang, Rowan McAllister, Roberto Calandra, Yarin Gal, and Sergey Levine.
+\newblock Learning invariant representations for reinforcement learning without
+  reconstruction.
+\newblock \emph{arXiv preprint arXiv:2006.10742}, 2021{\natexlab{a}}.
+
+\bibitem[Zhang et~al.(2021{\natexlab{b}})Zhang, Sodhani, Khetarpal, and
+  Pineau]{zhang2020bmdptransfer}
+Amy Zhang, Shagun Sodhani, Khimya Khetarpal, and Joelle Pineau.
+\newblock Learning robust state abstractions for hidden-parameter block mdps,
+  2021{\natexlab{b}}.
+
+\bibitem[Zhang et~al.(2017)Zhang, Springenberg, Boedecker, and
+  Burgard]{zhang2017deepsucc}
+Jingwei Zhang, Jost~Tobias Springenberg, Joschka Boedecker, and Wolfram
+  Burgard.
+\newblock Deep reinforcement learning with successor features for navigation
+  across similar environments.
+\newblock In \emph{2017 IEEE/RSJ International Conference on Intelligent Robots
+  and Systems (IROS)}, pp.\  2371--2378. IEEE, 2017.
+
+\end{thebibliography}
+
+
+\newpage
+
+\begin{appendices}
+
+\section{Linear Successor Feature Models}
+\label{app:lsfm}
+\citeauthor{lehnert2020lsfm} define LSFMs as a set of real-valued vectors $\{ \pmb{w}_a \}_{a \in \mathcal{A}}$ and real-valued square matrices $\{ \pmb{F}_a \}_{a \in \mathcal{A}}$ that are indexed by the different actions $a \in \mathcal{M}$ of an MDP.
+Furthermore, LSFMs can be used to identify a reward-predictive representation function $\pmb{\phi}: \mathcal{S} \to \mathbb{R}^n$.
+Specifically, if a state-representation function $\pmb{\phi}$ satisfies for all state-action pairs $(s,a)$
+\begin{align}
+    \pmb{w}_a^\top \pmb{\phi}(s) &= \mathbb{E}_p[r(s,a,s') |s,a] \label{eq:reward-condition-mdp} \\
+    \text{and}~ \pmb{F}_a^\top \pmb{\phi}(s) &= \pmb{\phi}(s) + \gamma \overline{\pmb{F}}^\top \mathbb{E}_p[\pmb{\phi}(s') |s,a]~\text{where}~\overline{\pmb{F}} = \frac{1}{|\mathcal{A}|} \sum_{a' \in \mathcal{A}} \pmb{F}_{a'}, \label{eq:sf-condition-mdp}
+\end{align}
+then the state-representation function $\pmb{\phi}$ is reward-predictive.
+
+Given a partition function $c$ and the trajectory data set $\mathcal{D}$, a LSFM can be computed.
+For a partition $i$ the $i$th entry of the weight vector $\pmb{w}_a$ equals the one-step rewards averaged across all state observations and
+\begin{equation}
+    \pmb{w}_a(i) = \frac{1}{ | \{ (s,a,r,s') | c(s)=i \} | } \sum_{(s,a,r,s') | c(s) = i} r, \label{eq:reward-average}
+\end{equation}
+where the summation Equation~\ref{eq:reward-average} ranges over all transitions in $\mathcal{D}$ that start in partition $i$.
+Similarly, the empirical partition-to-partition transition probabilities can be calculated and stored in a row-stochastic transition matrix $\pmb{M}_a$.
+Each entry of this matrix is set to the empirical probability of transitioning from a partition $i$ to a partition $j$ and
+\begin{equation}
+    \pmb{M}_a(i,j) = \frac{ | \{ (s,a,r,s') | c(s)=i, c(s')=j \} | }{ | \{ (s,a,r,s') | c(s)=i \} | } .
+\end{equation}
+Using this partition-to-partition transition matrix, the matrices $\{ \pmb{F}_a \}_{a \in \mathcal{A}}$ can be calculated as outlined by~\citeauthor{lehnert2020lsfm} and
+\begin{equation}
+    \pmb{F}_a = \pmb{I} + \gamma \pmb{M}_a \pmb{F}~\text{and}~ \pmb{F} = (\pmb{I} - \gamma \overline{\pmb{M}})^{-1},
+\end{equation}
+where $\pmb{M} = \frac{1}{|\mathcal{A}|} \sum_{a \in \mathcal{A}} \pmb{M}_{a}$.
+
+This calculation is used to compute the SF targets used for function approximation in Algorithm~\ref{alg:cluster}.
+
+
+
+\section{Convergence proof}
+\label{app:proofs}
+
+\begin{definition}[Sub-clustering]\label{def:sub-clustering}
+A clustering $c$ is a sub-clustering of $c^*$ if the following property holds:
+\begin{equation}
+    \forall s, \tilde{s},~ c(s) \ne c(\tilde{s}) \implies c^*(s) \ne c^*(\tilde{s}).
+\end{equation}
+\end{definition}
+
+\begin{definition}[Maximally-Compressed-Reward-Predictive Clustering]\label{def:reward-predictive}
+A maximally-compressed-reward-predictive representation is a function $c^*$ assigning every state $s \in \mathcal{S}$ to an index such that for all state-action pairs $(s,a)$
+\begin{align}
+    \big| \pmb{w}_a^\top \pmb{e}_{c*(s)} - \mathbb{E}_p[r(s,a,s') |s,a] \big| \le \varepsilon_r \label{eq:reward-condition} \\
+    \text{and}~ \big| \pmb{F}_a^\top \pmb{e}_{c*(s)} - \pmb{\psi}^\pi_*(s,a) \big| \le \varepsilon_\psi, \label{eq:sf-condition}
+\end{align}
+where $\pmb{\psi}^\pi_*(s,a)$ are the SFs calculated for a state-representation function mapping a state $s$ to a one-hot bit vector $c^*(s)$.
+Furthermore, this representation uses as few indices as possible.
+\end{definition}
+
+Definition~\ref{def:reward-predictive} implicitly makes the assumption that the state space of an arbitrary MDP can be partitioned into finitely many reward-predictive partitions.
+While this may not be the case for all possible MDPs, this assumption is not restrictive when using the presented clustering algorithm.
+Because the trajectory data set is finite, any algorithm only processes a finite subset of all possible states (even if state spaces are uncountable infinite) and therefore can always partition these state observations into a finite number of partitions.
+
+\begin{property}[Refinement Property]\label{prop:refinement}
+In Algorithm~\ref{alg:cluster}, every iteration refines the existing partitions until the termination condition is reached.
+Specifically, for every iteration $c_i$ is a sub-clustering of $c_{i+1}$ and for any two distinct states $s$ and $\tilde{s}$, 
+\begin{equation}
+    c_i(s) \ne c_i(\tilde{s}) \implies c_{i+1}(s) \ne c_{i+1}(\tilde{s}).
+\end{equation}
+\end{property}
+
+\begin{property}[Reward-predictive Splitting Property]\label{prop:reward-predictive}
+Consider a maximally-compressed-reward-predictive representation encoded by the clustering $c^*$ and the cluster sequence $c_1,c_2,...$ generated by Algorithm~\ref{alg:cluster}.
+For any two distinct states $s$ and $\tilde{s}$,
+\begin{equation}
+    c_i(s) \ne c_i(\tilde{s}) \implies c^*(s) \ne c^*(\tilde{s})
+\end{equation}
+\end{property}
+
+\begin{lemma}[SF Separation]\label{lem:sf-separation}
+For a cluster function $c_i$ and any arbitrary MDP, if
+\begin{equation}
+    \gamma < \frac{1}{2}~\text{and}~\frac{2}{3} \left( 1 - \frac{\gamma}{1 - \gamma} \right) > \varepsilon_\psi > 0, \label{eq:sf-separation-lemma}
+\end{equation}
+then
+\begin{equation}
+    || \pmb{\psi}^\pi_i(s,a) - \pmb{\psi}^\pi_i(\tilde{s},a) || \ge 3 \varepsilon_\psi
+\end{equation}
+for two states $s$ and $\tilde{s}$ that are assigned to two different partitions and $c_i(s) \ne c_i(\tilde{s})$.
+\end{lemma}
+\begin{proof}[Proof of SF Separation Lemma~\ref{lem:sf-separation}]
+First, we observe that the norm of a SF vector can be bounded with
+\begin{align}
+    \Bigg|\Bigg| \pmb{\psi}^\pi_i(s,a) \Bigg|\Bigg| &= \left|\left| \mathbb{E}_\pi \left[ \sum_{t=1}^\infty \gamma^{t-1} \pmb{e}_{c_i(s_t)} \middle| s=s_1,a \right] \right|\right| \\
+    &= \Bigg|\Bigg| \sum_{t=1}^\infty \gamma^{t-1} \mathbb{E}_\pi \left[ \pmb{e}_{c_i(s_t)} \middle| s=s_1,a \right] \Bigg|\Bigg| &(\text{by linearity of expectation}) \\
+    &\le \sum_{t=1}^\infty \gamma^{t-1} \underbrace{\Bigg|\Bigg| \mathbb{E}_\pi \left[ \pmb{e}_{c_i(s_t)} \middle| s=s_1,a \right] \Bigg|\Bigg|}_{\le 1} \\
+    &= \sum_{t=1}^\infty \gamma^{t-1} \label{eq:sf-norm-derivation} \\
+    &= \frac{1}{1 - \gamma} \label{eq:sf-norm}.
+\end{align}
+The transformation to line~\eqref{eq:sf-norm-derivation} uses the fact that expected values of one-hot vectors are always probability vectors.
+
+Furthermore, we note that
+\begin{equation}
+    0 \le \gamma < \frac{1}{2} \implies \frac{2\gamma}{1 - \gamma} < 2. \label{eq:gamma-condition}
+\end{equation}
+The norm of the difference of SF vectors for two states $s$ and $\tilde{s}$ that start in different partitions can be bounded with
+\begin{align}
+    \big| \big| \pmb{\psi}^\pi_i(s,a) - \pmb{\psi}^\pi_i(\tilde{s},a) \big| \big| &= \big| \big| (\pmb{e}_k + \gamma \mathbb{E}[\pmb{\psi}^\pi_i(s',a')|s,a]) - (\pmb{e}_l + \gamma \mathbb{E}[\pmb{\psi}^\pi_i(s',a')|\tilde{s},a]) \big| \big| \\
+    &= \big| \big| (\pmb{e}_k - \pmb{e}_l) + \gamma (\mathbb{E}[\pmb{\psi}^\pi_i(s',a')|s,a] - \mathbb{E}[\pmb{\psi}^\pi_i(s',a')|\tilde{s},a]) \big| \big|\\
+    &= \big| \big| (\pmb{e}_k - \pmb{e}_l) - \gamma (\mathbb{E}[\pmb{\psi}^\pi_i(s',a')|\tilde{s},a] - \mathbb{E}[\pmb{\psi}^\pi_i(s',a')|s,a]) \big| \big| \\
+    &\ge \Big| \underbrace{\big| \big| \pmb{e}_k - \pmb{e}_l \big| \big|}_{=2} - \gamma \big| \big| \mathbb{E}[\pmb{\psi}^\pi_i(s',a')|\tilde{s},a] - \mathbb{E}[\pmb{\psi}^\pi_i(s',a')|s,a] \big| \big| \Big| \\
+    &= \Big| 2 - \underbrace{ \gamma \big| \big| \mathbb{E}[\pmb{\psi}^\pi_i(s',a')|\tilde{s},a] - \mathbb{E}[\pmb{\psi}^\pi_i(s',a')|s,a] \big| \big|}_{\text{$\in [0, \frac{2 \gamma}{1 - \gamma}]$ by~\eqref{eq:sf-norm} and $<2$ by~\eqref{eq:gamma-condition}}} \Big| \label{eq:sf-separation-proof-1} \\
+    &= 2 - \gamma \big| \big| \mathbb{E}[\pmb{\psi}^\pi_i(s',a')|\tilde{s},a] - \mathbb{E}[\pmb{\psi}^\pi_i(s',a')|s,a] \big| \big| \label{eq:sf-separation-proof-2} \\
+    &\ge 2 - \frac{2 \gamma}{1 - \gamma} \label{eq:sf-separation-proof-3}
+\end{align}
+The transformation to line~\eqref{eq:sf-separation-proof-1} holds because $s$ and $\tilde{s}$ start in different partitions and therefore $c_i(s) = k \ne c_i(\tilde{s}) = l$.
+The transformation to line~\eqref{eq:sf-separation-proof-2} holds, because the norm of the difference of two SF vectors is bounded by $\frac{2}{1 - \gamma}$.
+The term inside the absolute value calculation cannot possibly become negative because the discount factor $\gamma$ is set to be below $\frac{1}{2}$ and the bound in line~\eqref{eq:gamma-condition} holds.
+
+Using the condition on the discount factor in line~\eqref{eq:sf-separation-lemma}, we have 
+\begin{align}
+    \frac{2}{3} \left( 1 - \frac{\gamma}{1 - \gamma} \right) \ge \varepsilon_\psi &\implies 2 - \frac{2\gamma}{1 - \gamma} \ge 3 \varepsilon_\psi &\text{(by~\eqref{eq:sf-separation-lemma})} \\
+    &\implies || \pmb{\psi}^\pi_i(s,a) - \pmb{\psi}^\pi_i(\tilde{s},a) || \ge 3 \varepsilon_\psi. &\text{(by~\eqref{eq:sf-separation-proof-3})}
+\end{align}
+\end{proof}
+
+\begin{definition}[Representation Projection Matrix]\label{def:projection-mat}
+For a maximally-compressed-reward-predictive clustering $c^*$ and a sub-clustering $c_i$, we define a projection matrix $\pmb{\Phi}_i$ such that every entry 
+\begin{equation}
+    \pmb{\Phi}_i(k,l) = \begin{cases} 1 &\exists s ~\text{such that}~ c_i(s)=k ~\text{and}~ c^*(s)=l \\ 0 &\text{otherwise.} \end{cases} \label{eq:projection-mat}
+\end{equation}
+\end{definition}
+
+\begin{lemma}[SF Projection]\label{lem:sf-projection}
+For every state-action pair $(s,a)$, $\pmb{\psi}^\pi_i(s,a) = \pmb{\Phi}_i \pmb{\psi}^\pi_*(s,a)$.
+\end{lemma}
+\begin{proof}[Proof of SF Projection Lemma~\ref{lem:sf-projection}]
+The proof is by the derivation in lines~\eqref{eq:sf-c-i} through~\eqref{eq:sf-projection}.
+\end{proof}
+
+\begin{proof}[Proof of Convergence Theorem~\ref{thm:convergence}]
+The convergence proof argues by induction on the number of refinement iterations and first establishes that the Refinement Property~\ref{prop:refinement} and Reward-predictive Splitting Property~\ref{prop:reward-predictive} hold at every iteration.
+Then we provide an argument that the returned cluster function is a maximally-compressed-reward-predictive representation.
+
+\paragraph{Base case:}
+The first clustering $c_1$ merges two state observations into the same cluster if they lead to equal one-step rewards for every action.
+The reward-condition in Equation~\eqref{eq:reward-condition} can be satisfied by constructing a vector $\pmb{w}_a$ such that every entry equals the average predicted one-step reward for each partition and 
+\begin{equation}
+    \pmb{w}_a(i) = \frac{1}{| \{ s: c_1(s) = i \} |} \sum_{s: c_1(s) = i} f_r(s,a)
+\end{equation}
+By Assumption~\ref{asmpt:perfect}, all predictions made by $f_r$ are at most $\frac{\varepsilon_r}{2}$ apart from the correct value and therefore 
+\begin{equation}
+    | \pmb{e}_{c_1(s)}^\top \pmb{w}_a - \mathbb{E}_{p}[r(s,a,s') | s,a] | \le \varepsilon_r \label{eq:reward-condition-c-1}
+\end{equation}
+Consequently, the reward condition in Equation~\eqref{eq:reward-condition} is met and for any two states $s$ and $\tilde{s}$
+\begin{equation}
+    c_1(s) \ne c_1(\tilde{s}) \implies c^*(s) \ne c^*(\tilde{s})
+\end{equation}
+and Property~\ref{prop:reward-predictive} holds.
+Property~\ref{prop:refinement} holds trivially because $c_1$ is the first constructed clustering.
+
+\paragraph{Induction Hypothesis:}
+For a clustering $c_i$ both Property~\ref{prop:refinement} and Property~\ref{prop:reward-predictive} hold.
+
+\paragraph{Induction Step:}
+To see why Property~\ref{prop:refinement} and~\ref{prop:reward-predictive} hold for a clustering $c_{i+1}$, we first
+denote prediction errors with a vector $\pmb{\delta}_i$ and 
+\begin{equation}
+    \widehat{\pmb{\psi}}^\pi_i(s,a) = \pmb{\psi}^\pi_i(s,a) + \pmb{\delta}_i(s,a). \label{eq:prediction-error-vector}
+\end{equation}
+If two states $s$ and $\tilde{s}$ are merged into the same partition by a maximally-compressed-reward-predictive representation (and have equal SFs $\pmb{\psi}^\pi_*$), then
+\begin{align}
+    &|| \widehat{\pmb{\psi}}^\pi_i(s,a) - \widehat{\pmb{\psi}}^\pi_i(\tilde{s},a) || \\
+    &\le || \pmb{\psi}^\pi_i(s,a) - \pmb{\psi}^\pi_i(\tilde{s},a) || + || \pmb{\delta}_i(s,a) - \pmb{\delta}_i(\tilde{s},a) || &\text{(by substituting~\eqref{eq:prediction-error-vector} and triangle ineq.)} \\
+    &= || \pmb{\Phi}_i \pmb{\psi}^\pi_*(s,a) - \pmb{\Phi}_i  \pmb{\psi}^\pi_*(\tilde{s},a) || + \underbrace{|| \pmb{\delta}_i(s,a) - \pmb{\delta}_i(\tilde{s},a) ||}_{\text{$\le \frac{\varepsilon_
+    \psi}{2} + \frac{\varepsilon_\psi}{2}$ by Assmpt.~\ref{asmpt:perfect}}} &\text{(by Lemma~\ref{lem:sf-projection})} \\
+    &\le || \pmb{\Phi}_i || \cdot \underbrace{|| \pmb{\psi}^\pi_*(s,a) - \pmb{\psi}^\pi_*(\tilde{s},a) ||}_{\text{$=\pmb{0}$ by choice of $s$ and $\tilde{s}$}} + \varepsilon_\psi \\
+    &= \varepsilon_\psi.
+\end{align}
+Consequently, 
+\begin{equation}
+    c^*(s) = c^*(\tilde{s}) \implies || \pmb{f}_i(s,a) - \pmb{f}_i(\tilde{s},a) || \le \varepsilon_\psi \implies c_{i+1}(s) = c_{i+1}(\tilde{s}). \label{eq:cluster-implication}
+\end{equation}
+By inversion of the implication in line~\eqref{eq:cluster-implication}, the Reward-predictive Splitting Property~\ref{prop:reward-predictive} holds.
+Furthermore, because the matching condition in line~\eqref{eq:matching-condition} holds, we have for any two states
+\begin{equation}
+    c_i(s) \ne c_i(\tilde{s}) \implies || \pmb{\psi}_i^\pi(s,a) - \pmb{\psi}_i^\pi(\tilde{s},a) || > 3 \varepsilon_\psi.
+\end{equation}
+Consequently,
+\begin{align}
+    || \pmb{f}_i(s,a) - \pmb{f}_i(\tilde{s},a) || &= || (\pmb{\psi}^\pi_i(s,a) - \pmb{\psi}^\pi_i(\tilde{s},a)) - (\pmb{\delta}_i(\tilde{s},a) - \pmb{\delta}_i(s,a)) || \\
+    &\ge \big| \underbrace{|| \pmb{\psi}^\pi_i(s,a) - \pmb{\psi}^\pi_i(\tilde{s},a) ||}_{> 3 \varepsilon_\psi} - \underbrace{|| \pmb{\delta}_i(\tilde{s},a) - \pmb{\delta}_i(s,a) ||}_{\le 2 \varepsilon_\psi} \big| &\text{(by inverse triangle ineq.)} \\
+    &>  3 \varepsilon_\psi - 2 \varepsilon_\psi = \varepsilon_\psi.
+\end{align}
+Therefore, $c_{i+1}(s) \ne c_{i+1}(\tilde{s})$ and the Refinement Property~\ref{prop:refinement} holds as well.
+
+Lastly, the clustering $c_T$ returned by Algorithm~\ref{alg:cluster} satisfies the conditions outlined in Definition~\ref{def:reward-predictive}.
+Because the Refinement Property~\ref{prop:refinement} holds at every iteration, we have by line~\eqref{eq:reward-condition-c-1} that
+\begin{equation}
+    \big| \pmb{e}_{c_T(s)}^\top \pmb{w}_a - \mathbb{E}_{p}[r(s,a,s') | s,a] \big| \le \varepsilon_r
+\end{equation}
+and therefore $c_T$ satisfies the bound in line~\eqref{eq:reward-condition}.
+Furthermore, because Algorithm~\ref{alg:cluster} terminates when $c_T$ and $c_{T-1}$ are identical, we have that
+\begin{equation}
+    c_T(s) = c_T(\tilde{s}) \iff \big|\big| \widehat{\pmb{\psi}}^\pi_T(s,a) - \widehat{\pmb{\psi}}^\pi_T(\tilde{s},a) \big|\big| \le \varepsilon_\psi.
+\end{equation}
+For this clustering, we can construct a set of matrices $\{ \widehat{\pmb{F}}_a \}_{a \in \mathcal{A}}$ by averaging the predicted SFs such that every row
+\begin{equation}
+    \widehat{\pmb{F}}_a(i) = \frac{1}{| \{ s : c_T(s) = i \} |} \sum_{s : c_T(s) = i} \widehat{\pmb{\psi}}^\pi_T(s,a). \label{eq:f-mat-avg}
+\end{equation}
+For every observed state-action pair $(s,a)$
+\begin{align}
+    \big|\big| \pmb{e}_{c_T(s)}^\top \widehat{\pmb{F}}_a - \pmb{\psi}^\pi_T(s,a) \big|\big| &= \big|\big| \pmb{e}_{c_T(s)}^\top \widehat{\pmb{F}}_a - \widehat{\pmb{\psi}}^\pi_i(s,a) + \pmb{\delta}_i(s,a) \big|\big| &\text{(by line~\eqref{eq:prediction-error-vector})} \\
+    &\le \underbrace{\big|\big| \pmb{e}_{c_T(s)}^\top \widehat{\pmb{F}}_a - \widehat{\pmb{\psi}}^\pi_i(s,a) \big|\big|}_{\text{$\le \varepsilon_\psi$ by~\eqref{eq:f-mat-avg}}} + \underbrace{\big|\big| \pmb{\delta}_i(s,a) \big|\big|}_{\text{$\le \frac{\varepsilon_\psi}{2}$ by Assmpt~\ref{asmpt:perfect}}} \\
+    &\le \frac{3}{2} \varepsilon_\psi
+\end{align}
+and therefore the SF condition in line~\eqref{eq:sf-condition} holds as well (up to a rescaling of the $\varepsilon_\psi$ hyper-parameter).
+
+\end{proof}
+
+\section{Experiments}\label{app:experiments}
+
+\subsection{Reward-predictive clustering experiments}
+
+In Section~\ref{sec:experiments}, the clustering algorithm was run on a fixed trajectory dataset that was generated by selecting actions uniformly at random. 
+In the Column World task, a start state was sampled uniformly at random from the right column.
+In the Combination Lock task the start state was always the combination $(0,0,0)$.
+MNIST images were always sampled uniformly at random from the training or test sets (depending on the experiment phase).
+
+For the Column World experiment a three layer fully connected neural network was used with ReLU activation functions. 
+The two hidden layers have a dimension of 1000 (the output dimension depends on the number of latent states and actions).
+In the Combination Lock experiment the ResNet18 architecture was used by first reshaping the state image into a stack of three digit images and then feeding this image into the ResNet18 model.
+For all experiments the weights of the ResNet18 model were initialized at random (we did not use a pre-trained model).
+The 1000 dimensional output of this model was then passed through a ReLU activation function and then through a linear layer.
+The output dimension varied depending on the quantity the network is trained to predict during clustering.
+Only the top-most linear layer was re-trained between different refinement iterations, the weights of the lower layers (e.g. the ResNet18 model) were re-used across different refinement iterations.
+All experiments were implemented in PyTorch~\citep{pytorch} and all neural networks were optimized using the Adam optimizer~\citep{kingma2014adam}.
+We always used PyTorch's default network weight initialization heuristics and default values for the optimizer and only varied the learning rate.
+Mini-batches were sampled by shuffling the data set at the beginning of every epoch.
+Table~\ref{tab:cluster-hyper-parameter} lists the used hyper-parameter.
+
+\begin{table}[!ht]
+    \caption{Hyper-parameter settings for both clustering algorithms} 
+    \label{tab:cluster-hyper-parameter}
+    \centering 
+    \begin{tabular}{l  l  l}
+        \hline
+        {\bf Parameter} & {\bf Column World} & {\bf Combination Lock} \\ 
+        \hline
+        Batch size                              & 32    & 256    \\
+        Epochs, reward refinement               & 5     & 10     \\
+        Epochs, SF refinement                   & 5     & 20     \\
+        Epochs, representation network training & 5     & 20     \\
+        Learning rate                           & 0.005 & 0.001  \\
+        $\varepsilon_r$                         & 0.5   & 0.4    \\
+        $\varepsilon_\psi$                      & 1.0   & 0.8    \\
+        Spurious latent state filter fraction   & 0.01  & 0.0025 \\
+        Number of training trajectories         & 1000  & 10000  \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\subsection{DQN experiments}
+
+All experiments in Figure~\ref{fig:combination-lock-transfer} were repeated 20 times and each agent spent 100 episodes in each task.
+To select actions, an $\varepsilon$-greedy exploration strategy was used that selects actions with $\varepsilon$ probability greedily (with respect to the Q-value predictions) and with $1 - \varepsilon$ actions are selected uniformly at random.
+During the first episode in each training and test task, $\varepsilon = 0$ and the $\varepsilon$ was linearly increase to 1 within 10 time steps.
+The DQN agent always used a Q-network architecture consisting of the ResNet18 architecture (with random weight initialization), a ReLU activation function, and then a fully connected layer to predict Q-values for each action (as illustrated in Figure~\ref{fig:combination-lock-dqn}).
+Table~\ref{tab:dqn-hyper-parameter} outlines the hyper-parameters that were fine tuned for the combination lock training task.
+These hyper-parameters were then re-used for all DQN variants used in Section~\ref{sec:improving-learning-efficiency}.
+
+\begin{table}[!ht]
+    \caption{Hyper-parameter sweep results for DQN on the combination lock training task.}
+    \label{tab:dqn-hyper-parameter}
+    \centering
+    \begin{tabular}{l  l  l}
+        {\bf Parameter} & {\bf Tested Values} & {\bf Best Setting (highest reward-per-step score)} \\
+        \hline
+        Learning rate & $10^{-4}$, $10^{-3}$, $10^{-2}$, $10^{-1}$ & $10^{-3}$ \\
+        Batch size & 100, 200, 500 & 200 \\
+        Buffer size & 100, 1000, 10000 & 10000 \\
+        Exploration episodes & 5, 10, 20, 50, 80 & 10 \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\end{appendices}
+
+\end{document}
+
+

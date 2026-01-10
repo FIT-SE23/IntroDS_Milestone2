@@ -1,0 +1,1168 @@
+In the previous sections, we detailed how to use the partition tree to derive decision procedures for equivalence properties.
+We describe in this section a constraint solving procedure that may be used to generate one in practice.
+
+\subsection{Extended constraint systems} \label{sec:ext-csys}
+  In order to carry out the constraint solving required to construct the partition tree, we extend constraint systems with components allowing to reason more finely about the \emph{attacker's knowledge}.
+  The notion of solution of constraint system is also extended to capture their expected properties.
+
+  \subsubsection{Knowledge base and formulas} \label{sec:formulas}
+
+    \paragraph{New constraints}
+      From now on we assume an implicit rewriting system \(\R\) that is constructor-destructor and subterm convergent (we recall that the results of the previous sections did not rely on this assumption).
+      We introduce an extension of constraint systems with second-order constraints that serve key roles in the generation of the partition tree:
+
+      \caseitem{\emph{Giving a finite representation of the deductive capabilities of the attacker}.}
+
+        This takes the form of a \emph{knowledge base} \(\Solved\) which is a finite set of deduction facts.
+        By relying on subterm convergence among others, our procedure will ensure that a term \(u\) is deducible \textit{iff} it can be deduced by applying constructor symbols to deduction facts of \(\Solved\), which makes deducibility easily decidable due to the constructor-destructor property.
+        In particular we will only consider solutions that compute terms using entries of \(\Solved\) in this restricted manner.
+
+      \caseitem{\emph{Giving a finite representation of the distinguishing capabilities of the attacker}.}
+
+        This takes the form of a set of \emph{formulas} \(\USolved\) that is, in short, a finite representation of the term equalities that hold in the current frame.
+        In particular static equivalence will be characterisable only from the formulas of \(\USolved\).
+
+      \caseitem{\emph{Recording the constraints imposed on second-order solutions during the constraint solving}.}
+
+        When computing most general solutions or performing case analyses on the form of solutions, we track the resulting effect on second-order solutions in a set \(\Eqsnd\) that is the second-order analogue of \(\Eqfst\).
+        This is mostly how we model the predicates \(\pi\) that appear in the configurations in partition trees (Definition~\ref{def:configuration}).
+
+      \medskip
+
+      More formally we consider, in addition to deduction facts and second-order equations, a new atomic second-order constraint, \emph{equality facts} \(\xi \eqf \zeta\), \(\xi\) and \(\zeta\) second-order terms.
+      Unlike second-order equations that model syntactic equalities, equality facts capture equalities modulo theory, that is, the fact that \(\xi\) and \(\zeta\) deduce the same first-order term.
+      Concretely we extend the relation \(\models\) (Section~\ref{sec:mgs-def}) with
+      \[(\Phi,\Sigma,\sigma) \models \xi \Sigma \Phi \sigma\norm = \zeta \Sigma \Phi \sigma \norm\]
+      We now define the constraints that are typically put in the set \(\USolved\).
+
+      \begin{definition}[deduction formula, equality formula]
+        A \emph{deduction} (resp. \emph{equality}) \emph{formula} is a constraint of the form \(\clause[S]{H}{(C_1 \wedge \ldots \wedge C_n)}\):
+        \begin{enumerate}
+          \item \(S\) is a set of (both first-order and second-order) variables;
+          \item \(H\) is a deduction fact (resp. an equality fact);
+          \item for all \(i \in \{1, \ldots, n\}\), \(C_i\) is either a deduction fact of the form \(X \dedfact t\), \(X \in \X[2]\), or a first-order syntactic equation \(u \eqs v\).
+        \end{enumerate}
+        A formula \(\psi\) is called \emph{solved} when it contains no hypotheses, i.e., \(\psi = (\clause[\emptyset]{H}{\top}) = H\).
+        % In this case \(\psi\) may be simply referred to as \(H\).
+        Given a formula \(\psi = \clause[S]{H}{\varphi}\), we denote by \(\Fhyp(\psi)\) the set of the syntactic equations appearing in the hypotheses \(\varphi\), and by \(\Df(\psi)\) the set of deduction facts in \(\varphi\).
+      \end{definition}
+
+      Intuitively, a formula captures a deduction or comparison that the attacker may perform and the premisses \(C_1, \ldots, C_n\) express conditions under which this is possible.
+      Typically if the attacker observed a ciphertext \(\rsenc(m,r,k)\) (bound to an axiom \(\ax\)), we may express the deducibility of \(m\) through the formula
+      \[\clause[X]{\rsdec(\ax,X) \dedfact m}{X \dedfact k}\]
+      Another example is the following formula that expresses the tautology that two recipes deducing the same term should be equal in the sense of an equality fact:
+      \[\clause[X,Y,z]{X \eqf Y}{(X \dedfact z \wedge Y \dedfact z)}\]
+      This formula will serve as a generic placeholder when computing equality formulas during the constraint solving, that is, we will always add equality formulas obtained by substituting variables in the above formula.
+      Although we consider arbitrary formulas such as the above two during the computation of the partition tree, note that only formulas of a certain shape will eventually be added in the set \(\USolved\) recording the attacker's distinguishing capabilities.
+      We give more details about the invariants of the procedure in Appendix~\ref{app:invariants}, but we can mention for example that the formulas effectively recorded in \(\USolved\) will be of the form \(\clause{H}{\varphi}\), i.e., there are no universally-quantified variables, and \(\varphi\) only contains first-order equations.
+
+    \paragraph{Extended constraint systems}
+      We now formalise how we extend constraint systems to store the knowledge base, formulas, and to capture restrictions on the form of solutions.
+
+      \begin{definition}[extended constraint system]
+        A tuple \(\C^e = (\Phi, \Df, \Eqfst, \Eqsnd, \Solved, \USolved)\) is called an \emph{extended constraint system} where:
+        \begin{enumerate}
+          \item \((\Phi,\Df,\Eqfst)\) is a constraint system, although more general in that \(\Df\) may contain constraints of the form \(X \dedfact u\) or \(\forall X.\, X \ndedfact u\) where \(u\) may be an arbitrary constructor term;
+          \item \(\Eqsnd\) is a set of second-order equations and constraints of the form \(\forall Y_1,\ldots, Y_k. \bigvee_{j=1}^p \xi_j \neqs \zeta_j\)
+          \item \(\Solved\) is a set of deduction facts;
+          \item \(\USolved\) is a set of deduction and equality formulas.
+        \end{enumerate}
+      \end{definition}
+
+      As explained earlier, the set \(\Eqsnd\) gathers constraints to be satisfied by the second-order solutions of the system, \(\Solved\) is a finite representation of the attacker knowledge, and \(\USolved\) characterises the attacker capabilities to deduce and compare terms modulo theory.
+      In particular the set \(\Eqsnd\) contains additional constraints to be satisfied by solutions while \(\Solved\) and \(\USolved\) are valid formulas that characterise potential attacker actions.
+      For example, the (unsolved) deduction formulas in \(\USolved\) reason about potentially deducible terms:
+      when such formula contains premisses, the procedure will perform a case analysis to distinguish cases where the hypotheses hold or not, leading to solved or trivial formulas, respectively.
+      When a solved deduction formula is obtained this way, we add it to the knowledge base \(\Solved\) if \(u\) is not already deducible from it.
+      % In particular this ensures all along the procedure that \(\Solved\) does not contain redundant entries.
+
+  \subsubsection{(Most general) solutions} \label{sec:ext-mgs}
+
+    We now define how the notion of solutions is lifted to extended constraint systems and how this embeds the predicates \(\pi\) used in the definition of partition-tree configurations.
+    The definition of a solution \((\Sigma,\sigma)\) of \(\C^e\) follows three guidelines:
+    \begin{enumerate*}
+      \item it should be a solution in the usual sense and satisfy \(\Eqsnd(\C^e)\);
+      \item the set of formulas \(\USolved(\C^e)\) plays no role in the definition of solutions:
+      we will only prove invariants that this set verifies during our specific constraint-solving procedure (see Appendix~\ref{app:ptree}, Section \ref{app:invariants}); and
+      \item all recipes used in the solution should have been constructed from the knowledge base \(\Solved(\C^e)\), \emph{uniformly} (that is, a same first-order term should not be deduced by different recipes in the solution).
+    \end{enumerate*}
+    In particular this requires a notion of \emph{consequence}, indicating that a recipe can be deduced from the knowledge base.
+
+    \begin{definition}[consequence] \label{def:consequence}
+      We define the set of \emph{consequences} of a set of deduction facts \(S\), denoted \(\conseq(S)\), as the set of pairs \((C[\xi_1,\ldots, \xi_n],C[u_1,\ldots, u_n])\)
+      where \(C\) is a context built using \(\sigc \cup \sig_0\) and for all \(i \in \{1,\ldots, n\}\), \(\xi_i \dedfact u_i \in S\).
+      %
+      We write \(\xi \in \conseq(S)\) if \(\exists t.\, (\xi,t) \in \conseq(S)\).
+    \end{definition}
+
+    We recall that by definition a deduction fact never has a constructor function symbol at its root (Definition \ref{def:constraint}):
+    in particular if \(\xi \in \conseq(S)\), the context \(C\) in the above definition is unique.
+    Writing \(\xi = C[\xi_1, \ldots, \xi_n]\) it is therefore possible to define unambiguously the set of \emph{consequential subterms} of \(\xi\)
+    \[\stc(\xi,S) = \{ \xi_{|p} \mid p \text{ position of } C\}\]
+    If \(R\) is a set of recipes we write \(\stc(R,S) = \bigcup_{\xi \in R} \stc(\xi,S)\).
+    From this we can define solutions of extended constraint systems.
+
+    \begin{definition}[solution of an extended constraint system] \label{def:ext-sol}
+      A pair of substitutions \((\Sigma,\sigma)\) is a solution of \((\Phi, \Df, \Eqfst, \Eqsnd, \Solved, \USolved)\) if \((\Phi,\Sigma,\sigma) \models \Df \wedge \Eqfst \wedge \Eqsnd\) and the following two properties hold:
+      \begin{enumerate}
+        % \item \emph{Second-order structure:} \((\Phi,\Sigma,\sigma) \models \Df \wedge \Eqsnd\)
+        \item \emph{\(\Solved\)-Basis:}
+        %
+        for all \(\xi \in \subterms[2](\im(\Sigma) \cup \Solved\Sigma)\),
+        \(\msg(\xi\Phi\sigma)\) and \((\xi,\xi \Phi \sigma \norm) \in \conseq (\Solved \Sigma \sigma)\)
+        \item \emph{Uniformity:}
+        %
+        for all \(\xi,\xi' \in \stc(\im(\Sigma), \Solved\Sigma)\), \(\xi \Phi \sigma\norm = \xi' \Phi \sigma\norm\) implies \(\xi = \xi'\).
+      \end{enumerate}
+      The set of solutions of \(\C^e\) is written \(\Sol(\C^e)\) and \(\C^e\) is \emph{satisfiable} if \(\Sol(\C^e) \neq \emptyset\).
+      We will denote by \(\bot\) an unsatisfiable extended constraint system.
+      The notion of most general solution of \(\C^e\) is adapted in a straightforward way from the analogue for regular constraint systems.
+    \end{definition}
+
+    Intuitively when computing a node \(n\) of a partition tree, the extended constraint systems represent the predicate \(\pi(n)\):
+    it will be defined so that given \((\P,\C) \in \Gamma(n)\) attached with \(\C^e\), we have \(\Sol[\pi(n)](\C) = \Sol(\C^e)\) (up to domain restriction).
+    We detail this in Sections \ref{sec:cs-basics} and \ref{sec:correctness-proc}.
+
+    \begin{example}
+      Consider the extended constraint system \(\C^e\) defined by
+      \begin{mathpar}
+        \Phi = \{\ax_1 \mapsto \pair{k,x}\} \and
+        \Df = \quanti{X}{0} \dedfact x \wedge \quanti{Y}{1} \dedfact y \and
+        \Eqfst = y \eqs x \and
+        \Eqsnd = \top \and
+        \Solved = \ax_1 \dedfact \pair{k,x} \and
+        \USolved = \Solved \wedge \fst(\ax_1) \dedfact k \wedge \snd(\ax_1) \dedfact x \wedge X \eqf \snd(\ax_1)
+      \end{mathpar}
+      This system involves an adversarial input \(x\) computable from an empty frame, which produces in response an output of \(\pair{k,x}\) for some name \(k\), and then the adversary inputs again \(y = x\).
+      The set \(\USolved\), although not impacting the notion of solution, characterises here all successful operations that the attacker may perform in this situation:
+      applying destructors to the term bound to \(\ax_1\) and observe that \(X\) and \(\snd(\ax_1)\) deduce the same term.
+
+      We have for example \((\pair{X,\ax_1}, \pair{x,\pair{k,x}}) \in \conseq(\Solved \cup \Df)\).
+      However the knowledge base is not \emph{saturated} in the sense that there are deducible terms \(u\), for example \(u = k\), such that there exist no recipes \(\xi\) such that \((\xi,u) \in \conseq(\Solved \cup \Df)\).
+      In our procedure, the saturation is done by adding to \(\Solved\) all destructor applications that result into a non-consequence term.
+      A saturated version of the constraint system would be
+      \[\C^e_s = \C^e[\Solved \mapsto \Solved \wedge \fst(\ax_1) \dedfact k]\]
+      Note that adding the deduction fact \(\snd(\ax_1) \dedfact x\) to the knowledge base is possible but redundant since \(x\) is already deducible from \(X\).
+      The saturation
+      ensures that for all \((\Sigma,\sigma)\) satisfying \(\Df(\C^e_s) \wedge \Eqfst(\C^e_s) \wedge \Eqsnd(\C^e_s)\), there exists \(\Sigma'\) such that \((\Sigma',\sigma) \in \Sol(\C^e_s)\), meaning that the requirement that solutions verify \(\Solved\)-basis can always be satisfied (which is key for satisfying the requirement that all symbolic transitions are reflected in the partition tree,
+      recall Item~\ref{it:PT-child-concrete-derivation} of Definition~\ref{def:partition-tree}).
+      %
+      Let us then consider
+      \begin{align*}
+        \Sigma & = \{X \mapsto a, Y \mapsto \snd(\ax_1)\} &
+        \Sigma' & = \{X \mapsto a, Y \mapsto a\} &
+        \sigma & = \{x \mapsto a, y \mapsto a\}
+      \end{align*}
+      Both \((\Sigma,\sigma)\) and \((\Sigma',\sigma)\) are solutions of the regular constraint system \((\Phi(\C^e_s), \Df(\C^e_s), \Eqfst(\C^e_s))\),
+      but only \((\Sigma',\sigma)\) is a solution of \(\C^e\).
+      This is because \(\Sigma\) does not verify uniformity:
+      two different recipes \(a\) and \(\snd(\ax_1)\) are used to deduce the same first-order term \(a\).
+      More generally we have \(\mgs(\C^e_s) = \{Y \mapsto X\}\).
+      To obtain this result, the constraint-solving procedure for computing mgs', detailed in Section \ref{sec:mgs-gen}, will observe that \(X\) and \(Y\) deduce the same term and should therefore be unified to satisfy uniformity.
+      A second-order equation \(X \eqs Y\) is thus added in \(\Eqsnd\), whose mgu is then the expected most general solution.
+    \end{example}
+
+    \begin{remark}[uniformity and complexity]
+      In some sense enforcing that solutions are uniform ensures their minimality in terms of DAG size, by forcing identical recipes to be reused as much as possible when constructing the solution.
+      This will be key for the complexity of our decision procedure, see Section~\ref{sec:termination}.
+    \end{remark}
+
+  \subsubsection{\cs: the basics} \label{sec:cs-basics}
+    Now we give details about the organisation of our constraint solver, detailed and proved correct in the next sections.
+    % Now we can formalise what the signature of our constraint-solving procedure, detailed in the next sections, will be, and give details about its overall structure.
+    As explained in Section \ref{sec:ext-mgs}, the goal of extended constraint system is to carry additional, structural information about solutions in a node \(n\), thus playing the role of the predicate \(\pi(n)\).
+    More formally the procedure operates on:
+
+    \begin{definition}[extended symbolic process, vector]
+      An \emph{extended symbolic process} is a tuple \((\P,\C,\C^e)\) where \((\P,\C)\) is a symbolic process and \(\C^e\) an extended constraint system.
+      We call a \emph{vector} a set of sets of extended symbolic processes \(\S = \{\Gamma_1, \ldots, \Gamma_n\}\).
+      Each set \(\Gamma_i\) is called a \emph{component} of \(\S\).
+    \end{definition}
+
+    An extended symbolic process \((\P,\C,\C^e)\) induces a predicate \(\pi\) on the solutions of \((\P,\C)\) defined as follows:
+    if \((\Sigma,\sigma) \in \Sol(\C)\), then \(\pi(\Sigma)\) holds \textit{iff} there exists \((\Sigma',\sigma') \in \Sol(\C^e)\) such that \(\Sigma \subseteq \Sigma'\) and \(\sigma \subseteq \sigma'\).
+    In particular \(\Sol[\pi](\C) = \Sol(\C^e)\) (up to domain restriction).
+    However, we recall that, in the definition of the node of a partition tree (configurations, Definition~\ref{def:configuration}), only \emph{one} common predicate \(\pi\) is used for all constraint systems \(\C\) of the configuration \(\Gamma\).
+    For consistency, we therefore have to impose conditions ensuring that the predicates \(\pi\) corresponding to each \(\C \in \Gamma\) are all identical.
+    %
+    Given a set of constraint systems \(\Gamma\) such that this property is not verified, the goal of the constraint-solving procedure is thus to refine \(\Gamma\) until obtaining a vector \(\S = \{\Gamma_1, \ldots, \Gamma_n\}\) such that
+
+    \medskip
+    \begin{enumerate}
+      \item each component \(\Gamma_i\) can be used to model a partition-tree node, that is, a predicate \(\pi_i\) can be defined as above uniformly across all elements of \(\Gamma_i\);
+      \item the underlying nodes verify the properties of the partition tree w.r.t. their father node \(\Gamma\).
+    \end{enumerate}
+    \medskip
+    
+    The procedure takes the form of various reduction relations that are used to refine a set of sets of extended symbolic processes, progressively, until reaching the final vector \(\S\):
+
+    \medskip
+    \begin{enumerate}
+      \item A set of rules to compute \emph{most general solutions} (Section \ref{sec:mgs-gen}).
+      \item A set of \emph{symbolic rules} (Section \ref{sec:symbolic-rules}) that formalise how to apply symbolic transitions to extended symbolic processes.
+      \item Various sets of \emph{simplification rules} (Sections \ref{sec:first-simplification-rules}, \ref{sec:normalisation-rules} and \ref{sec:vector-rules}) that simplify vectors to remove unsatisfiable systems, or to split components that contain processes with non-statically-equivalent solutions.
+      \item A set of \emph{case distinction rules} (Section \ref{sec:case-distinction-rules}) that refines the current vector based on case analyses to enforce the various properties of the partition tree (unique mgs in each component, maximal components w.r.t. static equivalence...).
+    \end{enumerate}
+    \medskip
+
+    The overall procedure organising the above sets of rules into a complete algorithm to compute a partition tree is then detailed in Section \ref{sec:correctness-proc}.
+    This can therefore be seen as the detailed version of the outline provided in Section \ref{sec:overview-ptree}.
+    The main arguments for proving the correctness of the computation are also provided in Section~\ref{sec:correctness-proc};
+    note however that these are only arguments of \emph{partial correctness}: 
+    the termination of the procedure is later justified in Section~\ref{sec:termination}.
+
+\subsection{\cs: computing most general solutions} \label{sec:mgs-gen}
+
+  \subsubsection{Applying solutions and unifiers} \label{sec:mgs-app}
+    Because solutions \(\Sigma\) may introduce new second-order variables, their applications to a constraint system or a formula is not straightforward.
+    %
+    Let for example \(\C^e = (\Phi, \Df, \Eqfst, \Eqsnd, \Solved, \USolved)\) where a variable \(\quanti{X}{k}\) is used to deduce a term \(u\), i.e. \((X \dedfact u) \in \Df\).
+    Now say we want consider the scenario where \(u\) is computed using a constructor \(\ffun/3\) and an entry of the knowledge base \((\xi \dedfact v) \in \Solved\) as a first argument, that is, we want to apply to \(\C^e\):
+    \begin{align*}
+      \Sigma & = \{X \rightarrow \ffun(\xi,X_1,X_2)\} &
+      X_1,X_2 \text{ fresh}
+    \end{align*}
+    The raw application \(\C^e \Sigma\) has a flawed structure, in particular because the variables \(X_1\) and \(X_2\) would not be bound in the resulting system.
+    To solve this issue we use a custom application mechanism that replaces \(X \dedfact u\) in \(\Df\) by \(X_1 \dedfact x_1,X_2 \dedfact x_2\), \(x_1,x_2\) fresh, and we add the equality \(u \eqs \ffun(v,x_1,x_2)\) to \(\Eqfst\) to express the logical link between \(X\) and \(X\Sigma = \ffun(\xi,X_1,X_2)\).
+    %
+    % We formalise this as follows.
+
+    \begin{definition}[application of a substitution to an extended constraint system] \label{def:application_mgs_csys}
+      Let \(\C^e = (\Phi, \Df, \Eqfst, \Eqsnd, \Solved, \USolved)\) and \(\Sigma\) be a substitution.
+      We write \(\CApply{\Sigma}{\C^e}\) the constraint system:
+      \[
+        (\Phi, \Df', \Eqfst \wedge E_\Sigma, \Eqsnd \Sigma \wedge \Sigma_{|\vars[2](\C^e)}, \Solved\Sigma, \USolved\Sigma)
+      \]
+      where \(\Df' = (\Df \smallsetminus D_\dom) \cup D_\freshlab\) with the sets of:
+      \begin{enumerate}
+        \item deduction facts removed by the application of \(\Sigma\):
+        \(D_\dom = \{ Y \dedfact u \in \Df \mid Y \in \dom(\Sigma)\}\)
+        \item binding facts:
+        \(D_\freshlab = \{ Y \dedfact y \mid Y \in \vars[2](\im(\Sigma_{|\vars[2](\C^e)})) \smallsetminus \vars[2](\C^e), y \text{ fresh}\}\)
+        \item linking equations:
+        \(E_\Sigma = \{ u \eqs v \mid Y \dedfact u \in D_\dom, (Y\Sigma,v) \in \conseq(\Solved\Sigma \cup \Df')\}\)
+      \end{enumerate}
+      By abuse of notation we may write \(\CApply{\Sigma}{S}\) for \((\P,\C,\CApply{\Sigma}{\C^e})\) if \(S = (\P,\C,\C^e)\).
+    \end{definition}
+
+    We will also use a similar mechanism for applying substitutions to formulas:
+    % Sometimes we also need to apply such subsitutions to formulas;
+    % for the same reasons, this requires some similar transformations to bind the new variables.
+
+    \begin{definition}[application of a substitution to a formula]
+      \label{def:application_mgs_formula}
+      Let \(\C^e = (\Phi, \Df, \Eqfst, \Eqsnd, \Solved, \USolved)\),
+      \(\psi = \clause[S]{H}{\varphi}\) be a formula,
+      and \(\Sigma\) be a substitution.
+      We denote \(\FApply{\Sigma}{\psi}{\C^e}\) (or \(\FApply{\Sigma}{\psi}{S}\) by abuse of notations if \(S = (\P,\C,\C^e)\)) the formula
+      \[
+          \clause[S']{H\Sigma}{(\Df' \wedge \Fhyp(\psi) \wedge E_\Sigma)}
+      \]
+      where \(\Df' = (\Df(\psi) \smallsetminus D_\dom) \cup D_\freshlab\), \(S' = (S \smallsetminus \dom(\Sigma)) \cup \vars[1](D_\freshlab)\) and:
+      \begin{enumerate}
+        \item \(D_\dom = \{ Y \dedfact u \in \Df(\psi) \mid Y \in \dom(\Sigma)\}\)
+        \item \(D_\freshlab = \{ Y \dedfact y \mid Y \in \vars[2](\im(\Sigma)) \smallsetminus \vars[2](\C,\psi), y \text{ fresh}\}\)
+        \item \(E_\Sigma = \left\{ u \eqs v \mid Y \dedfact u \in D_\dom,  (Y\Sigma,v) \in \conseq\left(\Solved \cup \Df \cup \Df'\right) \right\}\)
+      \end{enumerate}
+    \end{definition}
+
+  \subsubsection{Constraint-solving rules} \label{sec:mgs-rules}
+    \paragraph{A complete example}
+      By definition, the solutions of an extended constraint systems \(\C^e\) have to verify \(\Solved(\C^e)\)-basis, which means that in practice we only have to compute solutions constructed by applying constructors to the entries of the knowledge base and \(\Df\).
+      Besides due to the uniformity requirement we can always unify two recipes that deduce the same first-order term.
+      %
+      Putting everything together the most general solutions of an extended constraint system can then be computed with a simple transition system.
+      Let us detail a complete example to illustrate the mechanisms in play, before formalising the corresponding constraint-solving rules.
+
+      \begin{example}
+        Given \(k,r \in \Nall\), let us consider a situation where the attacker has observed the output of a hash \(\hfun(r)\), then inputs a term \(x\), receives in response a ciphertext \(\raenc(k,r,x)\) encrypted with \(x\), and finally inputs a term \(y\) that should verify the equation \(y \eqs \pair{k,\hfun(x)}\).
+        This is modelled by the frame \(\Phi = \{\ax_1 \mapsto \hfun(r), \ax_2 \mapsto \raenc(k,r,x)\}\) and the constraints
+        \begin{align*}
+          \Df & = \quanti{X}{1} \dedfact x \wedge \quanti{Y}{2} \dedfact y &
+          \Eqfst & = y \eqs \pair{k,\hfun(x)}
+        \end{align*}
+        At this point a saturated knowledge base should contain the two entries of the frame and one recipe indicating that decrypting \(\ax_2\) results in obtaining the name \(k\).
+        \[\Solved = \ax_1 \dedfact \hfun(r) \wedge \ax_2 \dedfact \raenc(k,r,x) \wedge \radec(\ax_2,X) \dedfact k\]
+        We consider that \(\Eqsnd = \top\) and we leave the set of formulas \(\USolved\) unspecified since it has no influence on solutions.
+        First of all some \emph{simplification rules} will be applied to propagate the equations on \(x\) and \(y\) to the whole system;
+        here it will apply \(\mgu(\Eqfst)\) to \(\Df\), resulting in
+        \[\Df = X \dedfact x \wedge Y \dedfact \pair{k,\hfun(x)}\]
+        The constraint-solving rules detailed in the remaining of this section consider all ways to compute recipes for \(X\) and \(Y\) from the knowledge base.
+        For each of these recipes two cases arise:
+        either
+        \begin{enumerate*}
+          \item it is picked directly from the knowledge base; or
+          \item it starts with a constructor symbol.
+        \end{enumerate*}
+        This will correspond to the constraint-solving rules \eqref{rule:res} and \eqref{rule:cons}, respectively.
+        Finally, to satisfy the uniformity property,
+        the procedure unifies any second-order terms in the system that deduce the same first-order term (Rule \eqref{rule:conseq}).
+        %
+        We keep on refining the case analysis with these three rules, removing branches yielding contradictions, until no more rules are applicable.
+        The resulting systems will either have no solutions, or be in a so-called \emph{solved form} and have \(\mgu(\Eqsnd)\) as a unique mgs.
+        Let us do it for our example:
+
+        \caseitem{\emph{{case 1}: the recipe for \(Y\) has a constructor symbol at its root (only possible case)}}
+
+          The constructor in question is necessarily the pair.
+          Therefore we let two fresh second-order variables \(\quanti{Y_1}{2},\quanti{Y_2}{2}\) and apply the substitution \(\{Y \mapsto \pair{Y_1,Y_2}\}\) to the system (in the sense of Definition \ref{def:application_mgs_csys}).
+          After simplification this leads to the updated second-order constraints:
+          \begin{align*}
+            \Df & = X \dedfact x \wedge Y_1 \dedfact k \wedge Y_2 \dedfact \hfun(x) &
+            \Eqsnd & = Y \eqs \pair{Y_1,Y_2}
+          \end{align*}
+
+        \caseitem{\emph{{case 1.1}: the recipe for \(Y_1\) is \(\radec(\ax_2,X)\) from the knowledge base (only possible case)}}
+
+          We thus apply the substitution \(\{Y_1 \mapsto \radec(\ax_2,X)\}\), resulting in the updated constraints:
+          \begin{align*}
+            \Df & = X \dedfact x \wedge Y_2 \dedfact \hfun(x) &
+            \Eqsnd & = Y \eqs \pair{\radec(\ax_2,X),Y_2} \wedge Y_1 \eqs \radec(\ax_2,X)
+          \end{align*}
+
+        \caseitem{\emph{{case 1.1.1}: the recipe for \(Y_2\) is the entry \(\ax_1\) from the knowledge base}}
+
+          We therefore apply the substitution \(\{Y_2 \mapsto \ax_1\}\), resulting in the updated constraints:
+          \begin{align*}
+            \Df & = X \dedfact r &
+            \Eqsnd & = Y \eqs \pair{\radec(\ax_2,X),\ax_1} \wedge Y_1 \eqs \radec(\ax_2,X) \wedge Y_2 \eqs \ax_1 
+          \end{align*}
+          However the constraints on \(X\) are now unsatisfiable:
+          the corresponding recipe can neither start with a constructor nor be an entry of the knowledge base.
+          The constraints in this branch of the case analysis therefore have no solutions.
+
+        \caseitem{\emph{{case 1.1.2}: the recipe for \(Y_2\) has a constructor symbol at its root}}
+
+          The constructor in question is necessarily \(\hfun\).
+          Similarly to case 1 we apply the substitution \(\{Y_2 \mapsto \hfun(Y_3)\}\) for some fresh variable \(\quanti{Y_3}{2}\) which results in the updated constraints:
+          \begin{align*}
+            \Df & = X \dedfact x \wedge Y_3 \dedfact x &
+            \Eqsnd & = Y \eqs \pair{\radec(\ax_2,X),\hfun(Y_3)} \wedge Y_1 \eqs \radec(\ax_2,X) \wedge Y_2 \eqs \hfun(Y_3)
+          \end{align*}
+          Then we observe that \(X\) and \(Y_3\) should be unified by uniformity because they deduce the same first-order term \(x\).
+          We have \(\mgu(X \eqs Y_3) = \{Y_3 \mapsto X\}\) (we recall that \(\{X \mapsto Y_3\}\) is \emph{not} a valid second-order substitution because \(Y_3\) has a strictly greater type than \(X\)) which, after application to the system, results in the updated constraints:
+          \begin{align*}
+            \Df & = X \dedfact x &
+            \Eqsnd & = Y \eqs \pair{\radec(\ax_2,X),\hfun(X)} \wedge Y_1 \eqs \radec(\ax_2,X) \wedge Y_2 \eqs \hfun(X) \wedge Y_3 \eqs X
+          \end{align*}
+          This will be a typical example of system in solved form.
+          Since we considered all cases and only this branch was successful we conclude that the overall system has a unique mgs which is \(\mgu(\Eqsnd) = \{Y \mapsto \pair{\radec(\ax_2,X),\hfun(X)}\}\).
+      \end{example}
+
+    \paragraph{Formalisation}
+      We will formalise the simplification rules in the next section and focus here on the main three rules \eqref{rule:conseq}, \eqref{rule:res} and \eqref{rule:cons} mentioned in the above example.
+      For that we reason about a set \(\recipes(\C^e)\) that represents all recipes that are already used to constraint the solutions of \(\C^e\):
+      \[\recipes(\C^e) =
+        \stc(\im(\mgu(\Eqsnd(\C^e)), \Solved(\C^e) \cup \Df(\C^e))
+        \cup \vars[2](\Df(\C^e))\]
+      As we saw in the example, the mgs is gradually constructed ``within \(\Eqsnd\)'', in the sense that after normalising \(\C^e\) with the transition system defined in this section, it will have \(\mgu(\Eqsnd)\) as a unique mgs.
+      In particular an invariant of our transition system is that \(\im(\mgu(\Eqsnd(\C^e)))\) is consequence of \(\Solved(\C^e)\) and \(\Df(\C^e)\), hence the notation \(\recipes(\C^e)\) is well defined.
+      %
+      Formally speaking the transition system relies on three rules of the form
+      \[\tag{\mbox{\(\star\)}} \label{rule:mgs-base}
+        \C^e\ \xrightarrow{\Sigma}\ \CApply{\Sigma}{\C^e}\]
+      for some subtitution \(\Sigma\) and under various conditions capturing the possible ways to satisfy the constraints of \(\C^e\).
+      The uniformity property is expressed by applying \eqref{rule:mgs-base} with
+      \begin{equation}
+        \tag{\mbox{\textsc{MGS-Conseq}}}
+        \parbox{0.75\textwidth}{
+          \(\Sigma = \mgu(\xi \eqs \zeta)\) for some \(\xi \in \recipes(\C^e) \cup \sig_0\), \(\zeta \in \recipes(\C^e)\), and provided
+          \(\Sigma \neq \top\), \(\Sigma \neq \bot\), and \(\exists u. (\xi,u), (\zeta,u) \in \conseq(\Solved(\C^e) \cup \Df(\C^e))\)
+        }
+        \label{rule:conseq}
+      \end{equation}
+      %
+      The result is the unification in \(\C^e\) of the two second-order terms \(\xi\) and \(\zeta\) that deduce the same term \(u\).
+      It then remains to add rules that express how each term \(u\), \((X \dedfact u) \in \Df(\C^e)\), can be constructed by the adversary from the knowledge base.
+      When Rule \eqref{rule:conseq} is not applicable we thus apply \eqref{rule:mgs-base} under one of the following two conditions.
+      The first one expresses that \(u\) is computed by directly using an entry from the knowledge base:
+      %
+      \begin{equation}
+        \tag{\mbox{\textsc{MGS-Res}}}
+        \parbox{0.75\textwidth}{
+          \(\Sigma = \mgu(X \eqs \xi) \neq \bot\) where, for some \(u \notin \X\), there exist deduction facts \((X \dedfact u) \in \Df(\C^e)\) and \((\xi \dedfact v) \in \Solved(\C^e)\)
+          %and for all \(\zeta \in \recipes(\C^e) \smallsetminus \{X\}\), \((\zeta,u) \notin \conseq(\Solved(\C^e) \cup \Df(\C^e))\)
+        }
+        \label{rule:res}
+      \end{equation}
+      %
+      Then the last rule expresses that the computation of \(u\) starts by applying a constructor \(\ffun\):
+      %
+      \begin{equation}
+        \tag{\mbox{\textsc{MGS-Cons}}}
+        \parbox{0.75\textwidth}{
+          \(\Sigma = \{ X \rightarrow \ffun(X_1,\ldots, X_n)\}\) where \(\quanti{X_1}{k},\ldots, \quanti{X_n}{k}\) are fresh, and there exists a deduction fact \((\quanti{X}{k} \dedfact \ffun(u_1,\ldots, u_n)) \in \Df(\C^e)\)
+          % such that for all \(\xi \in \recipes(\C^e) \smallsetminus \{ X\}\), \((\xi,\ffun(u_1,\ldots, u_n)) \notin \conseq(\Solved(\C^e) \cup \Df(\C^e))\)
+        }
+        \label{rule:cons}
+      \end{equation}
+      %
+      As said above we always apply Rule~\eqref{rule:conseq} in priority, that is, we add to the last two rules the condition that Rule~\eqref{rule:conseq} cannot be applied.
+      This will be crucial in particular when studying the complexity of the procedure in Section~\ref{sec:termination}.
+
+  \subsubsection{First set of simplification rules} \label{sec:first-simplification-rules}
+    To effectively compute most general solutions, the above three rules are applied repeatively, but some \emph{simplification rules} are also used in between.
+    Their role is to put the system in a simpler form and to detect unsatisfiable ones.
+    Other simplification rules, serving different purposes, will be introduced later in the procedure.
+    The rules here are of two kinds:
+    \begin{enumerate}
+      \item \emph{simplification rules for formulas} that simply compute mgu and simplify the hypotheses of formulas; and
+      \item \emph{simplification rules for mgs'} that apply mgu to the rest of the system, and detect unsatisfiability through contradictions or violations of uniformity.
+    \end{enumerate}
+
+    \paragraph{Simplification rules for formulas}
+      We first introduce basic simplification rules for formulas that will be used even outside of the computation of most general solutions.
+      We define five sets rules in Figure \ref{fig:normalisation_formula} that apply on constraints of \(\Eqfst\), \(\Eqsnd\) and \(\USolved\).
+
+      \begin{figure}[ht]
+        \[
+          \begin{array}{l@{\quad}l}
+            \mbox{\em Misc.} &
+              \neg \top \simpl \bot \qquad \qquad
+              \neg \bot \simpl  \top \qquad \qquad
+              \varphi \wedge \top \simpl \varphi \qquad
+              \varphi \wedge \bot \simpl \bot \\[3mm]
+            %
+            \text{\em Universal vars.} & \clause[S \cup
+            \{x\}]{H}{(x \eqs u \wedge \varphi)} \simpl
+            \clause[S]{H\sigma}{\varphi\sigma} \qquad \text{if}\ \sigma =
+            \mgu(x \eqs u) \neq \bot \\
+            & \clause[S \cup \{x\}]{H}{\varphi}
+            \simpl \clause[S]{H}{\varphi} \qquad \text{if}\ x \notin
+            \vars[1](\varphi) \\[3mm]
+            %
+            \mbox{\em 1\textsuperscript{st} order eq.} &
+              u \eqs v \simpl \mgu(u \eqs v) \\[3mm]
+            \mbox{\em 1\textsuperscript{st} order diseq.} &
+            \forall S.\, \phi \simpl
+                \left\{\begin{array}{ll}
+                  \forall S.\, \displaystyle \bigvee_{x \in \dom(\sigma)} x \neqs x\sigma & \mbox{with } \sigma = \mgu(\neg\phi) \neq \bot\\
+                  \top & \mbox{if } \mgu(\neg\phi) = \bot
+                \end{array}\right. \\\\
+              % & \forall S.\, \bigvee_{i=1}^n u_i \neqs v_i \simpl \forall S.\, \neg \mgu(\bigwedge_{i=1}^n u_i \eqs v_i)\\\\
+            %
+            \mbox{\em 2\textsuperscript{nd} order diseq.} &
+              \forall S.\, \phi \simpl
+                \left\{\begin{array}{ll}
+                  \forall S \cup S'.\hspace{-2mm} \displaystyle \bigvee_{X \in \dom(\Sigma)} \hspace{-3mm} X \neqs X\Sigma
+                    & \mbox{with } \Sigma = \mgu(\neg\phi) \neq \bot \\[-4mm]
+                    & \text{and } S' = \vars[2](\im(\Sigma)) \smallsetminus \vars[2](\phi)\\[2mm]
+                  \top & \mbox{if } \mgu(\neg\phi) = \bot
+                \end{array}\right.
+              % \forall S.\, \bigvee_{i=1}^n \xi_i \neqs \zeta_i \simpl \forall S.\, \neg \mgu(\bigwedge_{i=1}^n \xi_i \eqs \zeta_i)
+          \end{array}
+        \] %\vspace{-5mm}
+        \caption{Simplification rules on formulae}
+        \label{fig:normalisation_formula}
+      \end{figure}
+
+      We recall that, in the case of the simplification of second order disequations, the computation of mgu may introduce new variables to match arities (see Section~\ref{sec:unification}), hence the need for the universal quantified variables \(S'\).
+      No rules are needed for second-order equations in the context of our decision procedure, since Rules \eqref{rule:conseq}, \eqref{rule:res} and \eqref{rule:cons} already apply mgu to the entire system.
+      The simplification rules are lifted to extended constraint systems \(\C^e\) in the natural way, by applying the simplifications to all formulas of \(\Eqfst(\C^e)\), \(\Eqsnd(\C^e)\) and \(\USolved(\C^e)\).
+
+    \paragraph{Simplification rules for MGS}
+      In addition of the rules of Figure \ref{fig:normalisation_formula} we define a couple of other rules specific to the computation of most general solutions.
+      First of all the rule
+      \begin{equation}
+        % Unification Eqfst
+        \label{rule:unifEqfst_simpl}
+        \tag{\mbox{\textsc{MGS-Unif}}}
+        (\Phi, \Df, \Eqfst \wedge x \eqs u, \Eqsnd, \Solved, \USolved)
+        \quad  \simpl \quad
+          (\Phi\sigma, \Df\sigma, \Eqfst\sigma \wedge x \eqs u, \Eqsnd, \Solved\sigma, \USolved\sigma)
+      \end{equation}
+      where \(x \in \vars[1](\Eqfst, \Df, \Phi, \Solved, \USolved) \smallsetminus \vars(u)\) and \(\sigma = \{x \mapsto u\}\),
+      propagates first-order mgu in the whole system.
+      We also consider the following rule discarding a system with no solutions
+      \begin{equation}
+        % Unsatisfiability
+        \label{rule:mgs-unsat}
+        \tag{\mbox{\textsc{MGS-Unsat}}}
+        \C^e \simpl \bot
+      \end{equation}
+      where either of the following three conditions is satisfied:
+      \begin{enumerate}
+        \item \label{it:mgs-unsat}
+        % \emph{the system is not satisfiable:}
+        \(\Eqfst = \bot\)
+        \item \label{it:mgs-not-uniform}
+        % \emph{the system has not uniform solutions:}
+        there exist \(\xi,\zeta \in \recipes(\C^e)\) such that \((\xi,u),(\zeta,u) \in \conseq(\Solved(\C^e) \cup \Df(\C^e))\) and,
+        writing \(\Sigma = \mgu(\xi \eqs \zeta)\), either \(\Sigma = \bot\) or \(\Eqsnd \Sigma \simpl^* \bot\) with the rules of Figure \ref{fig:normalisation_formula}
+        \item \label{it:mgs-private}
+        % \emph{a private channel is deducible}:
+        there exist \((\forall \quanti{X}{i}.\, X \ndedfact u) \in \Df(\C^e)\) and \(\xi \in \recipeset_i\) such that \((\xi,u) \in \conseq(\Solved(\C^e) \cup \Df(\C^e))\)
+      \end{enumerate}
+
+      The first condition captures trivially unsatisfiable systems, the second one systems with no uniform solutions, and the third one exhibits a public channel that has been used for an internal communication (which is forbidden by the semantics).
+      Since the whole set of simplification rules (Figure \ref{fig:normalisation_formula} and the above two) is convergent modulo renaming of variables, we denote \(\C \simplnorm\) a normal form of the extended constraint system \(\C\) w.r.t. \(\simpl\).
+
+  \subsubsection{Overall procedure and correctness} \label{sec:mgs-proc}
+    \paragraph{Description of the procedure}
+      The point of the transition systems above is to transform an extended constraint system into a form where it has a unique mgs.
+      More formally:
+
+      \begin{definition}[solved extended constraint system]
+        An extended constraint system \(\C^e\) is in \emph{solved form} if \(\C^e \neq \bot\), \(\C^e\) is irreducible w.r.t. \(\simpl\) and \(\xrightarrow{\Sigma}\), and all deduction facts in \(\Df(\C^e)\) have  variables as first-order terms. 
+      \end{definition}
+
+      % In particular this implies that
+      % \begin{enumerate*}
+      %   \item all deduction facts in \(\Df\) have \emph{distinct} variables as first-order terms,
+      %   \item for all constraints \((\forall X.\, X \ndedfact u) \in \Df\), \(u\) is not consequence of \(\Solved(\C^e) \cup \Df(\C^e)\), and
+      %   \item for all \((\xi,\zeta) \in (\recipes(\C) \cup \sig_0)^2\),
+      %   \((\xi,u), (\zeta,u) \in \conseq(\Solved(\C^e) \cup \Df(\C^e))\) implies \(\xi = \zeta\).
+      % \end{enumerate*}
+      Intuitively for such constraint systems, \(\mgu(\Eqsnd(\C^e))\) is the unique mgs of \(\C^e\).
+      Note however that this method for computing mgs' is only correct under some invariants of our overall procedure.
+      Typically, since second-order equations are not handled by simplification rules,
+      if \(\Eqsnd\) contains two contradictory equations \(X \eqs a \wedge X \eqs b\) for two constants \(a \neq b\), our procedure would fail to detect the contradiction.
+      % The invariants in question (called with ``\(\predlab\)'' names such as \(\PredWellFormed\), \(\PredCorrectFormula\)...) are formally defined in Appendix \ref{app:ptree}, Section \ref{app:invariants} but we make explicit mention to them in this section for the sake of precision.
+      % Knowing their exact definition is not necessary to understand this section.
+      %
+      If we define the reduction relation \(\SimpStep{\Sigma}\) as the reflexive transitive closure of the composition of relations \(\simpStep{\sigma}\),
+      then under the invariants of the procedure we compute a set of most general solutions of \(\C^e\) as the set
+      \(
+        \{ \Sigma_{|\vars[2](\C^e)} \mid \C^e \SimpStep{\Sigma} \C^{e\prime}, \C^{e\prime} \text{ solved}\}\,.
+      \)
+      % This property is formally proved in Appendix \ref{sec:correctness-proc}.
+
+      \begin{remark}[notation for extended symbolic processes]
+        For convenience we often abuse notations and, if \(S = (\P,\C,\C^e)\) is an extended symbolic process, we write \(\mgs(S)\) instead of \(\mgs(\C^e)\) or say that \(S\) is in solved form.
+      \end{remark}
+
+    \paragraph{Correctness arguments}
+      As mentioned earlier this procedure is only correct under some additional properties verified all along Algorithm~\ref{alg:ptree}.
+      For the sake of precision we make explicit mention to these two invariants, \(\PredWellFormed(\C^e)\) and \(\PredCorrectFormula(\C^e)\).
+      They are formally defined in Appendix~\ref{app:invariants} with a proof that they are preserved during the whole computation of the partition tree, but knowing their exact definition is not necessary to understand the results of this section.
+      The core correctness arguments can be decomposed into following propositions, and are derived from the results proved in Appendix~\ref{app:mgs}.
+      The first one states that when an extended constraint system cannot be reduced anymore then its set of most general solutions is either empty or a singleton:
+
+      \begin{proposition}[restate={propCorrectMgsSolved},name={mgs of an irreducible system}] \label{prop:correct-mgs-solved}
+        Let \(\C^e\) be an extended constraint system that is irreducible w.r.t. \(\simpl\) and \(\xrightarrow{\Sigma}\), and such that the invariants \(\PredWellFormed(\C^e)\) and \(\PredCorrectFormula(\C^e)\) hold.
+        Then
+        \begin{enumerate}
+          \item if \(\C^e\) is in solved form then \(\mgs(\C^e) = \{\mgu(\Eqsnd(\C^e))\}\)
+          \item otherwise \(\mgs(\C^e) = \emptyset\)
+        \end{enumerate}
+      \end{proposition}
+
+      The second argument is that applying the mgs constraint-solving rules is correct w.r.t. the solutions of the initial system.
+
+      \begin{proposition}[restate={propSoundMgsStep},name={soundness of one step of the mgs constraint solving}] \label{prop:sound-mgs-step}
+        Let \(\C^e\) be an extended constraint system with \(\C^e = \C^e \simplnorm\).
+        If \(\C^e \simpStep{\Sigma} \C^{e\prime}\) and \((\Sigma',\sigma) \in \Sol(\C^{e\prime})\) then \((\Sigma'_{|\vars[2](\C^e)}, \sigma_{|\vars[1](\C^e)}) \in \Sol(\C^e)\).
+      \end{proposition}
+
+      Finally the last argument formalises than all solutions can be expressed as a sequence of mgs constraint-solving transitions.
+
+      \begin{proposition}[restate={propCompleteMgsStep},name={completeness of one step of the mgs constraint solving}] \label{prop:complete-mgs-step}
+        Let \(\C^e\) be an extended constraint system such that \(\C^e \simplnorm = \C^e\) and the invariants \(\PredWellFormed(\C^e)\) and \(\PredCorrectFormula(\C^e)\) hold.
+        We also assume that at least one mgs constraint-solving rule is applicable to \(\C^e\).
+        Then for all \((\Sigma,\sigma) \in \Sol(\C^e)\), there exist a constraint-solving transition \(\C^e \simpStep{\Sigma_0} \C^{e\prime}\) and \(\Sigma \subseteq \Sigma'\), \(\sigma \subseteq \sigma'\) such that \((\Sigma',\sigma') \in \Sol(\C^{e\prime})\).
+      \end{proposition}
+
+      Together these three results give the partial correctness of the procedure, that is, the correctness of the computation when it terminates.
+      The termination is studied in Section~\ref{sec:termination}:
+
+      \begin{theorem}[partial correctness of mgs computation]
+        Let \(\C^e\) be an extended constraint system such that \(\PredWellFormed(\C^e)\) and \(\PredCorrectFormula(\C^e)\) hold.
+        Then, assuming there exist no infinite sequences of \(\simpStep{}\) reductions from \(\C^e\), we have
+        \[\mgs(\C^e) = \{\Sigma_{|\vars[2](\C^e)} \mid \C^e \simplnorm \SimpStep{\Sigma} \C^{e\prime}, \C^{e\prime} \text{ solved}\}\]
+      \end{theorem}
+
+      \begin{proof}
+        Since a set of mgs' of \(\C^e\simplnorm\) is also a set of mgs' of \(\C^e\), we assume without loss of generality that \(\C^e \simplnorm = \C^e\).
+        Let us write \(S = \{\Sigma_{|\vars[2](\C^e)} \mid \C^e \SimpStep{\Sigma} \C^{e\prime}, \C^{e\prime} \text{ solved}\}\) and prove that \(S\) is a set of mgs' of \(\C^e\simplnorm\).
+        By the termination assumption, we can reason by well-founded induction on the reduction relation \(\simpStep{}\) from \(\C^e\).
+        Using such an induction we can prove the two requirements of the definition, that is:
+        \begin{enumerate}
+          \item that all \(\Sigma \in S\) are solutions of \(\C^e\) after replacing their second-order variables by fresh constants (base case: Proposition \ref{prop:correct-mgs-solved};
+          inductive case: soundness, i.e., Proposition \ref{prop:sound-mgs-step}).
+          \item that all solutions of \(\C^e\) are instances of a substitution of \(S\)
+          (base case: Proposition \ref{prop:correct-mgs-solved} again;
+          inductive case: completeness, i.e., Proposition \ref{prop:complete-mgs-step}). \qedhere
+        \end{enumerate}
+      \end{proof}
+
+\subsection{\cs: symbolic and simplification rules}
+
+  \subsubsection{Symbolic rules} \label{sec:symbolic-rules}
+
+    The symbolic rules simply apply the transitions of the symbolic semantics to extended symbolic processes, adding the corresponding constraints to both the symbolic process and the extended constraint system.
+    In that sense most rules are close to identical to those of the symbolic semantics (Section \ref{sec:symbolic-semantics}).
+    Typically the analogue of the rule \eqref{rule:s-in} is:
+    \begin{equation}
+      \tag{\mbox{\textsc{E-In}}} \label{rule:e-in}
+      (\multi {\InP {u} {x}.P} \cup \P, \C, \C^e)
+        \sstep {\InP {Y} {X}} (\multi {P} \cup \P, \mathit{incr}(\C), \mathit{incr}(\C^e))
+    \end{equation}
+    where, if \(\D \in \{\C,\C^e\}\), \(\mathit{incr}(\D) = \D[\Df \mapsto \Df \wedge X \dedfact x \wedge Y \dedfact y, \Eqfst \mapsto \Eqfst \wedge \sigma]\)
+    with \(\quanti{Y}{n}\), \(\quanti{X}{n}\) and \(y\) fresh (\(n\) size of the domain of the frame of \(\C\)), and \(\sigma \in \mguR(y \eqs u \mu)\), \(\mu = \mgu(\Eqfst(\C)) \neq \bot\).
+    The only rule that is not a trivial extension of the symbolic semantics is the one for outputs that puts a deduction fact in \(\USolved\) to model the additional capability this offers to the attacker:
+    \begin{equation}
+      \tag{\mbox{\textsc{E-Out}}} \label{rule:e-out}
+      (\multi {\OutP {u} {v}.P} \cup \P, \C, \C^e)
+        \sstep {\OutP {Y} {\ax_{n+1}}} (\multi {P} \cup \P, \mathit{incr}(\C), \mathit{incr}(\C^e)[\USolved \mapsto \USolved \wedge \ax_{n+1} \dedfact v \sigma \norm])
+    \end{equation}
+    where, if \(\D \in \{\C,\C^e\}\), \(\mathit{incr}(\D) = \D[\Phi \mapsto \Phi \cup \{\ax_{n+1} \mapsto v \mu \sigma \norm\}, \Df \mapsto \Df \wedge Y \dedfact y, \Eqfst \mapsto \Eqfst \wedge \sigma]\)
+    with \(\quanti{Y}{n}\) and \(y\) fresh (\(n\) size of the domain of the frame of \(\C\)), and \(\sigma \in \mguR(y \eqs u \mu \wedge v\mu \eqs v\mu)\), \(\mu = \mgu(\Eqfst(\C)) \neq \bot\).
+    We omit the definition of the remaining rules corresponding to the other symbolic transitions, all constructed being constructed similarly to \eqref{rule:e-in} by copying the new constraints of \(\C\) into \(\C^e\).
+
+  \subsubsection{Normalisation rules} \label{sec:normalisation-rules}
+
+    We define a new set of simplification rules, called \emph{normalisation rules}, that operate on extended constraint systems.
+    Similarly to the simplification rules for most general solutions introduced in Section \ref{sec:first-simplification-rules} they propagate first-order unifiers across the system and replace unsatisfiable systems by \(\bot\).
+    They also rely on the computation of mgs' of Section \ref{sec:mgs-gen}, for example to identify and remove trivial constraints such as formulas with unsatisfiable hypotheses.
+    They are defined in Figure \ref{fig:normalisation_constraint_systems} and commented below (in particular regarding the definition of \(\receq\)).
+
+    \begin{figure}[ht]
+      \begin{align}
+        % Unification Eqfst
+        \tag{\mbox{\textsc{Norm-Unif}}}
+        \label{rule:unifEqfst_norm}
+        \C^e & \simpl \C^{e\prime} && \text{if \(\C^e \simpl \C^{e\prime}\) by rule \eqref{rule:unifEqfst_simpl}}\\
+        % Uniformity
+        \tag{\mbox{\textsc{Norm-no-MGS}}}
+        \label{rule:uniform}
+        \C^e & \simpl \bot && \mbox{if \(\mgs(\C^e) = \emptyset\)}\\
+        % Disequation removal
+        \tag{\mbox{\textsc{Norm-Diseq}}}
+        \label{rule:Disequation removal 1}
+        \C^e[\Eqfst \mapsto \Eqfst \wedge \forall \tilde{x}. \phi]
+        & \simpl
+        \C^e && \mbox{if \(\mgs(\C^e[\Eqfst \mapsto \Eqfst \wedge \neg\phi]) = \emptyset\)}\\
+        % private channel removal
+        % \tag{\mbox{\textsc{Norm-channel}}}
+        % \label{rule:channel removal}
+        % \C^e[\Df \mapsto \Df \wedge \forall X.\phi]
+        % & \simpl
+        % \C^e && \text{if \(\mgs(\C^e[\Df \mapsto \Df \wedge \neg\phi]) = \emptyset\)}\\
+        % trivial formula removal
+        \tag{\mbox{\textsc{Norm-Formula}}}
+        \label{rule:Disequation removal 2}
+        \C^e[\USolved \mapsto \USolved \wedge \psi]
+        & \simpl \C^e && \mbox{if \(\mgs(\C^e[\Eqfst \mapsto \Eqfst \wedge \Fhyp(\psi)]) = \emptyset\)}\\
+        % Removal of unsolved formula
+        \tag{\mbox{\textsc{Norm-Dupl}}}
+        \label{rule:Removal of unsolved formula}
+        \C^e[\USolved \mapsto \USolved \wedge \psi]
+        & \simpl \C^e && \mbox{if \(\exists \psi' \in \USolved\), \(\psi' \receq \psi\) and \(\psi'\) solved}
+      \end{align}
+      \caption{Normalisation rules on extended constraint systems}
+      \label{fig:normalisation_constraint_systems}
+    \end{figure}
+
+    We recall that we also write \(\C^e \simpl \C^{e\prime}\) if a constraint of \(\Eqfst(\C^e)\), \(\Eqsnd(\C^e)\) or \(\USolved(\C^e)\) can be simplified using one of the simplification rules on formulas (Figure \ref{fig:normalisation_formula}).
+    The relation \(\simpl\) can be lifted to sets of (sets of) extended constraint systems or symbolic processes in the natural way.
+    Let us now comment on the rules of Figure \ref{fig:normalisation_constraint_systems}.
+    Rule \eqref{rule:unifEqfst_norm} uses the same rule as in the mgs constraint solving to propagate first-order unifiers to the whole system.
+    The next three rules exploit the existence of a most general solution of the constraint system to simplify some constraints:
+
+    \medskip
+    \begin{enumerate}
+      \item Rule \eqref{rule:uniform} checks whether the constraint system is unsatisfiable, i.e., does not have a most general solution, and in this case transforms it into \(\bot\).
+      \item Rule \eqref{rule:Disequation removal 1} similarly removes a disequation \(\forall \tilde{x}. \phi\) in \(\Eqfst\) when it does not effectively restrict the solutions:
+      for that we require the constraint system not to have solutions that contradict the disequation.
+      \item Analogously Rule \eqref{rule:Disequation removal 2} removes a formula with unsatisfiable hypotheses.
+      The fact that we only consider the equations among the hypotheses (recall that \(\Fhyp{\psi}\) omits the hypotheses of \(\psi\) that are deduction facts) is due to an invariant of our procedure.
+      We will indeed ensure that formulae are only added to the set \(\USolved\) after all deduction facts have been removed from hypotheses by appropriate solving.
+    \end{enumerate}
+    \medskip
+
+    % Following the same approach as the last two rules, one could imagine a rule removing a non-deducibility constraint \(\forall X.\, X \ndedfact u\) from \(\Df\)
+    % provided \(\mgs(\C^e[\Df \mapsto \Df \wedge X \dedfact u]) = \emptyset\).
+    % This would however not be sound in general since the knowledge base may not be saturated, that is, there may exist a solution satisfying \(X \dedfact u\) due to an entry added to \(\Solved(\C^e)\) in the future.
+    % The treatment of non-deducibility facts will be handled by a dedicated case-distinction rule, see Section \ref{sec:rule-chan}.
+    %
+    Finally Rule \eqref{rule:Removal of unsolved formula} removes an unsolved deduction or equality formula \(\psi\) from \(\USolved\) when it is subsumed by another formula \(\psi'\).
+    This is formalised by the following notion of equivalence:
+
+    \begin{definition}[head equivalence of formulas]
+      Let \(\psi = \clause{H}{\varphi}\) and \(\psi' = \clause{H'}{\varphi'}\) be two formulas.
+      We say that \(\psi\) and \(\psi'\) are \emph{head equivalent}, written \(\psi \receq \psi'\), if for some \(\xi,\zeta,u,u'\) either \(H = H' = (\xi \eqf \zeta)\), or \(H = (\xi \dedfact u)\) and \(H' = (\xi \dedfact u')\).
+    \end{definition}
+
+    That is, two formulas are head equivalent if their heads have the same second-order terms (but may differ on their first-order terms), which means they model the same attacker action.
+    In particular if \(\psi \receq \psi'\) and \(\psi'\) is solved (namely has no hypotheses anymore) then the formula \(\psi\) is already implied by \(\psi'\) which is why Rule \eqref{rule:Removal of unsolved formula} can remove it from \(\USolved\).
+
+  \subsubsection{Vector-simplification rules} \label{sec:vector-rules}
+
+    We now define simplification rules that focus on vector, thus called \emph{vector-simplification rules}.
+    They are described in Figure \ref{fig:normalisation_vector} and focus among other things on adding formulas and entries in the knowledge base.
+    This has to be done concurrently on an entire vector component to ensure that the same attacker actions can be performed in all of its elements, that is, that they have statically-equivalent solutions.
+    The rules assume that the constraint systems have been normalised by the normalisation rules (see Figure \ref{fig:normalisation_constraint_systems}), and one of them uses our custom notation for applying a substitution \(\Sigma\) to a formula (Section \ref{sec:mgs-app}, Definition \ref{def:application_mgs_formula}).
+    Finally, for the sake of succinctness, if \(S = (\P,\C,\C^e)\) is an extended symbolic process we refer as \(\Phi(S), \Eqfst(S), \Eqsnd(S), \ldots\) to the corresponding components of \(\C^e\).
+
+    \begin{figure}[ht]
+      \begin{equation}
+        \tag{\mbox{\textsc{Vect-rm-Unsat}}}
+        \label{rule:vectorbot}
+        \S \cup \{ \Gamma \cup \{ (\P,\C,\bot) \} \}
+        \simpl
+        \S \cup \{ \Gamma \}
+      \end{equation}
+      \begin{equation}
+        \tag{\mbox{\textsc{Vect-Split}}}
+        \label{rule:vector-split solved}
+        % \S \cup \left\{ \{(\P_i,\C_i,\C^e_i)\}_{i=1}^{n} \right\} \simpl \S \cup \left\{ \{(\P_i,\C_i,\C^e_i)\}_{i=1}^m, \{(\P_i,\C_i,\C^e_i)\}_{i=m+1}^{n} \right\}
+        \S \cup \{\Gamma\} \simpl \S \cup \{\Gamma^+, \Gamma^-\}
+      \end{equation}
+      if \(\Gamma^+,\Gamma^-\) is a partition of \(\Gamma\) and there exists a formula \(\psi\) such that
+      \begin{enumerate}
+        \item \(\forall S \in \Gamma^+,\,\exists \psi' \in \USolved(S),\, \psi \receq \psi' \text{ and } \psi'\) solved; and
+        \item \(\forall S \in \Gamma^-,\, \forall \psi' \in \USolved(S),\, \psi \not\receq \psi'\)
+      \end{enumerate}
+
+      \begin{equation}
+        \tag{\mbox{\textsc{Vect-add-Conseq}}}
+        \label{rule:vector-solve}
+        \S \cup \left\{ \Gamma \right\}
+        \simpl
+        \S \cup \left\{ \{ S[\Solved \mapsto \Solved \wedge \xi \dedfact u_{S}] \mid S \in \Gamma\} \right\}
+      \end{equation}
+      if for all \(S \in \Gamma\), \(S\) is solved, \(\xi \dedfact u_{S} \in \USolved(S)\) and for all second-order term \(\zeta\), \((\zeta,u_{S}) \notin \conseq(\Solved(S) \cup \Df(S))\)
+
+      \begin{equation}
+        \tag{\mbox{\textsc{Vect-add-Formula}}}
+        \label{rule:vector-consequence}
+        \S \cup \left\{ \Gamma \right\}
+        \simpl
+        \S \cup \left\{ \{ S[\USolved \mapsto \USolved \wedge \FApply{\Sigma}{\psi}{S})] \mid S \in \Gamma\} \right\}
+      \end{equation}
+      if \(\psi = \clause[X,Y,z]{X \eqf Y}{(X \dedfact z \wedge Y \dedfact z)}\) and \(\Sigma = \{X \mapsto \xi, Y \mapsto \zeta\}\), and
+      for all \(S \in \Gamma\),
+      \begin{enumerate}
+        \item \(S\) is solved
+        \item \(\USolved(S)\) contains a formula of the form \(\xi \dedfact u_{S}\).
+        Besides, there should exist \(S \in \Gamma\), such that \((\zeta,u_S) \in \conseq(\Solved(S) \cup \Df(S))\).
+        % \item \(\Sigma = \{ X \rightarrow \xi, Y \rightarrow \zeta\}\) and \(\psi = \left(\clause[X,Y,z]{(X \eqf Y)}{X \dedfact z \wedge Y \dedfact z}\right)\) with \(X,Y,z\) fresh variables
+        \item for all \((\clause{\zeta_1 \eqf \zeta_2}{\varphi}) \in \USolved(S)\), \(\zeta_1 \neq \xi\) and \(\zeta_2 \neq \xi\)
+        % \item there exists \(S_0\) such that \((\zeta,u_{S_0}) \in \conseq(\Solved(S_0) \cup \Df(S_0))\)
+        % \item \(\psi = \clause[X,Y,z]{X \eqf Y}{(X \dedfact z \wedge Y \dedfact z)}\) and \(\Sigma = \{X \mapsto \xi, Y \mapsto \zeta\}\)
+      \end{enumerate}
+      \caption{Vector-simplification rules for sets of sets of extended symbolic processes}
+      \label{fig:normalisation_vector}
+    \end{figure}
+
+    Rule \eqref{rule:vectorbot} removes \(\bot\) elements from the vector.
+    % In Rules \eqref{rule:vector-solve} and \eqref{rule:vector-consequence}, we assume that for all \(\C^e\) are irreducible by the normalisation rules
+    % (Figures \ref{fig:normalisation_constraint_systems} and \ref{fig:normalisation_formula}) and
+    % \(\C^e \neq \bot\) (i.e. they are solved).
+    Rule \eqref{rule:vector-split solved} splits a component whenever a common solution would yield statically inequivalent frames.
+    More specifically, the rule separates the constraint systems in \(\Gamma^+\) in which a given recipe always yields a message (resp. an equality always holds) from the constraint systems in \(\Gamma^-\) in which the same recipe would never yield a message (resp. the same equality would never hold).
+    This is characterised by the fact that a deduction (resp. equality) formula is solved in some constraint systems and not in the others. 
+    Rule \eqref{rule:vector-solve} adds a solved deduction formula from \(\USolved(S)\) to \(\Solved(S)\) when this formula is solved in the entire component \(\Gamma\) and the new knowledge-base entries are not redundant with existing ones.
+    Finally, when an equality fact \(\xi \eqf \zeta\) should hold in one constraint system, Rule \eqref{rule:vector-consequence} adds it to the entire component \(\Gamma\) (with appropriate hypotheses).
+    Observe that we use in this rule the placeholder formula \(\psi = \clause[X,Y,z]{X \eqf Y}{(X \dedfact z \wedge Y \dedfact z)}\), introduced in Section \ref{sec:formulas}, stating that two recipes deducing the same term should verify an equality fact.
+
+    % \begin{remark}[application of simplification rules]
+    %   Note that the vector-simplifications rules are not confluent in general.
+    %   When normalising vectors we therefore refer to one arbitrary normal form w.r.t. \(\simpl\).
+    % \end{remark}
+
+\subsection{\cs: case distinction rules} \label{sec:case-distinction-rules}
+ 
+  Our case distinction rules take the form of a transition system on vectors \(\S\) of extended symbolic processes similarly to the vector-simplification rules.
+  There are three different rules, each operating in a similar manner:
+  given a vector \(\S \cup \{\Gamma\}\), all rules perform a transformation of the following form on one component \(\Gamma\):
+  \[\tag{\mbox{\(\star\star\)}} \label{rule:case-base}
+    \S \cup \{\Gamma\} \rightarrow \S \cup \{\Gamma^+,\Gamma^-\}\]
+  where \(\Gamma^+\) (the \emph{positive branch}) is intuitively obtained by applying a mgs \(\Sigma\) on each symbolic processes of \(\Gamma\) and \(\Gamma^-\) (the \emph{negative branch}) by adding the formula \(\neg\Sigma\) to each symbolic process \(S \in \Gamma\), where
+  \begin{align*}
+    \neg\Sigma & = \forall S. \bigvee_{X \in \dom(\Sigma)} X \neqs X\Sigma &
+    \mbox{with } S = \vars[2](\im(\Sigma)) \smallsetminus \vars[2](\Gamma)
+  \end{align*}
+  Intuitively this refines the component \(\Gamma\) by considering the cases where \(\Sigma\) is a solution or not.
+  After that, normalising the refined components \(\Gamma^+\) and \(\Gamma^-\) with the simplification rules---in particular Rules \eqref{rule:vectorbot} and \eqref{rule:vector-split solved}---will discard impossibles cases and separate processes with newly-found non-statically-equivalent solutions.
+  The three case distinction rules \eqref{rule:satisfiable}, \eqref{rule:equality} and \eqref{rule:rewrite} are presented in the next sections by specifying how \(\Gamma^+\) and \(\Gamma^-\) are computed from \(\Gamma\).
+  They are applied using a particular strategy defined by the following ordering on rules (where < means ``has priority over''):
+  \[\ref{rule:satisfiable} < \ref{rule:equality} < \ref{rule:rewrite}\]
+  % \begin{figure}[ht]
+  %   \centering
+  %   \begin{tikzpicture}
+  % 		[node distance=12mm]
+  % 		\node (SAT) {\ref{rule:satisfiable}};
+  % 		\node (EQ) [above right of=SAT] {\ref{rule:equality}};
+  % 		\node (REW) [below right of=SAT] {\ref{rule:rewrite}};
+  % 		\node (CHAN) [right of=REW] {\ref{rule:channel}};
+  %
+  % 		\draw[-] (SAT) edge node {} (EQ);
+  % 		\draw[-] (SAT) edge node {} (REW);
+  % 		\draw[-] (REW) edge node {} (CHAN);
+  % 	\end{tikzpicture}
+  %   % \caption{Priority ordering for the application of case distinction rules}
+  %   % \label{fig:priority-case-distinction}
+  % \end{figure}
+
+  Note that this ordering is mostly arbitrary: only the minimality of \ref{rule:satisfiable} will be needed in Section~\ref{sec:termination} for complexity.
+  The other inequalities are only there to reduce the number of cases to be considered in proofs.
+
+  \subsubsection{Rule Sat}
+
+    The first rule focuses on satisfiability:
+    its goal is to separate extended constraint systems of \(\Gamma\) that do not have the same solutions.
+    For example if we have \(S = (\P,\C,\C^e) \in \Gamma\) and \(\Sigma \in \mgs(\C^e)\), all other symbolic processes \(S' \in \Gamma\) should also have a solution that is an instance of \(\Sigma\) (and if not, the component \(\Gamma\) should be split to separate \(S\) and \(S'\)).
+    In particular this ensures that when this rule cannot be applied anymore, all extended constraint system in \(\Gamma\) share a common, unique mgs (in particular they are in solved form).
+    The same mechanism can be used to consider the solutions \(\Sigma\) making trivial some disequations of \(\Eqfst\) or hypotheses of some formulas in \(\USolved\).
+    In particular the normalisation rules defined earlier in Section \ref{sec:normalisation-rules} will then handle the now trivial or unsatisfiable constraints.
+    All this can be formalised as an instance of \eqref{rule:case-base} with:
+
+    \begin{mdframed}[style=margindefstyle]
+      \begin{equation}
+        \tag{\text{\textsc{Sat}}}
+        \label{rule:satisfiable}
+        \begin{array}{r@{\ }l}
+          \Gamma^+ & = \{\CApply{\Sigma}{S} \mid S \in \Gamma\} \\
+          \Gamma^- & = \{S[\Eqsnd \mapsto \Eqsnd \wedge \neg\Sigma] \mid S \in \Gamma\}
+        \end{array}
+      \end{equation}
+      where there exists \(S \in \Gamma\) such that either
+      \begin{enumerate}%[label=(\textit{\roman*})]
+        \item \label{it:rule-sat-mgs}
+        \(S\) not solved and \(\Sigma \in \mgs(S)\); or otherwise
+        \item \label{it:rule-sat-hyp}
+        there exists \(\psi \in \USolved(S)\) not solved and \(\Sigma \in \mgs(S[\Eqfst \mapsto \Eqfst \wedge \Fhyp(\psi)])\); or
+        \item \label{it:rule-sat-diseq}
+        \(\Eqfst(S)\) contains a disequality \(\psi = \forall \tilde{x}.\phi\) and \(\Sigma \in \mgs(S[\Eqfst \wedge \psi \mapsto \Eqfst]\mgu(\neg\phi))\).
+      \end{enumerate}
+    \end{mdframed}
+
+  \subsubsection{Rule Eq}
+
+    The second case distinction rule focuses on the static equivalence between solutions of extended constraint systems.
+    More specifically, the rule \eqref{rule:equality} checks whether an entry \(\xi_1 \dedfact u_1\) of one knowledge base of \(\Gamma\) can deduce the same term as another recipe \(\xi_2\) consequence of \(\Solved\).
+    The rule is formalised as an instance of \eqref{rule:case-base} with
+    \begin{mdframed}[style=margindefstyle]
+      \begin{align}
+        \tag{\text{\textsc{Eq}}}
+        \label{rule:equality}
+        \begin{array}{r@{\ }l}
+          \Gamma^+ & = \{\CApply{\Sigma}{S}[\USolved \mapsto \USolved \wedge \FApply{\Sigma_0\Sigma}{\psi}{\CApply{\Sigma}{S}}] \mid S \in \Gamma\} \\
+          \Gamma^- & = \{S[\Eqsnd \mapsto \Eqsnd \wedge \neg\Sigma] \mid S \in \Gamma\}
+          % \S \cup \{ \{(\P_i,\C_i,\C^e_i)\}_{i=1}^n \}\\
+          % \rightarrow\\
+          % \S \cup \left\{
+          % 	\begin{array}{l}
+          % 		\{(\P_i,\C_i,\CApply{\Sigma}{\C^e_i}[\USolved \mapsto \USolved \cup \{ \FApply{\Sigma_0\Sigma}{\psi}{\CApply{\Sigma}{\C_i^e}}\}])\}_{i=1}^n,\\
+          % 		\{(\P_i,\C_i,\C^e_i[\Eqsnd \wedge \neg\Sigma])\}_{i=1}^n\\
+          % 	\end{array}
+          % 	\right\}
+        \end{array}
+      \end{align}
+      if there exist \(S \in \Gamma\), such that \(\Sigma \in \mgs(S[\Eqfst \mapsto \Eqfst \wedge H_E, \Df \mapsto \Df \wedge H_D])\),
+      where \(H_E\) and \(H_D\) are, respectively, the sets of equations and deduction facts of the hypotheses of \(\FApply {\Sigma_0} {\psi} {S}\), and:
+      \begin{enumerate}%[label=(\textit{\roman*})]
+        \item \label{it:rule-equality-1}
+        either \(\Sigma_0 = \{ X\rightarrow \xi_1, Y\rightarrow \xi_2 \}\) for some \((\xi_1 \dedfact u_1),(\xi_2 \dedfact u_2) \in \Solved(S)\) and
+        for all \((\clause{H}{\varphi}) \in \USolved(S)\), \(H \neq (\xi_1 \eqf \xi_2)\); or
+        \item \label{it:rule-equality-2}
+        \(\Sigma_0 = \{ X \rightarrow \xi_1, Y \rightarrow \ffun(X_1,\ldots,X_n)\}\) for some \((\xi_1 \dedfact u_1) \in \Solved(S)\) and
+        \(\ffun/n \in \sigc\) with \(\quanti{X_1}{k},\ldots, \quanti{X_n}{k}\) fresh and for all \((\clause{\zeta_1 \eqf \zeta_2}{\varphi}) \in \USolved(S)\),
+        \(\zeta_b = \xi_1\) implies \(\rootf(\zeta_{1-b}) \neq \ffun\).
+      \end{enumerate}
+      where \(k = |\dom(\Phi(S))|\) and \(\psi = \clause[X,Y,z]{X \eqf Y}{(X \dedfact z \wedge Y \dedfact z)}\) with \(\quanti{X}{k},\quanti{Y}{k},z\) fresh variables.
+    \end{mdframed}
+
+    Similarly to Rule \eqref{rule:vector-consequence} the rule uses the generic equality formula
+    \(\psi\) %= \clause[X,Y,z]{X \eqf Y}{(X \dedfact z \wedge Y \dedfact z)}\]
+    and the hypotheses of \(\FApply{\Sigma_0}{\psi}{S}\) express that \(X \Sigma_0\) and \(Y \Sigma_0\) deduce the same term.
+    Since a recipe consequence of \(\Solved\) can either be coming from a deduction fact in \(\Solved\) or be a recipe with a constructor symbol at its root, we consider the two cases \ref{it:rule-equality-1} and \ref{it:rule-equality-2} each with the appropriate instantiation \(\Sigma_0\) of the placeholders \(X\) and \(Y\).
+    The side requirements that head-equivalent formulas should not already be present in \(\USolved(S)\) are simply here for termination purpose, thus avoiding infinite aggregation of redundant formulas.
+
+  \subsubsection{Rule Rew}
+    The third case distinction rule focuses on saturating the knowledge base.
+    For example when outputting a term \(u\), the corresponding symbolic rule \eqref{rule:e-out} will add a deduction fact \(\ax_n \dedfact u\) to \(\USolved\);
+    the rule \eqref{rule:rewrite} will apply rewrite rules on \(u\) to determine whether new messages can be learned by the attacker.
+    Typically if \(u = \pair{u_1,u_2}\) the following actions will happen:
+    \begin{enumerate}
+      \item after \(\ax_n \dedfact u\) has been added to \(\USolved\) by the symbolic rule \eqref{rule:e-out}, it will be copied to the knowledge base \(\Solved\) by the simplification rules \eqref{rule:vector-solve} (assuming \(u\) is not already deducible from any knowledge base of the component)
+      \item after that, the case-distinction rule \eqref{rule:rewrite} will add the two deduction facts \(\fst(\ax_n) \dedfact u_1\) and \(\snd(\ax_n) \dedfact u_2\) to \(\USolved\), which may in turn be transferred to \(\Solved\) as well.
+    \end{enumerate}
+
+    More precisely, given a deduction fact \(\xi_0 \dedfact u_0\), the rule checks whether one may apply a rewrite rule \(\ell \rightarrow r\) to \(u_0\), which may require to first apply a context on \(u_0\) (for example if \(u_0 = \hfun(a)\) and \(\ell = \ffun(\gfun(\hfun(x)))\)).
+    For that we introduce a notion of \emph{skeleton} of \(\ell\).
+
+    \begin{definition}[rewriting skeleton] \label{def:skeleton}
+      Let \(p\) be a position of a first-order term \(\ell\).
+      A \emph{skeleton for \((\ell,p)\)} is a tuple \((\xi,t,D)\) such that
+      \(\xi \in \termset(\sig \cup \sig_0 \cup \X[2])\),
+      \(t \in \termset(\sig \cup \sig_0 \cup \X[1])\),
+      \(D\) is a set of deduction facts and
+      \[(\rootf(\getpos{\xi}{q}), \rootf(\getpos{t}{q})) = \left\{
+        \begin{array}{ll}
+          (\rootf(\getpos{\ell}{q}), \rootf(\getpos{\ell}{q})) & \mbox{for any strict prefix \(q\) of \(p\)}\\
+          (X_{q},x_q) & \mbox{for any other position \(q\) of \(\xi\)}
+        \end{array}
+      \right.\]
+      where the set of variables \(X_{q}\) (resp. \(x_q\)), \(q\) a position of \(\xi\) that is not strict prefix of $p$, are fresh pairwise distinct second-order (resp. first-order) variables,
+      and \(D\) is the set of all the deduction facts \(X_q \dedfact x_q\).
+      The set of all such skeletons (which, notably, are all identical up to variable renaming but may therefore differ on the second-order-variable types) is written \(\Skel{\ell}{p}\).
+    \end{definition}
+
+    % The types of the fresh second-order variables generated when computing the skeleton will be fixed by imposing conditions on \(\xi\) when using the skeleton in practice.
+
+    For a skeleton \((\xi,t,D) \in  \Skel{\ell}{p}\), the recipe \(\xi\) represents the context that the attacker will apply on top of the deduction fact \(\xi_0 \dedfact u_0\) at the position \(p\) to obtain the left-hand side \(\ell\).
+    The term \(t\) represents the corresponding generic term on which the rewrite rule will be applied.
+    Finally \(D\) is the set of deduction facts linking the variables of \(\xi\) and \(t\).
+    % We will illustrate the definition with a concrete example a bit later.
+    \medskip
+
+    % \begin{example}
+    %   Consider \(\ell = \sdec(\senc(y,z),z)\)
+    %   we have, with \(D_1 = X_0 \dedfact x_0 \wedge X_1 \dedfact x_1\):
+    %   \begin{align*}
+    %     & \Skel{\ell}{1} = \Skel{\ell}{2} :&
+    %     & (\sdec(X_0, X_1), \sdec(x_0,x_1), D_1) \\
+    %     & \Skel{\ell}{1\cdot1} :&
+    %     & (\sdec(\senc(X_0, X_1), X_2), \sdec(\senc(x_0, x_1), x_2), D_1 \wedge X_2 \dedfact x_2) \qedhere
+    %   \end{align*}
+    % \end{example}
+
+    Consider now a component \(\Gamma\), a symbolic process \(S \in \Gamma\), a deduction fact \((\xi_0 \dedfact u_0) \in \Solved(S)\), and a context \(C\).
+    The first role of Rule \eqref{rule:rewrite} is to saturate the knowledge base, that is, to deduce the new term \(C[u_0] \norm\) using \(C[\xi_0]\).
+    However after adding the new deduction fact \(C[\xi_0] \dedfact C[u_0] \norm\) to \(\USolved(S)\), a head-equivalent formula should be added to all other symbolic processes of \(\Gamma\) whenever it is possible, so that the vector-simplification rule \eqref{rule:vector-split solved} (which separates processes with non-statically-equivalent solutions) only separates \(S' \in \Gamma\) from \(S\) if \(C[\xi_0]\) yields a valid message in \(S\) but not in \(S'\).
+    Yet the behaviour of a destructor symbol may be described by multiple rewrite rules:
+    the rewrite rule used to normalise \(C[u_0]\) may therefore not be the same as the one used to normalise the term deduced by \(C[\xi_0]\) in \(S'\).
+    %
+    Because of this we have to add to \(\USolved(S')\) all formulas corresponding to using all possible rewrite rules.
+    %
+    For that we consider the following set of generic formulas:
+    % if \(\xi \in \termset(\sig \cup \X[2])\), \(\ell \rightarrow r \in \R\) and \(p\) is a position of \(\ell\):
+    \[
+      \RewF{\xi}{\ell \rightarrow r}{p} =
+        \left\{\clause[S]{\xi \dedfact r'}{(D \wedge \mgu(\ell' \eqs t))}\ \left|
+          \begin{array}{l}
+            \ell' \rightarrow r' \in \R\\
+            (\xi,t,D) \in \Skel{\ell}{p}\\
+            S = \vars(D,\ell')
+          \end{array}\right.\right\}
+    \]
+    Let us now give a complete example to illustrate all these notions.
+    The goal is to detail what formulas will be added to \(\USolved\) by Rule \eqref{rule:rewrite} on a concrete case as the actual definition of the rule is quite technical and hard to read---although the intuition behind it is rather simple.
+
+    \begin{example}
+      Consider a rewriting system defined by a binary symbol \(\hfun\) and the two rewrite rules
+      \begin{align*}
+        \otherfun(\hfun(x,y),x) & \to y &
+        \otherfun(\hfun(x,y),y) & \to x
+      \end{align*}
+      These two rewrite rules give access to either argument of \(\hfun\) assuming the other one is known.
+      Now consider a component \(\Gamma\) containing two extended symbolic processes \(S_1\) and \(S_2\) with the respective frames, given \(k,k',s,s' \in \Nall\):
+      \begin{align*}
+        \Phi(S_1) & = \{\ax_1 \mapsto \hfun(k,k'), \ax_2 \mapsto k\} &
+        \Phi(S_2) & = \{\ax_1 \mapsto \hfun(s,s'), \ax_2 \mapsto s'\}
+      \end{align*}
+      They are are statically equivalent, even if the recipe \(\otherfun(\ax_1,\ax_2)\) is not normalised using the same rewrite rule in \(\Phi(S_1)\) and \(\Phi(S_2)\).
+      We assume that \(\Solved(S_1) = \ax_1 \dedfact \hfun(k,k') \wedge \ax_2 \dedfact k\) and \(\Solved(S_2) = \ax_1 \dedfact \hfun(s,s') \wedge \ax_2 \dedfact s'\).
+      We describe the application of Rule \eqref{rule:rewrite} that uses
+      the rewrite rule \((\ell \to r) = (\otherfun(\hfun(x,y),x) \to y)\) to deduce a new term in \(S_1\) by putting \(\ax_1\) at the position of \(\hfun(x,y)\) in \(\ell\), i.e., position $1$.
+      To begin the rule considers a skeleton \((\xi,t,D) \in \Skel{\ell}{1}\):
+      \begin{align*}
+        \xi & = \otherfun(X_1,X_2) &
+        t & = \otherfun(x_1,x_2) &
+        D & = X_1 \dedfact x_1 \wedge X_2 \dedfact x_2
+      \end{align*}
+      The set \(\RewF{\xi}{\ell \rightarrow r}{1}\) therefore contains the following two formulas (normalised by the simplification rules on formulae):
+      % \begin{align*}
+      %   \psi_1 & = \clause[S]{\otherfun(X_1,X_2) \dedfact y}{\left(D \wedge \otherfun(\hfun(x,y),x) \eqs \otherfun(x_1,x_2)\right)} \\
+      %   \psi_2 & = \clause[S]{\otherfun(X_1,X_2) \dedfact x}{\left(D \wedge \otherfun(\hfun(x,y),y) \eqs \otherfun(x_1,x_2)\right)}
+      % \end{align*}
+      % with \(S = \{X_1,X_2,x_1,x_2,x,y\}\).
+      % After applying simplification rules they become:
+      \begin{align*}
+        \psi_1 & = \clause[X_1,X_2,x,y]{\otherfun(X_1,X_2) \dedfact y}{\left(X_1 \dedfact \hfun(x,y) \wedge X_2 \dedfact x\right)} \\
+        \psi_2 & = \clause[X_1,X_2,x,y]{\otherfun(X_1,X_2) \dedfact x}{\left(X_1 \dedfact \hfun(x,y) \wedge X_2 \dedfact y\right)}
+      \end{align*}
+      They are only generic formulas indicating that when the left side of a rewrite rule can be computed then the right side can be computed as well.
+      Since our goal is to apply the rewrite rule \(\ell \to r\) where the deduction fact \(\ax_1 \dedfact \hfun(k,k')\) is used to deduce the subterm \(\getpos{\ell}{1}\), we have to replace the variable at position 1 in \(\xi\), namely \(X_1\), by \(\ax_1\) in these formulas.
+      We do this by applying the substitution \(\Sigma_0 = \{X_1 \mapsto \ax_1\}\) to \(\psi_1,\psi_2\) (in the sense defined in Section \ref{sec:mgs-app}, again normalised by simplification rules):
+      \begin{align*}
+        \FApply{\Sigma_0}{\psi_1}{S_1} & = \clause[X_2]{\otherfun(\ax_1,X_2) \dedfact k'}{X_2 \dedfact k} \\
+        \FApply{\Sigma_0}{\psi_2}{S_1} & = \clause[X_2]{\otherfun(\ax_1,X_2) \dedfact k}{X_2 \dedfact k'}
+      \end{align*}
+      Rule \eqref{rule:rewrite} will then compute most general solutions to instantiate \(X_2\) in a way that satisfies the hypotheses of these formulas.
+      In the case of the first formula we have the unique solution \(\mgs(S_1[\Df \mapsto \Df \wedge X_2 \dedfact k]) = \{\Sigma\}\) where \(\Sigma = \{X_2 \mapsto \ax_2\}\);
+      the algorithm will therefore add the following deduction fact to \(\USolved(S_1)\):
+      \[\FApply{\Sigma_0\Sigma}{\psi_1}{\CApply{\Sigma}{S_1}} = \otherfun(\ax_1,\ax_2) \dedfact k'\]
+      On the contrary, the algorithm could not have added the second formula: 
+      we have \(\mgs(S_1[\Df \mapsto \Df \wedge X_2 \dedfact k']) = \emptyset\), meaning that no solutions satisfy its hypotheses.
+      Then we are almost done:
+      as explained earlier it only remains to add a head-equivalent formula to \(\USolved(S_2)\), if any, so that the vector-simplification rule \eqref{rule:vector-split solved} does not split \(\Gamma\) if the recipe \(\otherfun(\ax_1,\ax_2)\) yields a valid message in both \(S_1\) and \(S_2\).
+      That is, we should add to \(\USolved(S_2)\):
+      \begin{align*}
+        \FApply{\Sigma_0\Sigma}{\psi_1}{\CApply{\Sigma}{S_2}} & = (\clause{\otherfun(\ax_1,\ax_2) \dedfact s'}{s' \eqs s}) \\
+        \FApply{\Sigma_0\Sigma}{\psi_2}{\CApply{\Sigma}{S_2}} & = (\clause{\otherfun(\ax_1,\ax_2) \dedfact s}{s' \eqs s'})
+      \end{align*}
+      This time the situation is reversed compared to \(S_1\):
+      the first formula has unsatisfiable hypotheses (and will therefore be discarded at the next round of normalisation rules by Rule \eqref{rule:Disequation removal 2}) and the second one will be simplified to \(\otherfun(\ax_1,\ax_2) \dedfact s\).
+      This illustrates why we add one formula for each rewrite rule:
+      should we have only considered \(\psi_1\), we would have missed the head-equivalent formula \(\otherfun(\ax_1,\ax_2) \dedfact s\) in \(S_2\), resulting in the incorrect conclusion that \(\Phi(S_1) \not\StatEq \Phi(S_2)\).
+    \end{example}
+
+    Let us now formalise Rule \eqref{rule:rewrite} in full generality.
+    It can now be defined as an instance of \eqref{rule:case-base} under the following conditions:
+    %
+    \begin{mdframed}[style=margindefstyle]
+      \begin{align}
+        \tag{\text{\textsc{Rew}}}
+        \label{rule:rewrite}
+        \begin{array}{r@{\ }l}
+          \Gamma^+ & = \{\CApply{\Sigma}{S}[\USolved \mapsto \USolved \wedge \USolved_S] \mid S \in \Gamma\} \\
+          \Gamma^- & = \{S[\Eqsnd \mapsto \Eqsnd \wedge \neg\Sigma] \mid S \in \Gamma\}
+        \end{array}
+      \end{align}
+      if there exist \(S \in \Gamma\), \(\ell\rightarrow r \in \R\),
+      \(p\) position of \(\ell\),
+      \(\xi \in \termset(\sig \cup \Xsndi[=]{k})\) with \(k = |\dom(\Phi(S))|\),
+      \(\psi_0 \in \RewF{\xi}{\ell \rightarrow r}{p}\), \((\xi_0 \dedfact u_0) \in \Solved(S)\), such that the following conditions are met:
+      \begin{enumerate}
+        \item \label{it:rule-rewrite-1}
+        \(p \neq \epsilon\) and \(\getpos {\ell} {p} \notin \X[1]\)
+        \item \label{it:rule-rewrite-3}
+        \(\Sigma_0 = \{ \getpos{\xi}{p} \rightarrow \xi_0\}\)
+        and \(\Sigma \in \mgs(S[\Df \mapsto \Df \wedge \Df(\psi_1), \Eqfst \mapsto \Eqfst \wedge \Fhyp(\psi_1)])\) if \(\psi_1 = \FApply{\Sigma_0}{\psi_0}{S}\)
+        % \item \label{it:rule-rewrite-4}
+        % \soutred{\(\FApply{\Sigma_0 \Sigma}{\psi_0}{\CApply{\Sigma}{S}}\) is a formula of the form \(\clause[S] {H} {\left(\bigwedge_{i=1}^n X_i \dedfact x_i\right)}\) with all \(X_i,x_i\) distinct}
+        \item \label{it:rule-rewrite-5}
+        \(\Sigma_1\) is an injection from \(\im(\Sigma) \setminus \vars[2](\psi_1)\) to fresh constants, and for any such injection \(\Sigma_1'\), we have \(\FApply{\Sigma_0 \Sigma \Sigma_1'}{\psi_0}{\CApply{\Sigma}{S}} \notin \USolved(S)\)
+        \item \label{it:rule-rewrite-2}
+        for all \(S' \in \Gamma\), \(\USolved_{S'} = \{\FApply{\Sigma_0 \Sigma \Sigma_1} {\psi} {\CApply{\Sigma}{S'}} \mid \psi \in \RewF{\xi}{\ell \rightarrow r}{p}\}\)
+      \end{enumerate}
+    \end{mdframed}
+
+    The conditions are rather technical but simply capture the steps of the example.
+    Commenting the requirements of the rule, Item \ref{it:rule-rewrite-1} ensures that the rewriting is not performed at a trivial position.
+    Items~\ref{it:rule-rewrite-3} and \ref{it:rule-rewrite-5} describe the formulas added to each symbolic process of \(\Gamma\):
+    just as in the example they are obtained by choosing one \(S \in \Gamma\), computing a formula \(\psi_0\) (\(\psi_1\) in the example) corresponding to applying one given rewrite rule \(\ell \to r\) in \(S\), replacing the position \(p\) of \(\ell\) by an entry of \(\Solved(S)\) by applying \(\Sigma_0\) and computing a solution \(\Sigma\) of the hypotheses of the resulting formula.
+    Finally, in Item~\ref{it:rule-rewrite-2}, all other symbolic processes \(S' \in \Gamma\) receive the formulas of \(\USolved_{S'}\), each attempting to apply a rewrite rule to yield a valid message with the same recipe as in \(\psi_0\). 
+
+    Note that the computation of the mgs \(\Sigma\) may leave some second-order variables \(X_1, \ldots, X_n\) unconstrained because they do not need to be instantiated in a particular way to obtain a solution.
+    This is where Item~\ref{it:rule-rewrite-5} come into play, replacing these pending variables by fresh constants.
+
+  % \subsubsection{Rule Chan} \label{sec:rule-chan}
+  %   Finally we present a rule dedicated to the treatment of internal-communication channels in the private semantics.
+  %   Due to the solving strategy mentioned at the beginning of the section, this rule will only by applied when Rule \eqref{rule:rewrite} is not applicable anymore, ensuring that \(\Solved\) has been saturated, i.e., that any deducible term is a consequence of the knowledge base.
+  %   The rule can therefore be formalised as an instance of \eqref{rule:case-base} with
+  %   \begin{mdframed}[style=margindefstyle]
+  %     \begin{equation}
+  %       \tag{\text{\textsc{Chan}}}
+  %       \label{rule:channel}
+  %       \begin{array}{r@{\ }l}
+  %         \Gamma^+ & = \left\{\CApply{\Sigma}{S} \mid S \in \Gamma \smallsetminus \{S_0\}\right\} \\
+  %         \Gamma^- & = \left\{S[\Eqsnd \mapsto \Eqsnd \wedge \neg\Sigma] \mid S \in (\Gamma \smallsetminus \{S_0\}) \cup \{S_0'\}\right\}
+  %       \end{array}
+  %     \end{equation}
+  %     if \(S_0 \in \Gamma\) and \(S_0' = S_0[\Df \wedge \varphi \mapsto \Df]\) for some \(\varphi = (\forall \quanti{X}{i}.\, X \ndedfact u) \in \Df(S_0)\) such that either
+  %     \begin{enumerate}%[label=(\textit{\roman*})]
+  %       \item \label{it:rule-chan-mgs}
+  %       \(\Sigma \in \mgs(S_0'[\Df \wedge \Df \wedge X \dedfact u])\); or
+  %       \item \label{it:rule-chan-nomgs}
+  %       \(\mgs(S_0'[\Df \mapsto \Df \wedge X \dedfact u]) = \emptyset\) and \(\Sigma = \bot\) (with the convention \(\Gamma^+ = \emptyset\)).
+  %     \end{enumerate}
+  %   \end{mdframed}
+
+  %   The rule picks an arbitrary extended symbolic process \(S_0 \in \Gamma\) such that \(\Df(S_0)\) still contains a non-deducibility constraint \(\varphi\).
+  %   % \(S_0'\) is obtained by removing \(\varphi\) from \(S_0\).
+  %   Then the rule checks whether a solution \(\Sigma\) that falsifies \(\varphi\) exists.
+  %   If there is one (case \ref{it:rule-chan-mgs}), \(S_0\) is removed from the positive branch and \(\varphi\) is removed from the negative branch.
+  %   If there are no such solutions (case \ref{it:rule-chan-nomgs}) this means that the adversary has no mean to compute the channel \(u\):
+  %   the positive branch is therefore entirely aborted, while the constraint \(\varphi\) is safely removed from the negative branch without adding new constraints.
+
+\subsection{All in all: computing a partition tree} \label{sec:correctness-proc}
+
+  \paragraph{Overall procedure}
+    We make reference to the various constraint-solving relations defined in the previous sections using the following notations:
+    \begin{mathpar}
+      \simplifstep \text{ : simplification rules on formulas} \and
+      \normstep \text{ : normalisation rules} \and
+      \vectstep \text{ : vector-simplification rules} \\
+      \satstep \text{ : \eqref{rule:satisfiable} case-distinction rule} \and
+      \eqstep \text{ : \eqref{rule:equality} case-distinction rule} \and
+      \rewstep \text{ : \eqref{rule:rewrite} case-distinction rule}
+      % \chanstep \text{ : \eqref{rule:channel} case-distinction rule}
+    \end{mathpar}
+    All these transition relations are interpreted as binary relations on vectors.
+    We recall that we call a \emph{component} a set \(\Gamma\) of extended symbolic processes and a \emph{vector} a set \(\S\) of components, and that all \((\P,\C,\C^e) \in \Gamma\) induce a predicate \(\pi\) on second-order solutions of \(\C\) such that
+    \[\Sol[\pi](\C) = \{(\Sigma_{|\vars[2](\C)}, \sigma_{|\vars[1](\C)}) \mid (\Sigma,\sigma) \in \Sol(\C^e)\}\]
+    We therefore propose in Algorithm \ref{alg:ptree} a procedure to compute the partition tree of two bounded plain processes, where the nodes are labelled by components instead of regular partition-tree configurations;
+    in particular the proof of correctness of this algorithm has to justify that the above predicate \(\pi\) can be defined uniformly across the entire nodes of the computed tree.
+
+    \newcommand\nodegen{\mathsf{generateSubtree}}
+    \newcommand\rootgen{\mathsf{generateRoot}}
+    \newcommand\applysimpl{\mathsf{applySimpl}}
+    \newcommand\applycase{\mathsf{applyCase}}
+    \newcommand\Ifkw[2]{\textbf{if}\ #1\ \textbf{then}\ #2}
+    \newcommand\ElseIfkw[2]{\textbf{else if}\ #1\ \textbf{then}\ #2}
+    \newcommand\Elsekw[1]{\textbf{else}\ #1}
+    \begin{algorithm}
+      \caption{Computation of the partition tree, with nodes labelled with components}
+      \label{alg:ptree}
+
+      \algocomment{Application of simplification rules, as much as possible}\;
+      \Def {\(\applysimpl(\S : \mathsf{Vector}) : \mathsf{Vector}\)} {
+        \Ifkw {\(\S \simplifstep \S'\)} {%
+          \(\returnkw\ \applysimpl(\S')\)\;
+        }
+        \ElseIfkw {\(\S \normstep \S'\)} {%
+          \(\returnkw\ \applysimpl(\S')\)\;
+        }
+        \ElseIfkw {\(\S \vectstep \S'\)} {%
+          \(\returnkw\ \applysimpl(\S')\)\;
+        }
+        \Elsekw {%
+          \(\returnkw\ \S\)\;
+        }
+      }\;
+
+      \algocomment{Application of case-distinction rules, with simplification rules in between}\;
+      \Def {\(\applycase(\S : \mathsf{Vector}) : \mathsf{Vector}\)} {
+        \Ifkw {\(\S \satstep \S'\)} {%
+          \(\returnkw\ \applycase(\applysimpl(\S'))\)\;
+        }
+        \ElseIfkw {\(\S \eqstep \S'\)} {%
+          \(\returnkw\ \applycase(\applysimpl(\S'))\)\;
+        }
+        \ElseIfkw {\(\S \rewstep \S'\)} {%
+          \(\returnkw\ \applycase(\applysimpl(\S'))\)\;
+        }
+        % \ElseIfkw {\(\S \chanstep \S'\)} {%
+        %   \(\returnkw\ \applycase(\applysimpl(\S'))\)\;
+        % }
+        \Elsekw {%
+          \(\returnkw\ \S\)\;
+        }
+      }\;
+
+      \algocomment{Generates the subtree rooted on a node labelled by the component \(\Gamma\)}\;
+      \Def {\(\nodegen(\Gamma : \mathsf{Component}) : \mathsf{Tree}\)} {
+        \(\Gamma_{\inp} \leftarrow \{S' \mid S \Sstep{\InP{Y}{X}} S', S \in \Gamma\}\)\;
+        \(\Gamma_{\outp} \leftarrow \{S' \mid S \Sstep{\OutP{Y}{\ax}} S', S \in \Gamma\}\)\;
+        \If {\(\Gamma_\inp = \Gamma_\outp = \emptyset\)} {%
+          \(\returnkw\) a tree reduced to its root, labelled \(\Gamma\)\;
+        }
+        \Else{} {%
+          \(\S \leftarrow \applycase(\applysimpl(\{\Gamma_\inp,\Gamma_\outp\}))\)\;
+          \(T \leftarrow\) tree with root \(\Gamma\) and children \(\nodegen(\Gamma')\) for each \(\Gamma' \in \S\)\;
+          \(\returnkw\ T\)\;
+        }
+      }\;
+
+      \algocomment{Generates the root and then an entire partition tree of \(P_1\) and \(P_2\)}\;
+      \Def {\(\ptree(P_1,P_2 : \mathsf{Processes}) : \mathsf{Tree}\)} {
+        \(\Gamma_1 \leftarrow \{S \mid P \Sstep{\epsilon} S\}\)\;
+        \(\Gamma_2 \leftarrow \{S \mid Q \Sstep{\epsilon} S\}\)\;
+        \(\{\Gamma\} \leftarrow \applysimpl(\{\Gamma_1 \cup \Gamma_2\})\) \algocomment{in the root, simplification rules never split the vector}\;
+        \(\returnkw\ \nodegen(\Gamma)\)\;
+      }
+    \end{algorithm}
+
+  \paragraph{Correctness arguments}
+    % To conclude we mention in this section the core arguments justifying that Algorithm \ref{alg:ptree} effectively generates a partition tree.
+    % Detailed proofs can then be found in Appendix \ref{app:ptree}.
+    % Technically, most of the theorem statements rely on a collection of invariants that can be found in Appendix \ref{app:ptree} as well, with a proof of their preservation at each step of the procedure.
+    % For the sake of precision our theorem statements will make explicit mention to these invariants (called with ``\(\predlab\)'' names such as \(\PredWellFormed\), \(\PredCorrectFormula\),...) but knowing their exact definition is not necessary to understand this section.
+
+    To conclude we mention that the core arguments justifying that Algorithm \ref{alg:ptree} effectively generates a partition tree can be found in Appendix~\ref{app:ptree-proof}.
+    Technically, most of the theorem statements rely on a collection of invariants, with a proof of their preservation at each step of the procedure (called with ``\(\predlab\)'' names such as \(\PredWellFormed\), \(\PredCorrectFormula\),...).
+    % For the sake of precision they will be mentioned in another technical chapter of this thesis (termination proof in Section~\ref{sec:termination}) but knowing their exact definition is not necessary to understand the body of the thesis.

@@ -1,0 +1,697 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%2345678901234567890123456789012345678901234567890123456789012345678901234567890
+%        1         2         3         4         5         6         7         8
+
+\documentclass[letterpaper, 10 pt, conference]{ieeeconf}  % Comment this line out if you need a4paper
+
+%\documentclass[a4paper, 10pt, conference]{ieeeconf}      % Use this line for a4 paper
+
+\IEEEoverridecommandlockouts                              % This command is only needed if 
+                                                          % you want to use the \thanks command
+
+\overrideIEEEmargins                                      % Needed to meet printer requirements.
+
+%In case you encounter the following error:
+%Error 1010 The PDF file may be corrupt (unable to open PDF file) OR
+%Error 1000 An error occurred while parsing a contents stream. Unable to analyze the PDF file.
+%This is a known problem with pdfLaTeX conversion filter. The file cannot be opened with acrobat reader
+%Please use one of the alternatives below to circumvent this error by uncommenting one or the other
+%\pdfobjcompresslevel=0
+%\pdfminorversion=4
+
+% See the \addtolength command later in the file to balance the column lengths
+% on the last page of the document
+
+% The following packages can be found on http:\\www.ctan.org
+%\usepackage{graphics} % for pdf, bitmapped graphics files
+%\usepackage{epsfig} % for postscript graphics files
+%\usepackage{mathptmx} % assumes new font selection scheme installed
+%\usepackage{times} % assumes new font selection scheme installed
+%\usepackage{amsmath} % assumes amsmath package installed
+%\usepackage{amssymb}  % assumes amsmath package installed
+
+\usepackage{graphicx,color}
+\usepackage[caption=false,font=scriptsize,format=hang]{subfig}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{url}
+\usepackage[sort,nocompress]{cite}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% make commands for abbreviations
+\usepackage{xspace}
+\makeatletter
+\DeclareRobustCommand\onedot{\futurelet\@let@token\@onedot}
+\def\@onedot{\ifx\@let@token.\else.\null\fi\xspace}
+
+\def\eg{\emph{e.g}\onedot} \def\Eg{\emph{E.g}\onedot}
+\def\ie{\emph{i.e}\onedot} \def\Ie{\emph{I.e}\onedot}
+\def\cf{\emph{c.f}\onedot} \def\Cf{\emph{C.f}\onedot}
+\def\etc{\emph{etc}\onedot} \def\vs{\emph{vs}\onedot}
+\def\wrt{w.r.t\onedot} \def\dof{d.o.f\onedot}
+\def\etal{\emph{et al}\onedot}
+\makeatother
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\makeatletter
+\let\NAT@parse\undefined
+\makeatother
+\usepackage{hyperref}
+
+\renewcommand{\arraystretch}{0.85}
+
+\graphicspath{{./imgs/}}
+
+\title{\LARGE \bf
+Prompter: Utilizing Large Language Model Prompting for a Data Efficient Embodied Instruction Following
+}
+
+\author{Yuki Inoue$^{1}$ and Hiroki Ohashi$^{1}$% <-this % stops a space
+\thanks{$^{1}$Intelligent Vision Research Dept., Hitachi Ltd., Tokyo, Japan
+        {\tt\small \{yuki.inoue.wh, hiroki.ohashi.uo\}@hitachi.com}.}%
+}
+
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\pagestyle{empty}
+
+\begin{abstract}
+
+Embodied Instruction Following (EIF) studies how mobile manipulator robots should be controlled to accomplish long-horizon tasks specified by natural language instructions. While most research on EIF are conducted in simulators, the ultimate goal of the field is to deploy the agents in real life.
+As such, it is important to minimize the data cost required for training an agent, to help the transition from sim to real. However, many studies only focus on the performance and overlook the data cost- modules that require separate training on extra data are often introduced without a consideration on deployability.
+In this work, we propose FILM++ which extends the existing work FILM \cite{film} with modifications that do not require extra data. While all data-driven modules are kept constant, FILM++ more than doubles FILM's performance.
+Furthermore, we propose Prompter, which replaces FILM++'s semantic search module with language model prompting. Unlike FILM++'s implementation that requires training on extra sets of data, no training is needed for our prompting based implementation while achieving better or at least comparable performance.
+Prompter achieves 42.64\% and 45.72\% on the ALFRED benchmark with high-level instructions only and with step-by-step instructions, respectively, outperforming the previous state of the art by 6.57\% and 10.31\%.
+
+\end{abstract}
+
+
+\section{Introduction} \label{sec:intro}
+
+Creation of sentient agents that can follow language instructions has long been one of mankind’s dreams. Embodied Instruction Following (EIF) studies just that- mobile agents are given natural language instructions of tasks that they are expected to complete.
+However, converting free-form language instructions to step-by-step robot controls is no easy task, as agents must integrate information of multiple modalities while operating in environments full of uncertainties.
+
+While most EIF research are conducted in simulators for quick and fair evaluations, the ultimate goal of EIF is to deploy agents in real life. In addition, as it is not realistic to develop simulators for every situation, real deployment must be accompanied with data collected in real life. Therefore, it is important to minimize the data cost needed to train an agent, to ease the transition from sim to real.
+
+One of the biggest breakthroughs in data efficiency is FILM \cite{film}, as its modular approach eliminated the need for demonstrations of the task by experts. Since then, various modules are proposed to improve the performance \cite{liu9planning,murray2022following,liu2022lebp}, most of which require extra training dataset and increase the deployment cost.
+While not all data-hungry modules are bad, they should be evaluated against a data efficient baseline to make sure that the performance increase is worth the effort of collecting extra data.
+In this paper, we introduce FILM++, which extends FILM with modifications that do not need extra data, to fill the role of the data efficient baseline. Some of the ideas are simplified, data-free versions of the previously proposed modules, in which we encourage researchers to apply their data-hungry counterparts for performance comparisons, while others are based on our careful observations of the EIF problem setting. As it turns out, FILM++ more than doubles FILM's performance despite the fact that all trained modules are kept constant, indicating that much can be done before requiring extra data. 
+
+Furthermore, we propose Prompter, which replaces the semantic search module of FILM++ with language prompting, making it even more data efficient than FILM++. The semantic search module promotes efficient search by predicting the probable locations of the unobserved objects from the observed ones. Previous implementations \cite{film,murray2022following} trained the module with simulator data, which is problematic for two reasons.
+First, the module training requires exact coordinate of every object in the scene as annotation. Such annotation is easy to collect in a simulator, as attributes of every object can be extracted with a few lines of code, but time-consuming to collect in real life, as a separate data collection process must be administered.
+Second, in order to minimize the gap between train and deployment, the annotations must represent the \textit{natural} distribution of the spatial relationships of objects, which can only be captured by examining thousands of rooms where organic human activities have taken place. The random object placement by a simulator or artificial rooms prepared by a small group of people will likely form distinctly different, biased distributions.
+As language models are pretrained on a much larger and diverse training data, Prompter's semantic search module is both free of data collection and less likely to overfit to a specific distribution.
+
+Prompter is evaluated on ALFRED \cite{alfred}, a popular EIF benchmark, achieving 42.64\% with high-level language only and 45.72\% with step-by-step instructions, outperforming the state of the art by 6.57\% and 10.31\%, respectively.
+
+
+\section{Related Work}
+
+% \subsection{Robotics}
+
+% With the initial release of ASIMO in the early 21st century, the dream of such technology have become more concretized \cite{?}, and the research have accelerated since then. Robots today are able to do everything from climbing stairs to performing backflips \cite{}.
+% However, there is still much progress to be made to realize the sentient robots depicted in sci-fi.
+% Although robots have acquired many complex motory skills, selecting the right skill at the right time, to achieve a complex task is another field of research that must be explored. Moreover, in order to realize the 
+
+There are many publications related to vision and language tasks, including Vision Language Navigation (VLN) in which agents are tasked to navigate through unknown environments using language input and visual feedback \cite{anderson2018vision,fried2018speaker,zhu2020vision}, and Embodied Question Answering (EQA) in which agents must answer questions about their surroundings \cite{das2018embodied,bisk2020experience}.
+% Although most tasks are staged in simulators to make comparisons easier, some researches are set in real environments \cite{hatori2018interactively,shridhar2022cliport}.
+Unlike VLN and EQA, EIF requires an agent to execute multiple subtasks in one run, many of which involve interactions with the environment, making EIF a challenging task.
+% Just as a brief reference, the state of the art for R2R, a well known VLN benchmark, is 78\% \cite{guhur2021airbert}, while the state of the art for ALFRED is 36\% \cite{liu9planning}.
+
+This paper will focus on ALFRED, a popular EIF benchmark.
+Early attempts on ALFRED trained single end-to-end models. For example, Shridhar \etal trained a Seq2Seq model with an attention mechanism \cite{alfred}, while others trained transformers \cite{suglia2021embodied,pashevich2021episodic}.
+Since then, modular approaches have been explored, with most equipped with front-end vision and language modules that process raw inputs which are then integrated in the back-end decision making module. Most methods have a similar front-end setup that organizes the processed information in a form of a semantic map for the back-end \cite{film,liu9planning,murray2022following,blukis2022persistent}.
+However, as this map is built with partial and erroneous observations of the environment, the back-end module must be carefully designed to appropriately select information, and this is where the differences between methods arise. Blukis \etal implement it as a trainable module \cite{blukis2022persistent}, Min \etal and Murray \etal add the semantic search module to complement the partial information \cite{film,murray2022following}, and Liu \etal invest first half of each run for information gathering, so that the map is as complete as possible \cite{liu9planning}.
+
+% Unfortunately, one factor that seems to be lacking in many literature is deployability in real world.
+% Many of the vision and language tasks are staged in simulators to make comparisons easier, and EIF is no exception. As a result, many work introduce modules that require separate sets of training data, which are relatively easy to collect in simulator, but not so much in real world.
+
+In this paper, we propose a more deployment-friendly semantic search module, based on prompting off-the-shelf large language models (LLMs).
+Prompting LLMs was first proposed by Petroni \etal, and the key concept is to take advantage of the mask-filling capability of LLMs by inputting sentences with the wanted information masked out \cite{petroni2019language}. For example, if one wants to know the capital of Japan, an input ``Capital of Japan is [MASK].'' is fed to an LLM. The LLM fills the mask with the wanted information, in this case ``Tokyo''.
+We use prompting to extract the likelihood of object pairs collocating together, which is then used to guide the object search.
+
+% \begin{table}[!tb]
+% 	\centering
+%     \footnotesize
+% 	\caption{Seven task types available in the ALFRED benchmark.}
+% 	\begin{tabular}{ll}
+% 	    Name & Example \\
+% 	    \midrule
+%         Pick and Place      & Put a candle on the toilet \\
+%         Stack and Place     & Put a knife in a cup on the table \\
+%         Pick Two and Place  & Put two remote on the couch \\
+%         Clean and Place     & Put two remote on the couch \\
+%         Heat and Place      & Place a heated apple in a sink \\
+%         Cool and Place      & Place a cooled potato slice in the garbage \\
+%         Examine in Light    & Examine a grey bowl in the light of a lamp \\
+% 	\end{tabular}
+% 	\label{tbl:tasks}
+% \end{table}
+
+\section{Task Description} \label{sec:task_description}
+
+All experiments are conducted on the ALFRED benchmark \cite{alfred}, in which a mobile manipulation robot is given natural language instructions to complete long-horizon tasks of typically longer than 70 steps. 
+The ALFRED benchmark is built on the AI2-THOR simulator \cite{ai2thor}, an interactive environment simulating a regular American household. As such, tasks in ALFRED are limited to household chores, such as cutting apples and cooking via microwave. \ref{fig:alfred_example} shows a sample task.
+
+The ALFRED benchmark provides language inputs of two granularities- high-level instructions summarizing the task, and low-level step-by-step instructions.
+At each time step, an agent makes one action from five navigation actions (RotateRight, RotateLeft, MoveAhead, LookUp, LookDown) or seven object interaction actions (PickupObject, PutObject, OpenObject, CloseObject, ToggleObjectOn, ToggleObjectOff, SliceObject). The navigation actions are constrained to discrete values (rotations, move ahead, and look actions are discretized by 90$^\circ$, 25cm, and 15$^\circ$, respectively), and the manipulation actions must be accompanied by an image mask specifying the location of the interaction target in the agent's view.
+An \textit{episode} ends when the task is finished, 1000 steps are taken, or 10 bad interactions (\eg collisions, interacting with non-interactive object) occur.
+
+\begin{figure}[!tb]
+	\captionsetup[subfloat]{font=scriptsize}
+	\centering
+    \includegraphics[trim={0mm 25mm 0mm 0mm},clip,width=1\linewidth]{imgs/alfred_sequence.pdf}
+	\caption{A sample episode in ALFRED. Texts in the blue boxes correspond to the low-level instructions.}
+	\label{fig:alfred_example}
+	\vspace{-4mm}
+\end{figure}
+
+
+\section{Proposed Method} \label{sec:design}
+
+\ref{fig:overall} shows the overview of the proposed system. It consists of two substreams that process the raw inputs and the motion controller that integrates the information for action planning.
+In the following sections, we will first briefly review FILM which we base our proposal, proceeded by modifications made to build FILM++ and Prompter.
+
+\begin{figure*}[!tb]
+	\centering
+	\includegraphics[trim={0mm 5mm 0mm 10mm},clip,width=0.7\linewidth]{imgs/overview.pdf} 
+	\vspace{-2mm}
+	\caption{Method overview. Modules in dotted squares are trained on ALFRED data. FILM's semantic search module is also trained on the ALFRED data.}
+	\label{fig:overall}
+	\vspace{-4mm}
+\end{figure*}
+
+
+\subsection{FILM}
+
+\subsubsection{Language substream}
+
+The language substream subdivides the language instructions into a series of object-action pairs, which serve as subtasks that agents follow to complete the task in divide-and-conquer manner. For example, an object-action pair (Faucet, ToggleObjectOn) corresponds to first finding a faucet and then turning the knob.
+The contents and the order of the object-action pairs are templated for the seven tasks types available in ALFRED. For example, "examine in light" task is always converted to (Obj1, PickupObject), (FloorLamp, ToggleObjectOn), in which the task types and object names are predicted by the language processing module.
+
+\subsubsection{Vision substream} \label{pssec:vision}
+
+The aim of the vision substream is to create a 2D top-down map of the obstacles and objects (semantic map).
+At each time step, it receives an egocentric image which is processed into a depth map via UNet \cite{ronneberger2015u} and an instance segmentation via Mask R-CNN \cite{he2017mask}. As in FILM, we use models trained by Blukis \etal for depth estimation \cite{blukis2022persistent}, and Shridhar \etal for instance segmentation \cite{shridhar2020alfworld}.
+The two estimations are integrated as a semantic 3D point cloud and converted to an allocentric 2D semantic map. The resulting semantic map has the dimension $(C + 1) \times M \times M$, where $C$ is the number of object categories plus one for the obstacle information and $M \times M$ corresponds to the floor space, each cell representing 5cm $\times$ 5cm space.
+
+\subsubsection{Motion Controller} \label{ssec:planner}
+
+Given the processed information from the substreams, the motion controller plans the next action.
+First, one of three goal planners is chosen in order to determine the next location the agent should visit.
+The planner selection process is fully deterministic- (1) if the target object is within sight, the local adjustment module makes final adjustments to prepare the agent for object interaction, (2) if the target is in the semantic map, the semantic map lookup module guides the agent to the stored coordinate, and (3) if the previous two conditions are not met, the semantic search module estimates the location of the target from previous landmark observations (Sec. \ref{ssec:semantic_search}).
+Finally, the navigation module plans the next action to realize the goal planner's decision.
+
+
+\subsection{FILM++} \label{ssec:film++}
+
+FILM++ and FILM share the same trained modules; they only differ in deterministic aspects, as we describe in the following sections.
+
+\subsubsection{Navigation}
+
+In ALFRED, agents can only make 90$^\circ$ turns or 25 cm steps to navigate, which means that only specific locations in the environment can be visited, visualized by a grid of 25 cm intervals.
+FILM uses Fast Marching Method (FMM) \cite{sethian1996fast} for navigation, but as FMM assumes that an agent is able to take steps of any size in any direction, it may not be possible for ALFRED agents to follow the path planned by FMM.
+Therefore, it is better to formulate navigation under a discrete assumption as done by Murray \etal. The environment is discretized into a grid of $X\times Y\times O$, in which $X\times Y$ corresponds to the floor space and $O$ is the yaw angle of the agent \cite{murray2022following}. After grid node connectivity is determined from the obstacle prediction, a shortest path solver plans the next step.
+
+\subsubsection{Reachable distance} \label{sssec:reachable_dist}
+
+An agent can only interact with objects that are currently visible and reachable. In ALFRED, an object is considered reachable if its horizontal displacement from the agent is less than 1.5 meters.
+FILM directly uses the depth estimation to determine the reachability, which is suboptimal as depth includes the height displacement between the camera and the object. FILM++ removes the height component from the depth estimation using camera pose, allowing it to accurately judge reachability.
+
+\subsubsection{Interaction offset} \label{sssec:interact_offset}
+
+An agent must be close enough to an object for a successful interaction, but being too close to an object can also be a source of error. This is especially true when objects change shape after interaction, as agents may get in the way of deformation. In fact, Murray \etal proposes a module specifically to care for this type of problem. While their module is shown effective, an extra training data with human-in-the-loop is necessary.
+We instead propose to offset the agent from the object by 50 cm for the OpenObject action, as it is the only deforming interaction in ALFRED.
+
+\subsubsection{Slice replay} \label{sssec:slice_replay}
+
+The ALFRED benchmark contains the SliceObject action, which typically requires the agent to cut something, put away the knife, and deliver the sliced contents somewhere. In FILM++, the agent location and the object mask during slicing event is stored so that the agent can efficiently return for a pick up later.
+
+\subsubsection{Look around} \label{sssec:lookaround}
+
+FILM++ instructs the agent to look around the environment at the beginning of an episode, to promote information gathering.
+Liu \etal take a similar approach, but they use the first 500 steps to gather information, making the average episode duration extremely long \cite{liu9planning}. Our look around sequence is only 11 steps long, consisting of three LookUp, three RotateLeft, three LookDown, two RotateRight, in that order (agents start an episode with camera angle of 45$^\circ$ below the horizon, and three LookUps equates to looking up by 45$^\circ$).
+
+\subsubsection{Obstacle enlargement} \label{sssec:obstacle}
+
+A common practice during collision-free path planning is to enlarge the obstacles by the size of the agent, so that the agent can be modeled as a point. As an agent in ALFRED is shaped as a cylinder of radius 20 cm, we enlarge the obstacles by a conservative 22.5 cm to account for the agent size, unlike 10 cm as done in FILM.
+
+% \begin{figure}[!tb]
+%     \centering
+%     \includegraphics[width=0.25\linewidth]{imgs/distance_fail.png}
+% 	\caption{RotateLeft should be chosen for the green drawer, while MoveAhead should be chosen for the yellow drawer.}
+% 	\label{fig:centering}
+% \end{figure}
+
+% \subsubsection{Local adjustment} \label{sssec:local_adjust}
+
+% The local adjustment modules is selected when the target is within the agent's sight, to get the agent ready to interact with objects. In addition to the visibility and the reachability constraints mentioned in Sec. \ref{sssec:reachable_dist}, the relative position between the target and an agent is important for a successful interaction.
+% FILM proposes a simple reposition strategy, which is that when the target is off-centered in the egocentric view, it is instructed to ``sidestep'' in that direction. However, this approach struggles in the situation such as \ref{fig:centering}. For both drawers, the simple centering strategy would order the agent to sidestep left (RotateLeft-MoveAhead-RotateRight). However, the correct course of action is actually RotateLeft for the green drawer and MoveAhead for the yellow drawer, as the drawers are positioned at different distance from the agent.
+
+% We instead propose a simpler, deterministic local adjustment module that bases its decision on the 3D location of the target.
+% If the target is not reachable or centered, the module searches for the optimal navigation action by estimating the 2D egocentric coordinate of the target in the new camera pose, allowing it to handle situations presented in \ref{fig:centering}.
+
+% \subsection{Initial Look Around}
+
+% One last modification from FILM is that the agent looks around the environment at the beginning of an episode. This is to gather information and make smarter decisions at the start of the episode. A similar approach was taken by Liu \etal, but they use the first 500 steps to gather information, making the average episode duration extremely long \cite{liu9planning}, which is undesired. Our look around sequence is only 11 steps long, consisting of three LookUp}, three RotateLeft}, three LookDown}, two RotateRight}, in that order (because the look actions are discretized at 15$^\circ$, three LookUp} equates to looking up by 45$^\circ$).
+
+% \begin{algorithm}[!tb]
+%     \small
+%     \DontPrintSemicolon
+%     \SetKwFor{ForAll}{forall}{do}{end forall}%
+%     \SetKwFor{RepTimes}{repeat}{times}{end}
+%     \SetKwInOut{Input}{Input} \SetKwInOut{Output}{Output}
+
+%     \Input{$P$ \tcp*{Precise Annotations}}
+%     \InputXX{$n_{dil}$ \tcp*{Number of dilation to apply}}
+%     \Output{$S$ \tcp*{Synthesized Annotations}}
+%     $S \gets \emptyset$
+%     \ForAll{$p \in P$}{
+%         $\alpha_L \gets 10$\;
+%         $\alpha_U \gets 10000$\;
+%         \RepTimes{$n_{dil}$}{
+%             $d \gets Dilate(p)$\;
+%         }
+%         \Repeat{$0.925 \leq r \leq 0.975$}{
+%             $\alpha \sim \mathcal{U}(\alpha_L, \alpha_U)$\;
+%             $s \gets ElasticTransform(\alpha, d)$\;
+%             $r \gets Recall(s, p)$\tcp*{Calculate recall}
+%             \If{$r \geq 0.975$}{$\alpha_L \gets \alpha$}
+%             \If{$r \leq 0.925$}{$\alpha_U \gets \alpha$}
+%         }
+%         $S \gets s$
+%     }
+%     \Return S
+%     \caption{Annotation Synthesis Procedure}
+%     \label{alg:synthesis_algo}
+% \end{algorithm}
+
+% \begin{figure}[!tb]
+%     \centering
+%     \includegraphics[width=0.25\linewidth]{imgs/cabinet_fail_1.png}
+%     \includegraphics[width=0.25\linewidth]{imgs/cabinet_fail_2.png}
+% 	\caption{The importance of centering procedure. PutObject could fail when the opened cabinet is in the way.}
+% 	\label{fig:adjustment}
+% \end{figure}
+
+
+\begin{figure*}[!tb]
+    \centering
+	\subfloat[Before normalization.]{
+	    \includegraphics[trim={0mm 10mm 12mm 14mm},clip,height=18mm]{imgs/prior_comp_unadjusted.pdf}
+	    \label{fig:multitoken_unadjusted}
+	}
+	\subfloat[After normalization.]{
+	    \hspace{-3mm}
+	    \includegraphics[trim={15mm 10mm 0mm 14mm},clip,height=18mm]{imgs/prior_comp_adjusted.pdf}
+	    \label{fig:multitoken_adjusted}
+	}
+	\caption{Collocation log-probability of the landmark objects, averaged across all objects. The color of the plot correspond to the token length. The effect of the token length on the collocation probability is reduced after normalization.}
+	\label{fig:multitoken}
+	\vspace{-4mm}
+\end{figure*}
+
+\subsection{Semantic Search Module}  \label{ssec:semantic_search}
+
+As agents spend much of their time searching for objects, an efficient search is desired. In many of the recent work, the semantic search module, which predicts the location of the target object from the observed objects, is implemented to expedite the search \cite{film,murray2022following}. The module is based on the idea that because certain object pairs are more likely to collocate, observed objects can act as landmarks to guide the search process. For example, when searching for a fork, one should search near a sink and not near a toilet.
+In general, larger immovable objects function better as landmarks, as they are easier to spot and less likely to be in arbitrary locations. We use the same list of landmark objects as in FILM.
+
+As mentioned in Sec. \ref{sec:intro}, a major drawback of the previous implementations of semantic search module is that an extra dataset is needed for training. This increases the deployment cost and make the model prone to overfit to a distribution different from the \textit{natural} object spatial distribution.
+
+We propose a semantic search module based on language model prompting. First, probabilities of each object pair collocating is calculated by prompting (\textit{collocation probability}). Then the probability is multiplied with the semantic map to produce the object location prediction. Our method has three benefits: first, the pretrained nature removes the data collection bottleneck, second, the fact that LLMs are pretrained with large corpus remedies the data bias problem, and finally, it can easily be extended to adapt new objects, making it friendly to new environments.
+
+Prompts proposed by Qin \etal \cite{qin2021learning} for extracting the \texttt{AtLocation} attribute of the ConceptNet \cite{speer2017conceptnet} are used to prompt Huggingface \textit{bert-base-cased} pretrained model \cite{wolf-etal-2020-transformers,devlin2018bert}. Note that these prompts are almost directly taken from the Open Mind Common Sense dataset \cite{singh2002open}, which was published years before LLM prompting was proposed, and thus they are not optimized for prompting; devising an optimal set of prompts is left for future work. An example prompt is ``Something you find at [Y] is [X].'', where [X] is filled with the name of the object to find, and LLMs fill [Y] with landmark names.
+To adapt the method for collocation information extraction, we made two modifications.
+
+First, some object names in AI2-THOR such as ``sink basin'', ``laundry hamper'', and ``apple sliced'' are unnaturally phrased, resulting in disproportionately low scores. As such, object names are rephrased by forward and backward language translation \cite{wmt19}, similar to how prompts were rephrased by Jiang \etal \cite{jiang2020can}. The rephrased word is chosen from the top five candidates, to avoid different objects mapping to the same name.
+
+% Note that since translation models perform better on sentences, the template ``I have a [NAME].'' was used to generate the input sentences. 
+
+Another problem with calculating collocation probability is comparing names of different token lengths. Because LLMs output one probability score per token, words composed of multiple tokens receive multiple probabilities, making comparisons difficult.
+For example, let us evaluate if it is more likely to find an apple near a kitchen counter or a microwave. For the sake of argument, assume that \textit{kitchen}, \textit{counter}, and \textit{microwave} are each single token. In this case, two prompts must be used- ``Something you find at [MASK] [MASK] is apple.'' for kitchen counter and ``Something you find at [MASK] is apple.'' for microwave. Since LLM predictions are made per mask token, two probabilities will be produced for kitchen counter, one measuring ``kitchen'' to be in the first mask, and another measuring ``counter'' to be in the second mask, whereas only one probability will be outputted for microwave. Empirical studies have shown that aggregating the probability outputs of the multi-token word via multiplication is inadequate \cite{jiang2020x}. This is a well-known issue about prompting, and many researches circumvent it by only extracting single token vocabularies.
+
+This issue is observed in our case as well- \ref{fig:multitoken} shows the collocation log-probabilities of the landmarks, averaged across all objects. In other words, higher the log-probability, more objects are likely to be found near that landmark. \ref{fig:multitoken_unadjusted} shows that the number of tokens significantly influences the collocation probability regardless of an object's ability as a landmark.
+We remedy this issue by calculating the reference score of each landmark. The reference score is calculated by using the same prompts, but filling [X] with a random word, in our case ``tmp'', with the aim of quantifying the prior probability of the landmarks. The collocation scores are then normalized by their respective reference scores. \ref{fig:multitoken_adjusted} shows that the normalization subdues the effect of token length.
+
+The collocation distribution is multiplied with the semantic map prediction to obtain the prediction of probable target location.
+Finally, in order to balance exploration and exploitation, the goal coordinate is determined by argmax 50\% of the time, and sampling 50\% of the time.
+
+
+% Note that the semantic map is normalized by size before the multiplication to promote the agent to search smaller objects first. 
+
+% It also shows that the resulting distribution is strongly skewed, which is good because it exhibits strong exploitation, but also bad because the agent will be less inclined to explore. This is problematic as some objects in ALFRED are located in uncommon locations, like an apple in the sink or an egg in the sink. To promote exploration, we treat the situation as a two-armed bandit problem, in which the agent chooses between the LLM prompted collocation distribution and a uniform collocation distribution. Note that because the uniform distribution is still multiplied to the semantic map, it promotes the agent to pick goals in areas in which more landmarks are located.
+
+% One major difference between this situation and a typical two-armed bandit problem is that (1) the reward is zero until the object is found and (2) the LLM prompted collocation probability has a higher expected reward at the start since it is based on a more intelligent prediction. As a result, this simplifies to drawing from the LLM prompted collocation probability until its expected reward lowers to the same value as the uniform distribution.
+% Therefore, we formulate the goal coordinate selection strategy as follows: draw from the LLM prompted collocation probabilities for the first five attempts, and draw from the uniform distribution after that. Also, when drawing a goal from a distribution, use argmax 50\% of the time, and randomly sample from the distribution the other 50\% of the time.
+
+\section{Experiments} \label{sec:experiment}
+
+The ALFRED benchmark consists of tests seen (1533 episodes), tests unseen (1529 episodes), valid seen (820 episodes), and valid unseen (821 episodes) sets. Seen/unseen denotes whether rooms also appear in the training set.
+
+As for the evaluation metrics, Success Rate (SR) measures whether all subtasks are completed. Goal Condition Success (GC) measures the ratio of subtasks completed in an episode. Both metrics are weighted by (path length of the expert trajectory)/(path length taken by the agent) to produce path length weighted SR (PLWSR) and path length weighted GC (PLWGC), quantifying how efficiently tasks are completed.
+
+% \paragraph{Instruction Granularity}
+
+% In addition to test seen and unseen splits, the baselines are separated by the granularity of the language instructions, as mentioned in Sec. \ref{sec:task_description}. Our proposed model is evaluated on both.
+% While our proposed model does not require low-level instructions, both results are reported for a more complete comparison.
+
+% \paragraph{Training Details}
+
+% The dotted squares in \ref{fig:overall} correspond to trained components.
+% The Language Processing module is implemented with several BERTs \cite{devlin2018bert}, and we use the model trained in FILM \cite{film}.
+% The depth estimation model is implemented with UNet \cite{ronneberger2015u}, and we use the model trained in HLSM \cite{blukis2022persistent}.
+% The instance segmentation model is implemented with Mask R-CNN \cite{he2017mask}, and we use the model trained by Shridhar \etal \cite{shridhar2020alfworld}.
+% Finally, the semantic search module is implemented with BERT, and we directly use the pretrained Huggingface bert-base-cased model \cite{wolf-etal-2020-transformers,devlin2018bert}.
+
+\begin{table}[!tb]
+	\centering
+    \scriptsize
+    \setlength{\tabcolsep}{1mm}
+    \renewcommand{\baselinestretch}{0.8}
+	\caption{Results on the test splits of the ALFRED Benchmark. Bolded values are the top scores for that metric.}
+	\vspace{-1mm}
+	\begin{tabular}{lcccc|cccc}
+		\toprule
+		& \multicolumn{4}{c}{\textbf{Test Seen}}& \multicolumn{4}{c}{\textbf{Test Unseen}} \\
+		\cmidrule{2-5} \cmidrule{6-9}
+        \textbf{Method} &SR&GC&PLWSR&PLWGC &SR&GC&PLWSR&PLWGC \\
+		\midrule
+		\multicolumn{9}{l}{\textbf{Low-level step-by-step instructions + High-level goal instructions}} \\
+		\midrule
+        Seq2Seq \cite{alfred}               & 3.98 & 9.42 & 2.02 & 6.27 & 0.39 & 7.03 & 0.08 & 4.26 \\
+        % MOCA \cite{singh2021factorizing}    & 22.05 & 28.29 & 15.10 & 22.05 & 5.30 & 14.28 & 2.72 & 9.99 \\
+        E.T. \cite{pashevich2021episodic}   & 38.42 & 45.44 & \textbf{27.78} & 34.93 & 8.57 & 18.56 & 4.10 & 11.46 \\
+        LWIT \cite{nguyen2021look}          & 30.92 & 40.53 & 25.90 & \textbf{36.76} & 9.42 & 20.91 & 5.60 & 16.34 \\
+        % HiTUT \cite{zhang2021hierarchical}  & 21.27 & 29.97 & 11.10 & 17.41 & 13.87 & 20.31 & 5.86 & 11.51 \\
+        % ABP \cite{embodiedkim}              & 44.55 & 51.13 & 3.88 & 4.92 & 15.43 & 24.76 & 1.08 & 2.22 \\
+        % VLNBERT \cite{song2022one}          & 24.79 & 33.35 & 13.88 & 19.48 & 16.29 & 22.60 & 7.66 & 13.18 \\
+        FILM \cite{film}                    & 28.83 & 39.55 & 11.27 & 15.59 & 27.8 & 38.52 & 11.32 & 15.13 \\
+        LGS-RPA \cite{murray2022following}  & 40.05 & 48.66 & 21.28 & 28.97 & 35.41 & 45.24 & 15.68 & 22.76 \\
+        \textbf{Prompter}                   &\textbf{53.23}  & \textbf{63.43} & 25.81 & 30.72 &\textbf{45.72}  &\textbf{58.76} & \textbf{20.76} & \textbf{26.22} \\
+    	\midrule
+		\multicolumn{9}{l}{\textbf{High-level goal instructions only}} \\
+		\midrule
+        % LAV \cite{lav}                  &13.35 & 23.21 & 6.31 & 13.18 & 6.38 & 17.27 & 3.12 & 10.47 \\
+        HLSM \cite{blukis2022persistent}&25.11 & 35.79 & 6.69 & 11.53 & 16.29 & 27.24 & 4.34 & 8.45 \\
+        FILM \cite{film}                &25.77 & 36.15 & 10.39 & 14.17 &24.46 &34.75  &9.67   &13.13 \\
+        LGS-RPA \cite{murray2022following}&33.01&41.71  &16.65  &24.49  &27.80  &38.55  &12.92  &20.01 \\
+        EPA \cite{liu9planning}         &39.96 & 44.14 & 2.56 & 3.47 & 36.07 & 39.54 & 2.92 & 3.91 \\
+        \textbf{Prompter}               &\textbf{49.38}  & \textbf{55.90} & \textbf{23.47} & \textbf{29.06} &\textbf{42.64}  &\textbf{59.55} & \textbf{19.49} & \textbf{25.00} \\
+        \bottomrule
+	\end{tabular}
+	\vspace{-1mm}
+	\label{tbl:test_eval}
+\end{table}
+
+
+
+\subsection{Results}
+
+\ref{tbl:test_eval} shows the results on the test sets. Prompter achieves state of the art on most metrics, including test unseen SR used by the official leaderboard for ranking.
+Absolute gains of 10.31\% and 6.57\% over previous state of the art in the two instruction granularities display the effectiveness of the proposed method.
+Also note the significant increase in the path length weighted (PLW) metrics between the proposed method and EPA, as EPA requires the agent to observe the environment for the first 500 steps. This difference could be significant in real deployment, as older observations are more likely to get invalidated by other actors in the scene, such as when humans relocate objects. 
+
+The only metrics in which Prompter underperforms are the PLW metrics for the test seen split. Since Prompter has better SR and GC scores, it implies that E.T. and LWIT finish the tasks considerably faster, as SR and PLWSR should in general scale together. We believe this is caused by overfitting. As landmark objects stay at the same location between train and test seen splits, it is possible that these models remembered the landmark locations for a faster task completion. The fact that E.T. and LWIT are implemented as end-to-end models which are prone to overfit and their significant drop in performance from seen to unseen split support this hypothesis.
+
+
+\subsection{Ablation Study}
+
+If not otherwise noted, all ablation studies are conducted on the validation unseen split, and all methods are evaluated with high-level instructions only.
+
+\subsubsection{Substreams}
+
+\ref{tbl:gt_eval} summarizes how Prompter performs with ground truth depth and instance segmentations (+ gt perception), ground truth language parsing (+ gt lang.), and all ground truths (+ gt perception, gt lang.), showing that there is still a room for growth for the two substreams.
+
+% Min \etal claim that the templated subtask approach in the language substream should be adopted in all situations, due to its low overhead and effectiveness. Although we do agree that it is effective in many situations, we also want to warn about major failure cases of the approach, and that is when the target is hidden in a container. Because the visibility of the object is independent of the task type, it cannot be incorporated into the template. This could be solved by expanding the templates to include the hidden state, but it would significantly increase the number of templates, probably worsening the template classification accuracy. Also, it cannot specify the object attributes such as the color of an object and positional relationships between objects. As such, the system for example struggles to find a ``green apple'' when there are multiple apples in the environment.
+
+% We believe that the vision substream has two major issues.
+% First, the depth estimation model used in many ALFRED literature seems to be overfitted to the agent looking down at 45$^\circ$, also mentioned by Min \etal as well. This is highly evident from the fact that when the depth estimation of the floor is 3D reconstructed in the camera coordinate, its pitch angle is always around 45$^\circ$, instead of the angle at which the camera looks down, as shown in \ref{fig:problem_depth_a}. As a result, the agent must always be operated at 45$^\circ$ below the horizon for accurate depth estimation, making it difficult to explore the environment, as shown in \ref{fig:problem_depth_b}. One last small note regarding the depth estimation is that because it is a classification model, the estimates are discretized, making the 3D reconstructions have jagged surfaces, as shown in \ref{fig:problem_depth_a}. This makes floor estimation difficult.
+
+% Another problem with the vision substream is the instance segmentation. The Mask R-CNN model used in various literature has major problems with detecting certain objects, notably pepper shaker, salt shaker, and anything sliced (\eg sliced lettuce, sliced tomato).
+% The problem with sliced objects is that because there is little difference in appearance after an object is sliced, the model incorrectly predicts sliced objects as unsliced. In our implementation, we use the recognition results of unsliced objects as sliced objects as well.
+
+\begin{table}[!tb]
+	\centering
+    \scriptsize
+    \renewcommand{\baselinestretch}{0.8}
+	\caption{Ablation results with ground-truth perception and language. Note that all ablation experiments are conducted on the validation unseen split.}
+	\vspace{-1mm}
+	\begin{tabular}{lcccc}
+		\toprule
+		\textbf{Method}& \textbf{SR}&\textbf{GC}&\textbf{PLWSR}&\textbf{PLWGC} \\
+		\midrule
+		Prompter                    & 53.27 & 63.03 & 19.56 & 21.72 \\
+		\midrule
+% 		+ low-level lang.           & 56.76 & 66.02 & 20.45 & 22.63 \\
+		+ gt lang.                  & 60.90 & 69.56 & 21.07 & 23.15 \\
+		+ gt perception             & 70.04 & 75.89 & 41.03 & 43.17 \\
+		+ gt perception, gt lang.   & 80.51 & 84.59 & 46.31 & 47.83 \\
+% 		\midrule
+% 		Human performance           & 91.00 & 94.50 & 85.80 & 87.60 \\
+        \bottomrule
+	\end{tabular}
+	\label{tbl:gt_eval}
+	\vspace{-5mm}
+\end{table}
+
+
+\subsubsection{FILM++}
+
+\ref{tbl:filmpp_ablation} summarizes the effect of the modifications described in \ref{ssec:film++} on Prompter. Note that the navigation module is not evaluated, as it affects other modifications such as slice replay.
+The table shows that most modifications improve all metrics, except for slice replay and look around sequence.
+While SR slightly worsens when adding slice replay, efficiency improves, as shown by the PLW metrics.
+Also, while SR improves with the inclusion of look around sequence, the PLW metrics get worse. This is because the agent does not have to spend time to look around, shortening the average path length.
+
+% Finally, removing the reposition strategy slightly improves SR and GC.
+% One reason why no reposition strategy performs well is due to the limitations of the AI2-THOR simulator. \ref{fig:sim_limit} shows situations in which an agent can open the landmarks when the coordinates specified by yellow circles are used as interaction masks. Note that the agents can only see the left half of each figure, the grayed sections are out of agent's sight, added for viewer understandability. In other words, agents can interact with objects without needing to center itself to the target, despite the fact that it is highly unlikely that agents can do so in real life.
+% Furthermore, it turns out that agents without a reposition strategy is 20\% more likely to produce ``No valid positions to place object'' error than when the proposed 3D reposition strategy is used. This error is issued when an agent tries to put an object on a landmark with no visible space to place an object, and can be avoided by having a clear view of the landmark, which is what the 3D reposition strategy promotes.
+
+\begin{table}[!tb]
+	\centering
+    \scriptsize
+	\caption{Ablation results of the modifications described in Sec. \ref{ssec:film++}.}
+	\vspace{-1mm}
+	\begin{tabular}{lcccc}
+		\toprule
+		\textbf{Descriptions} & \textbf{SR}&\textbf{GC}&\textbf{PLWSR}&\textbf{PLWGC} \\
+	    \midrule
+		Prompter                    & 53.27 & 63.03 & 19.56 & 21.72 \\
+		\midrule
+	    uncorrected reach dist. (\ref{sssec:reachable_dist})    & 50.43 & 60.19 & 19.04 & 21.22  \\
+		w/o interaction offset  (\ref{sssec:interact_offset})    & 49.33 & 60.17 & 18.11 & 20.46   \\
+		w/o slice replay (\ref{sssec:slice_replay})              & 53.59 & 62.68 & 18.67 & 20.81  \\
+		w/o look around (\ref{sssec:lookaround})                 & 50.79 & 61.01 & 20.06 & 22.16  \\
+		10 cm obstacle enlargement (\ref{sssec:obstacle})       & 34.59 & 45.75 & 15.22 & 18.98  \\
+% 		no reposition (\ref{sssec:local_adjust})    & 54.57 & 64.19 & 19.43 & 21.61  \\
+% 		2D reposition (FILM)    & 50.55 & 60.10 & 18.67 & 20.46   \\
+        \bottomrule
+	\end{tabular}
+	\label{tbl:filmpp_ablation}
+	\vspace{-5mm}
+\end{table}
+
+% \begin{figure}[!tb]
+%     \centering
+%     \includegraphics[width=0.9\linewidth]{imgs/interaction_problems.pdf}
+% 	\caption{Limitations of the AI2-THOR simulator. Yellow circles indicate the masks used to open the target. Grayed regions are out of agent's sight.}
+% 	\label{fig:sim_limit}
+% \end{figure}
+
+\subsubsection{Semantic Search Module}
+
+\ref{tbl:semantic_search_ablation} summarizes the ablation study on the semantic search module. Due to smaller performance differences, averages of three runs is shown.
+The first block of the table compares LLM prompting against three baselines.
+Random search is a popular baseline in many literature \cite{film,murray2022following}, and it randomly selects the goal coordinate without considering the landmark locations. CNN is the module used in FILM, trained on the ALFRED data. Since the methods on this table are after applying the modifications described in Sec. \ref{ssec:film++}, CNN baseline is the FILM++ model. Note that with SR of 53.39\%, it more than doubles the score achieved by the original FILM at 20.10\%.
+Finally, the collocation probability is set to uniform in the uniform probability baseline. The uniform baseline prefers to search in areas with more landmark objects.
+
+The table shows that random search performs the worst across all metrics. It especially has low PLW metrics, confirming that the semantic search module does expedite task completions. LLM prompting and CNN perform similarly, which is a satisfactory result for LLM prompting, as it already has three benefits outside of accuracy performance over CNN, as described in \ref{ssec:semantic_search}, namely: (1) training data is not needed (2) less prone to data bias (3) easily extendable to new objects. In fact, it makes sense that the CNN baseline would outperform LLM prompting, as CNN is specifically trained on the simulator distribution.
+
+% Furthermore, the fact that the uniform probability baseline performs the worst supports the fact that the collocation probabilities extracted from the LLM is important.
+
+Despite making no assumptions on the object location relationship, the uniform baseline performs comparably to collocation-aware methods. While the low PLW metrics indicate that it is not as efficient as LLM prompting, it does surprisingly well considering that no outside knowledge is used.
+We believe this success is attributed to the fact that there are not many locations to search for objects in the ALFRED environment, as agents only have to explore one room per episode and objects are typically concentrated in one part of the room. As a result, agents have enough time to perform exhaustive search, explaining the high performance of the uniform baseline. 
+This is also evident by the performance of EPA \cite{liu9planning}, previous state of the art, which dedicates the first 500 steps for environment observation.
+While EPA does not disclose the details of the observation step, assuming a typical room dimension of 6 m $\times$ 6 m, it approximately takes 750 steps for an agent to look in four directions on a grid of 50 cm interval. As most rooms are not empty, this can fit into the budget of 500 steps.
+A recent development in AI2-THOR is to generate multiple rooms for agents to explore, and we believe that the semantic search module shines much brighter in such environments \cite{deitke2022procthor}.
+
+The second block of \ref{tbl:semantic_search_ablation} compares the effect of the vocabulary rephrasing and the token length normalization proposed in Sec. \ref{ssec:semantic_search}. The table shows that both proposals improve performance. In fact, LLM prompting is only as effective as the uniform baseline without those modifications.
+
+The last block of \ref{tbl:semantic_search_ablation} which compares the effect of different pretrained LLMs shows a mixed result. While the score improved for \textit{roberta-large}, it got worse for \textit{bert-large-cased}. Since the PLW metrics of \textit{bert-large-cased} are better than the uniform baseline, the agent is made more efficient, but it has a low SR score. This is unexpected, as \textit{bert-large-cased} generally performs better in most language tasks than \textit{bert-base-cased} used by Prompter. Further experiments should be conducted in the future to investigate the reason, but we hypothesize that the models may be sensitive to the prompt templates.
+
+The LLM prompting method is further analyzed to examine how effectively it captures the collocation information.
+\ref{fig:llm_outputs_comparison} shows an example of object location predictions, demonstrating that the module captures the close relationships between book/shelf, mug/coffee machine, and toilet paper/garbage can.
+\ref{fig:analysis_prompting_projection} shows an MDS 2D projection of the object names, in which negative collocation log-probabilities are treated as the similarity measure. In other words, object pairs with higher collocation probabilities are more likely to appear near each other. The object names are colored by the rooms in which they appear: bathroom (red), kitchen (green), living room or bedroom (blue). Living room and bedroom are combined because they share most of the objects, and objects that can appear in multiple rooms are excluded from the plot.
+The plot shows that the objects are clustered by the rooms they appear, indicating that the prompting-based collocation estimation is able to capture the relative locations of objects.
+
+% The AI2-THOR simulator defines which objects can be stored given a receptacle. For example, a baseball bat can be placed on a bed, but not in a refrigerator. In \ref{fig:analysis_prompting_compatibility}, the collocation log-probabilities are plotted for every receptacle-object pair, where red plots correspond to pairs that are accepted by the AI2-THOR and blue otherwise. As the plot shows, the collocation scores tend to be higher for pairs allowed by the simulator, showing that the LLM prompting captures the collocation information.
+
+\begin{table}[!tb]
+	\centering
+    \scriptsize
+    \setlength{\tabcolsep}{1.5mm}
+    \renewcommand{\baselinestretch}{0.8}
+	\caption{Ablation results of the semantic search module. Scores are averages of three runs.}
+	\vspace{-1mm}
+	\begin{tabular}{lcccc}
+		\toprule
+		\textbf{Method}& \textbf{SR}&\textbf{GC}&\textbf{PLWSR}&\textbf{PLWGC} \\
+		\midrule
+		Prompter (LLM prompting) & 53.27 & 63.03 & 19.56 & 21.72  \\
+		\midrule
+		\multicolumn{5}{l}{\textit{Other implementations}} \\
+    	Random search       & 50.14 & 59.63 & 17.94 & 19.76 \\
+		CNN (FILM++)        & 53.39 & 62.93 & 19.21 & 20.92 \\
+		Uniform             & 52.38 & 62.36 & 18.97 & 21.27 \\
+		\midrule
+		\multicolumn{5}{l}{\textit{Collocation extraction adaptations (Sec. \ref{ssec:semantic_search})}} \\
+		w/o rephrasing       & 52.48 & 62.58 & 19.32 & 21.47 \\
+		w/o token len. norm. & 52.21 & 62.10 & 19.31 & 21.37 \\
+		\midrule
+		\multicolumn{5}{l}{\textit{Effect of different pretrained LLMs}} \\
+		bert-large-cased    & 51.52 & 61.93 & 19.38 & 21.51 \\
+% 		roberta-base        & 51.48 & 62.11 & 19.81 & 22.16 \\
+		roberta-large       & 53.67 & 63.06 & 19.77 & 21.80 \\
+        \bottomrule
+	\end{tabular}
+	\label{tbl:semantic_search_ablation}
+	\vspace{-5mm}
+\end{table}
+
+
+\begin{figure}[!tb]
+	\centering
+    \includegraphics[trim={11mm 11mm 0mm 11mm},clip,width=0.95\linewidth]{imgs/llm_prompting_comparison.pdf}
+    \vspace{-2mm}
+	\caption{Object location prediction by the LLM prompting method, based on the semantic map (left). The difference in the prediction arises from the difference in the collocation probabilities.}
+	\label{fig:llm_outputs_comparison}
+	
+	\vspace{3mm}
+	
+    \includegraphics[trim={26mm 30mm 21mm 30mm},clip,width=0.8\linewidth]{imgs/bert-base-cased_mlmscore_projection.pdf}
+    \vspace{-2mm}
+	\caption{2D projection of the object names, in which the negative collocation log-probabilities are treated as the similarity matrix. Object names are colored by the rooms they appear.}
+    \label{fig:analysis_prompting_projection}
+\end{figure}
+
+
+\subsubsection{Error Modes}
+
+\ref{tbl:failure_analysis} shows the common error modes of FILM and Prompter. The FILM statistics are taken from their paper \cite{film}, and note that how we gathered the statistics may differ. The table shows that over half of Prompter's errors correspond to ``Goal object not found'' or ``Language processing error,'' which are errors in the vision and language substreams. Prompter is particularly bad at recognizing small objects such as salt shakers, and large objects that are difficult to recognize up close, such as refrigerators and floor lamps.
+Two notable differences between FILM and Prompter are interaction failures and collisions. We believe the reason why Prompter is more likely to fail during interaction is because OpenObject followed by PutObject, which is arguably the most difficult interaction, typically occurs at the end of tasks. As Prompter is more likely to reach the end of tasks, more interaction failures occur.
+Also, the reason for a sharp drop in the number of collisions is due to the larger obstacle enlargement (Sec. \ref{sssec:obstacle}). 
+
+
+\begin{table}[!tb]
+	\centering
+    \scriptsize
+    \renewcommand{\baselinestretch}{0.8}
+	\caption{Failure mode analysis on the validation unseen split.}
+	\vspace{-1mm}
+	\begin{tabular}{lcc}
+		\toprule
+		\textbf{Error mode} & \textbf{FILM} & \textbf{Prompter} \\
+		\midrule
+        Goal object not found       & 26.07 & 28.80 \\
+        Interaction failures        & 8.54  & 16.53 \\
+        Collisions                  & 11.00 & 0.27 \\
+        Object in a closed confinement & 16.16 & 12.00 \\
+        Language processing error   & 24.54 & 32.80 \\
+        Others                      & 13.69 & 9.60 \\
+        \bottomrule
+	\end{tabular}
+	\label{tbl:failure_analysis}
+	\vspace{-5mm}
+\end{table}
+
+\section{Conclusion}
+
+We proposed FILM++ and Prompter, two methods for EIF. FILM++ is an augmented version of FILM, with simple yet effective modifications. Despite the fact that the trained modules are kept untouched, FILM++ more than doubles FILM's performance. In Prompter, we proposed a semantic search module that utilizes large language models to estimate the location of the searching object, making the method more data efficient while keeping the performance. Finally, an evaluation on ALFRED revealed that Prompter significantly outperforms the previous state of the art.
+
+\bibliographystyle{unsrt}
+\bibliography{root}
+
+\addtolength{\textheight}{-12cm}   % This command serves to balance the column lengths
+                                  % on the last page of the document manually. It shortens
+                                  % the textheight of the last page by a suitable amount.
+                                  % This command does not take effect until the next page
+                                  % so it should come on the page before the last. Make
+                                  % sure that you do not shorten the textheight too much.
+
+
+% \section*{APPENDIX}
+
+
+% \begin{table*}[!tb]
+% 	\centering
+%     \footnotesize
+% 	\caption{Prompts used to extract object collocation probability.}
+% 	\begin{tabular}{lll}
+%         Something you find at [Y] is [X]. & Something you find at the [Y] is [X]. & You are likely to find a [X] in my [Y]. \\
+%         Somewhere [X] can be is in a [Y]. & Something you find in a [Y] is a [X]. & Something you find at the [Y] is a [X]. \\
+%         Something you find in [Y] is [X]. & Something you find on a [Y] is a [X]. & You are likely to find an [X] in a [Y]. \\
+%         You are likely to find [X] in [Y]. & Something you find at a [Y] is a [X]. & You are likely to find a [X] in the [Y]. \\
+%         Something you find on a [Y] is [X]. & Something you find on the [Y] is [X]. & Something you find under the [Y] is [X]. \\
+%         Something you find in a [Y] is [X]. & You are likely to find a [X] in a [Y]. & Something you find under a [Y] is a [X]. \\
+%         Something you find at a [Y] is [X]. & Something you find under a [Y] is [X]. & You are likely to find a [X] in your [Y]. \\
+%         Something you find in [Y] is a [X]. & Something you find in a [Y] is an [X]. & You are likely to find [X] around in [Y]. \\
+%         You are likely to find a [X] in [Y]. & You are likely to find [X] in the [Y]. & You are likely to find a [X] around in [Y]. \\
+%         Something you find at an [Y] is [X]. & Something you find at an [Y] is a [X]. & You are likely to find [X] around in a [Y]. \\
+%         You are likely to find [X] in a [Y]. & Something you find in the [Y] is a [X]. & You are likely to find a [X] around in a [Y]. \\
+%         You are likely to find an [X] in [Y]. & Something you find on the [Y] is a [X]. & You are likely to find a [X] around in the [Y]. \\
+%         Something you find in the [Y] is [X]. & You are likely to find a [X] in an [Y]. & \\
+% 	\end{tabular}
+% 	\label{tbl:prompts}
+% \end{table*}
+
+% \begin{table*}[!tb]
+% 	\centering
+%     \footnotesize
+% 	\caption{List of rephrased names.}
+% 	\begin{tabular}{llllllll}
+%         AlarmClock &  alarm clock & FloorLamp &  floor lamp & Safe &  safe \\
+%         Apple &  apple & Fork &  fork & SaltShaker &  salt shaker \\
+%         AppleSliced &  cut apple & Fridge &  fridge & ScrubBrush &  scrub brush \\
+%         ArmChair &  chair & GarbageCan &  trash can & Shelf &  shelf \\
+%         BaseballBat &  baseball bat & Glassbottle &  glass bottle & ShowerDoor &  shower door \\
+%         BasketBall &  basketball & HandTowel &  hand towel & SideTable &  side table \\
+%         BathtubBasin &  tub & HousePlant &  house plant & SinkBasin &  sink \\
+%         Bed &  bed & Kettle &  kettle & SoapBar &  soap bar \\
+%         Book &  book & KeyChain &  key chain & SoapBottle &  soap bottle \\
+%         Bowl &  bowl & Knife &  knife & Sofa &  sofa \\
+%         Box &  box & Ladle &  ladle & Spatula &  spatula \\
+%         Bread &  bread & Laptop &  laptop & Spoon &  spoon \\
+%         BreadSliced &  cut bread & LaundryHamperLid &  laundry basket & SprayBottle &  spray bottle \\
+%         ButterKnife &  butter knife & Lettuce &  lettuce & Statue &  statue \\
+%         CD &  CD & LettuceSliced &  cut lettuce & StoveBurner &  stove \\
+%         Cabinet &  cabinet & LightSwitch &  switch & StoveKnob &  stove button \\
+%         Candle &  candle & Microwave &  microwave & TVStand &  TV stand \\
+%         Cart &  cart & Mug &  mug & TeddyBear &  teddy bear \\
+%         CellPhone &  phone & Newspaper &  paper & Television &  TV \\
+%         Cloth &  cloth & Ottoman &  ottoman & TennisRacket &  tennis racket \\
+%         CoffeeMachine &  coffee machine & Pan &  pan & TissueBox &  tissue box \\
+%         CoffeeTable &  coffee table & PaperTowel &  paper towel & Toilet &  toilet \\
+%         CounterTop &  kitchen counter & PaperTowelRoll &  paper towel roll & ToiletPaper &  toilet paper \\
+%         CreditCard &  credit card & Pen &  pen & ToiletPaperRoll &  toilet paper roll \\
+%         Cup &  cup & Pencil &  pencil & Tomato &  tomato \\
+%         Desk &  desk & PepperShaker &  pepper shaker & TomatoSliced &  cut tomato \\
+%         DeskLamp &  desk lamp & Pillow &  pillow & Towel &  towel \\
+%         DiningTable &  dining table & Plate &  plate & Vase &  vase \\
+%         DishSponge &  sponge & Plunger &  plunger & Watch &  watch \\
+%         Drawer &  drawer & Pot &  pot & WateringCan &  watering pot \\
+%         Dresser &  dresser & Potato &  potato & WineBottle &  wine bottle \\
+%         Egg &  egg & PotatoSliced &  cut potato &  &  \\
+%         Faucet &  faucet & RemoteControl &  remote &  &  \\
+% 	\end{tabular}
+% 	\label{tbl:rephrase}
+% \end{table*}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+
+\end{document}

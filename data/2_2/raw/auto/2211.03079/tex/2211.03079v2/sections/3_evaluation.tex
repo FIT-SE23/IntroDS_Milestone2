@@ -1,0 +1,84 @@
+% \vspace{-5pt}
+\section{Methods} \label{sec:evaluation}
+% \subsection{Evaluation Methodology}\label{subsec:evaluation-methodology}
+
+
+
+
+\head{Evaluation setup}
+Table~\ref{tab:systemparameters} provides our system details. We evaluate \mech using:  (1) a  cutting-edge spatial vector computing system  from AMD-Xilinx (\mech-MP) \gssss{using mixed-precision computation},  and (2) AMD Mi50 GPU~\cite{mi50} (\mech-FP) \gssss{using floating-point precision computation}. 
+We train and evaluate \mech and our baseline basecallers (\cc, \gpf, and \bon) using the same MI50 GPU. 
+%We use the same setup to evaluate our baseline basecallers. 
+The AMD-Xilinx system is
+%also evaluate \mech on real cutting-edge spatial vector computing system, i.e., 
+the Versal ACAP VC2802 featuring Versal AI Engine (AIE) ML~\cite{aiemlvc2802}, with 304 AIE-ML cores. \gssss{We estimate the performance  on AIE-ML by calculating bit operations (BOPs)~\cite{baskin2021uniq} that
+measures the number of bitwise operations in a given network from its  ONNX (Open Neural Network
+Exchange)~\cite{onnx} representation.} % Core XCVC1902-2MSEVSVA2197 ACAP~\cite{aiexcvc1902} with 400 AIE cores. 
+The AIE vector datapath implements two-dimensional single instruction, multiple data (SIMD)~\cite{illiac_simd_1968} operations using precisions ranging from int4$\times$int8 to int16$\times$int16 %s
+operands that can execute 512 to 64 multiply-accumulate operations (MACs) per cycle, respectively.  
+\input{tables/system}
+
+
+\head{\nas setup details%\srr{we need to find a better title: Evaluating quantization-aware basecalling?}
+} We use the publicly available ONT dataset~\cite{bonito} %\srr{are these different from the ones in Table 2? \gsf{Yes, it's the bonito open-source dataset}} 
+\sr{sequenced using} MinION Flow Cell (R9.4.1) for the training and validation during the \nas search phase. We randomly select 30k samples from the training set for the search phase (specified using the \texttt{---chunks} parameter). We use nni~\cite{nni} with nn-meter~\cite{nnmetercode} to implement hardware-aware NAS. We use the Brevitas library~\cite{brevitas} to perform quantization-aware training.
+ The architectural parameters and network weights are updated using AdamW~\cite{kingma2014adam} optimizer with  a learning rate of  2$e^{-3}$, a beta value of 0.999, \sr{a} weight decay of 0.01, \sr{and an} epsilon of 1$e^{-8}$. We set the hyperparameter $\lambda$ to 0.6. \gs{We choose these values based on our empirical analysis.} %The network weights are optimized using the stochastic gradient descent (SGD) approach  \cite{amari1993backpropagation}, with an initial learning rate of 0.025 (adjusted using a cosine decay scheduler \cite{loshchilov2016sgdr}), a momentum of 0.9, and a weight decay of 3$e^{-4}$. 
+% \srr{What are the reasons behind choosing all these parameter values? default? empirically? based on another reference? based on an experiment?}
+After the \nas search phase, the sampled networks are trained \sr{until convergence with knowledge distillation} using the same ONT dataset that we use during the \nas search phase, %\srr{same as what? that are used for the QABAS search phase?}, 
+with a batch size \sr{of} 64, \gs{based on the maximum memory capacity of our evaluated GPU}.  We set knowledge distillation hyperparameters alpha ($\alpha$) and temperature ($\tau$) at 0.9 and 2, respectively. 
+
+ \head{\nas search space} For the computations operations, we search for a design with one-dimensional (1D) convolution with ten different options: ten kernel size (KS) options (3, 5, 7, 9, 25, 31, 55, 75, 115, and 123) for grouped 1-D convolutions. We also use an identity operator that, in effect, removes a layer to get a shallower network. For quantization bits, we use  bit-widths that are a factor of 2$^{n}$, where 2<n<4 (since we need at least 2 bits to represent nucleotides A, C, G, T and 1 additional bit to represent an undefined character in case of a misprediction). We use four different quantization options for weights and activation ($<$\texttt{8,4}$>$, $<$\texttt{8,8}$>$, $<$\texttt{16,8}$>$, and $<$\texttt{16,16}$>$). We choose these quantization levels based on the precision support provided by our evaluated hardware and the effect of quantization on basecalling (Section~\ref{supfig:over_quant}). We use five different channel sizes with four repeats each. We choose the number of repeats based on the maximum memory capacity of our evaluated GPU. In total, we have $\sim$1.8$\times$10$^{32}$ distinct model options in our search space $\mathcal{M}$. %41^^20=180167782956420929503029846064801
+ %11^^20=6.7274999e+20
+ 
+\head{\strim details}\gsss{ We use \bon as the teacher network, while the \nas-designed model is the student network. We remove skip connections with a stride 1 (using parameter \texttt{---skip\_stride}). Based on hyper-parameter tuning experiments (Supplementary~\ref{suppsec:Hyper_skipclip}), set knowledge distillation hyperparameters alpha ($\alpha$) and temperature ($\tau$) at 0.9 and 2, respectively. We use Kullback-Leibler divergence loss to calculate the loss~\cite{kldivloss}}.
+
+\head{Pruning details} We use PyTorch~\cite{pytorch} modules for both unstructured and structured pruning~\cite{torch_modules} with L1-norm, i.e., prune the weights that have the smallest absolute values. We apply one-shot pruning, where we first prune a model with a specific amount of sparsity, then train the model until convergence on the full ONT dataset~\cite{bonito}.
+
+\head{Baseline basecallers}  We compare \mech against three different basecallers: (1) \cc~\cite{zeng2020causalcall} is a state-of-the-art hand-tuned basecaller optimized for performance, (2) \gpf~\cite{guppy} is an official production version of basecaller from ONT that is optimized for throughput  for real-time basecalling on Nanopore devices, and (3) \bon~\cite{bonito} is an official development version of basecaller from ONT  used for research and development. Since \gpf required packages are supported only on NVIDIA GPUs, we estimate the performance of \gpf.\footnote{Extrapolated from comparable NVIDIA GPU measurements with a constant throughput factor observed for the other basecallers.} We are aware of other basecallers such as \texttt{Halcyon}~\cite{konishi2021halcyon},  \texttt{SACall}~\cite{huang2020sacall}, \texttt{Helix}~\cite{lou2020helix}, \texttt{Fast-bonito}~\cite{xu2021fast}, and \texttt{Dorado}~\cite{dorado}. However, these basecallers are either not open-source~\cite{lou2020helix},  do not provide training code~\cite{xu2021fast,huang2020sacall,konishi2021halcyon,dorado}, or are under development with support only for specific reads~\cite{dorado}. %  we do not add these to our evaluation because \texttt{Helix} is not open-source, \texttt{Fast-bonito} does not provide training scripts, and \texttt{Dorado} is under development with support for only specific reads.}
+%\srr{We need to add all other state-of-the-art hardware accelerated ones as we use the AI engine now. Helix is one. Fast-Bonito is another, Nanopore Base Calling on the Edge is a third one. Thhere could be more recent works, please check.}
+
+\head{Basecalling reads} %\srr{add all data used in the evaluations including read mapping, and assembly and including reference genomes...} <---
+To evaluate basecalling performance, we use a set of reads generated using a MinION R9.4.1 flowcell. Table~\ref{tab:basecall_reads} provides details on different organisms used in our evaluation. %We limit our read sets to bacterial samples \srr{Why? any reason?}. 
+% \srr{Why there are no accession numbers?HoltLab is not an accession number}
+% \srr{Why there are no accession numbers?} <---
+%Bacterial genomes are haploid and have relatively low repetitive content that allows for complete assembly and accurate polishing against which to calculate ONT basecalling accuracy.
+
+\input{tables/read_dataset}
+
+\head{Basecaller evaluation metrics} We evaluate the performance of \mech
+using two different metrics: (1) basecalling throughput (kbp/sec), i.e., the throughput of a basecaller in terms of kilo basepairs generated per second, and
+(2) basecalling accuracy (\%), i.e., the total number of bases of a read that are exactly matched to the bases of the reference genome divided by the total length of its alignment including insertions and deletions. 
+We measure the basecalling throughput for the end-to-end basecalling calculations, including reading FAST5 files and writing out FASTQ or FASTA file using Linux \textit{/usr/bin/time -v} command.
+%\srr{Please check the new sentence if good, remove this one}To measure basecalling speed, we run a basecaller on a read set to produce either a FASTQ or FASTA file. 
+For basecalling accuracy, we align each basecalled read to its corresponding reference genome of the same species using the state-of-the-art read mapper, minimap2~\cite{li_minimap2_2018}. %If less than half of a read \sr{is} aligned, \sr{we assign} an identity of 0\% \sr{to this read}.
+% \srr{Why do we do this? So this is going to affect the scale of the identity? it always starts from 50\%?}
+
+
+\head{Downstream analysis} 
+We evaluate the effect of using \mech and other baseline basecallers on two widely-used downstream analyses, \emph{de novo} assembly~\cite{robertson2010novo} and read mapping~\cite{li2010rna}.
+
+\textbf{\emph{De novo} assembly.}
+We construct \emph{de novo} assemblies from the basecalled reads and calculate the statistics related to the accuracy, completeness, and contiguity of these assemblies. 
+To generate \emph{de novo} assemblies, we use minimap2~\cite{li_minimap2_2018} to report all read overlaps and miniasm~\cite{li_minimap_2016} to construct the assembly from these overlaps. 
+We use miniasm because it allows us to observe the effect of the reads on the assemblies without performing additional error correction \sr{steps} on \sr{input} reads~\cite{firtina_hercules_2018} and the\sr{ir final} assembly~\cite{firtina_apollo_2020}. 
+%\srr{List the statistics reported here first, ten define each of them and how to calculate them.}
+\sr{To measure the assembly accuracy, we use dnadiff~\cite{marcais_mummer4_2018} to evaluate} 1)~the portion of the reference genome that can align to a given assembly (i.e., Genome Fraction) and 2)~the average identity of assemblies (i.e., Average Identity) when compared to their respective reference genomes. 
+To measure statistics related to the contiguity and completeness of the assemblies, such as the overall assembly length, average GC content (i.e., the ratio of G and C bases in an assembly), and NG50 statistics (i.e., shortest contig at the half of the overall reference genome length), we use QUAST~\cite{gurevich_quast_2013}. 
+We assume that the reference genomes are high\sr{-}quality representative of the sequenced samples that we basecall the reads from when comparing assemblies to their corresponding reference genomes. \sr{The higher the values of the average identity, genome fraction, and NG50 results, the higher quality of the assembly and hence the better the corresponding basecaller.}
+\sr{When the values of the average GC and assembly length results are closer to that of the corresponding reference genome, the better the assembly and the corresponding basecaller.}
+
+\textbf{Read mapping.}
+We basecall the raw electrical signals into reads using each of the subject basecallers. 
+We map the resulting read set to its reference genome of the same species using the state-of-the-art read mapper, minimap2~\cite{li_minimap2_2018}. 
+We use the default parameter values for mapping ONT reads using the preset parameter \textit{-x map-ont}.
+We use the \textit{stats} tool from the SAMtools library~\cite{li2009sequence} to obtain four key statistics on the quality of read mapping results, the total number of mismatches, the total number of mapped bases, the total number of mapped reads, and the total number of unmapped reads. %\srr{We need to report execution time, peak memory, and size of output SAM files...} <--
+
+
+
+
+
+
+% \head{Training dataset} We evaluate \mech
+
+
+

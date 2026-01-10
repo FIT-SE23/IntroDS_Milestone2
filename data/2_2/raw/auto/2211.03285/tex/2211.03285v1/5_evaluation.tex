@@ -1,0 +1,210 @@
+\section{Evaluation}
+\label{sec:evaluation}
+
+To demonstrate that our algorithm based on the above observations contributes to the realization of PUT-agnostic online optimization and compare it with existing methods, we evaluated TS-\OurMethodName-AFL++ on major coverage-based and bug-based benchmarks: FuzzBench \cite{fuzzbench} and MAGMA \cite{MAGMA}. 
+MAGMA is a ground-truth fuzzing benchmark in real-world software; bugs are inserted artificially and each crash triggered by a fuzzer can be identified.
+
+
+\subsection{Setup}
+\label{subsec:eval-setup}
+
+\noindent\textbf{Experiment Environment}\ \ All experiments, including our initial exploration in Section~\ref{sec:banditcomparison}, were conducted on an NVIDIA DGX A100 640GB workstation with two AMD EPYC 7742 2.25GHz CPUs with 256 logical cores in total.
+To avoid fuzzer instances that interfere with each other and produce inaccurate results, we ran only the instances of a single fuzzer in parallel.
+Furthermore, to maintain a constant workload, we ensured that at most 110 fuzzer instances were running simultaneously and that the sets of targeted PUTs running together, as well as the number of instances for each PUT among a set, were the same.
+Preliminary experiments confirmed that the number of PUT executions per second was not significantly affected even when 110 instances were running simultaneously.
+
+\noindent\textbf{Compared Fuzzers}\ \ We compared (TS-)\OurMethodName-AFL++ with five fuzzers: AFL++, MOpt-AFL++ \cite{MOpt}, AFL++ combined with the algorithm proposed by Karamcheti et al. (hereafter referred to as Karamcheti-AFL++) \cite{AdaptiveFuzzTS}, \HavocMAB{}-AFL++ \cite{HavocMAB}, and CMFuzz-AFL++ \cite{CMFuzz}. The compared fuzzers, including ours, are all based on AFL++ and optimize the selection of mutation operators, except for unaltered AFL++. Notice that only MOpt has been previously integrated in AFL++; therefore, we incorporated other optimization methods into AFL++. Especially, Karamcheti- and CMFuzz-AFL++ were implemented from scratch because their original implementations have not been published.
+We did not modify any hyperparameters in each fuzzer if their default values were specified in its implementation. Otherwise, they were set to popular or reasonable values. In particular, for MOpt-AFL++, we set the pacemaker parameter (\texttt{-L}) to 1, noted as the basic choice in \cite{MOptimpl}. For the other details, please refer to our source code. 
+
+\noindent\textbf{PUT Selection}\ \ In FuzzBench, we selected 10 PUTs and ran fuzzers with them to keep the experiment cost reasonable. We first excluded \texttt{jsoncpp\_jsoncpp\_fuzzer}, \texttt{systemd\_fuzz-link-parser}, and \texttt{zlib\_zlib\_uncompress\_fuzzer}, and then randomly selected 10 of the remaining 19 PUTs. We excluded these three PUTs because, as shown in Table~\ref{tab:fuzzbench_max_cov}, even the theoretical maximum values of their code coverage (as well as actual saturation values) are so small that the increase in code coverage would become saturated at a very early stage in every fuzzer; therefore, a comparison with these PUTs would not be meaningful. In fact, this phenomenon was observed in past experiments of FuzzBench \cite{FuzzbenchReport}. While early saturation may also occur in other PUTs even though their code is not small, we did not exclude such PUTs to avoid selection bias caused by excessive filtering. Random selection is also a measure to prevent selection bias. In MAGMA, all PUTs were used because the CPU days required for the evaluation with MAGMA were smaller than that of FuzzBench.
+PUT-specific configurations, such as initial seeds and dictionaries, were all unchanged from default.
+
+\noindent\textbf{\#Instances per PUT and Duration}\ \ Although the five fuzzers incorporating optimization methods were expected to improve code coverage and therefore we wanted to contrast them as much as possible especially in FuzzBench, it was concerned that these fuzzers might bring relatively similar results and it could become difficult to compare them by running only a small number of instances of them. Hence, in FuzzBench, we ran 30 instances of each fuzzer for 24 h. In MAGMA, we ran 10 instances of each fuzzer for 24 h. 
+
+\subsection{Effect on Baseline}
+
+\label{subsec:eval-vs-aflpp}
+
+We first evaluate the effect of introducing our proposed method.
+To this end, we compared TS-\OurMethodName-AFL++ with AFL++ by plotting the code coverage obtained by these fuzzers in FuzzBench.
+Because \OurMethodName{} regards the discovery of a new execution path as a reward, the coverage-based benchmark FuzzBench is more suitable than the bug-based benchmark MAGMA to see if \OurMethodName{} works successfully. 
+The results are shown in Figure~\ref{fig:edge-cov}. TS-\OurMethodName-AFL++ exhibited faster growth of code coverage within the first few hours for many PUTs, remaining evidently higher than the code coverage of AFL++ until the end. 
+Furthermore, for every PUT, the median code coverage of TS-\OurMethodName-AFL++ never fell below that of AFL++ at the end, as presented in Table~\ref{tab:vs_existing}.
+This fact is supported statistically by the Mann-Whitney U test.
+As shown in Figure~\ref{fig:edge-cov}, the two fuzzers produced significantly different edge coverages in every PUT except the three PUTs in which the fuzzers indistinguishably saturated the code coverage very early.
+Thus, we conclude that \OurMethodName{} generally improves performance without any prior knowledge of a PUT.
+
+\begin{figure*}[tb]
+\centering
+\includegraphics[width=0.96\linewidth]{figure/comp_fuzzers.png}
+\caption{Transition of edge coverage of two fuzzers running for 24 h against 10 PUTs taken from FuzzBench. The x-axis represents elapsed hours, and the y-axis shows the edge coverage. The solid line represents the average of the 30 runs. The upper and lower dashed lines show 75\% and 25\% quantile, respectively. The `*' sign to the right of a title indicates that the sets of the edge coverage obtained by the two fuzzers are significantly different in the Mann-Whitney U test ($p < 0.01$). }
+\label{fig:edge-cov}
+\end{figure*}
+
+\subsection{Comparison with Effects of Other Methods}
+\label{subsec:eval-vs-existing}
+
+Next, we contrast the performance improvement delivered by \OurMethodName{} with that of existing online optimization methods.
+Similar to Section~\ref{subsec:eval-vs-aflpp}, we examined the improvement in code coverage brought about by each method using FuzzBench.
+Table~\ref{tab:vs_existing} presents the median edge coverage obtained using the six fuzzers over 24 h.
+While all the optimization methods improved the code coverage compared to the baseline AFL++ in some PUTs, MOpt often degraded the code coverage in individual PUTs; hence, its average performance was slightly worse than that of AFL++. In particular, the median obtained coverage of MOpt-AFL++ was 5.78\% lower than that of AFL++ in \texttt{proj4-2017-08-14}.
+In contrast, the other optimization methods, all of which incorporate bandit algorithms, presented an edge coverage worse than that of AFL++ by at most 0.36\%.
+This suggests that bandit optimization would rarely yield results inferior to uniformly random choices, which is an important attribute for achieving PUT-agnostic optimization.
+In particular, in every PUT, \OurMethodName{}-AFL++ was superior to AFL++ when compared by not only the median code coverage but also Vargha-Delaney's $\hat{A}_{12}$ \cite{A12} (or rank sum) as showed in Table~\ref{tab:statistics}. In addition, its performance improvement was the highest in both score and rank on average. 
+Conversely, it is notable that some of the existing methods gave results worse than the baseline, which were confirmed as statistically significant in part. MOpt-AFL++ produced such results in four PUTs, as did Karamcheti-AFL++ in \texttt{vorbis-2017-12-11} although there was not a wide margin between its edge coverage and AFL++.
+
+Another interesting point is that the degree of performance improvement brought about by each method is diverse, depending on the PUTs.
+For example, Karamcheti-AFL++ achieved the best performance improvement in \texttt{libxml2-v2.9.2} when compared by medians, while \HavocMAB{} in \texttt{libpcap\_fuzz\_both} and ours in \texttt{sqlite3\_ossfuzz}. This indicates that different approaches to online optimization bring about different effects that can be either strong or weak, depending on each PUT, even though they all integrate bandit optimization.
+Specifically, the major difference between \OurMethodName{} and the others lies in their mutation schemes, as described in Section~\ref{sec:mutationscheme}, and we believe this difference explains the different degrees of performance improvement between \OurMethodName{} and the others, as described in Section~\ref{subsubsec:case-study}; however, this could not be proven because the experiment with 10 PUTs is still not sufficient as a case study to rule out coincidence.
+Nevertheless, it is clear and remarkable that mutation with a single type of mutation operator did not degrade the performance of fuzzers and, on the contrary, gave a high performance improvement on average.
+These insights represent a future direction for further research on the effects of mixing different types of mutation operators.
+
+\begin{table*}[tb]
+\centering
+\caption{Median edge coverage achieved by 6 fuzzers in 24 h with ranks and scores averaged over 10 PUTs. The `*' sign to the right of a value indicates that the sets of the edge coverage obtained by AFL++ and the fuzzer in the column are significantly different in Mann-Whitney's U test ($p < 0.01$).}
+
+\begin{tabular}{lcccccccc}
+\toprule
+
+PUT & AFL++ \cite{AFLpp} & MOpt \cite{MOpt} & CMFuzz \cite{CMFuzz} & Karamcheti \cite{AdaptiveFuzzTS} & \HavocMAB{} \cite{HavocMAB} & \OurMethodName{} \\
+
+\midrule
+
+openssl\_x509 & \textit{49.0} & 55.0* & 53.0 & 56.0* & 54.5* & \textbf{57.0}* \\
+re2-2014-12-09 & 2280.5 & \textit{2272.0}* & 2278.0 & 2278.5 & \textbf{2281.5} & \textbf{2281.5} \\
+proj4-2017-08-14 & 2076.0 & \textit{1956.0}* & 2115.5* & \textbf{2190.5}* & 2075.5 & 2145.5* \\
+sqlite3\_ossfuzz & \textit{9201.5} & 9238.0 & 10236.5* & 9926.0* & 9440.0 & \textbf{10819.5}* \\
+libxml2-v2.9.2 & 4574.0 & \textit{4233.5}* & 4674.5* & \textbf{4741.0}* & 4702.5* & 4688.5* \\
+freetype2-2017 & 5292.0 & \textit{4975.5}* & 5185.0 & 5320.0 & 5298.5 & \textbf{5526.5}* \\
+libpcap\_fuzz\_both & \textit{1167.5} & 1213.0 & 1365.0* & 1378.5* & \textbf{1408.0}* & 1351.5* \\
+libpng-1.2.56 & 377.5 & 377.0 & \textit{376.0} & 377.0 & 377.5 & \textbf{379.0} \\
+lcms-2017-03-21 & 675.0 & 660.5 & 701.0 & 714.0* & \textit{651.0} & \textbf{768.0}* \\
+vorbis-2017-12-11 & 770.0 & 769.0 & 770.5 & \textit{767.5}* & 771.0 & \textbf{772.0} \\
+
+\midrule
+
+Rank Avg & 4.4 & \textit{5.1} & 3.9 & 2.7 & 3.0 & \textbf{1.6} \\
+Score Avg & 92.81 & \textit{92.13} & 96.37 & 97.59 & 95.69 & \textbf{99.28} \\
+
+\bottomrule
+
+\end{tabular}
+
+\label{tab:vs_existing}
+\end{table*}
+
+
+
+  \subsubsection{Case Study}
+  \label{subsubsec:case-study}
+
+  To examine how SLOPT showed such performance differences, we briefly analyzed two particular PUTs: \texttt{s\-q\-l\-i\-t\-e\-3\-\_\-o\-s\-s\-f\-u\-z\-z} and \texttt{libxml2-v2.9.2}.
+  We selected these PUTs because the selection of parameters by SLOPT in them exhibited characteristic trends compared to other methods.
+  Table~\ref{tab:sqlite_batch} and \ref{tab:sqlite_mut} show the average percentages of batch sizes and mutation operators, respectively, selected by the bandit optimization methods.
+  Because \HavocMAB{} only selects one of two categories (called \textit{unit} and \textit{chunk} mutators) in selecting mutation operators \cite{HavocMAB}, we only display how often each category was selected also for the other methods. 
+  
+  \noindent\textbf{sqlite3\_ossfuzz}\ \ In this PUT, \OurMethodName{}-AFL++ frequently chose different batch sizes for different seed size as found in Table~\ref{tab:sqlite_batch}a. 
+  Although \HavocMAB{}-AFL++ as well as \OurMethodName{}-AFL++ preferred $2$ as batch size the most in total, \OurMethodName{}-AFL++ repeatedly picked $2^6$ for large seeds, which indicates that \OurMethodName{} recognized that larger batch size would make a fuzzing campaign more efficient when mutating large seeds, which is consistent with the observation in Section~\ref{sec:newtarget}.
+  In the selection of mutation operators, \OurMethodName{}- and \HavocMAB{}-AFL++ used chunk mutators more often than Karamcheti-AFL++ and CMFuzz-AFL++.
+  Considering the fact that \HavocMAB-AFL++ produced lower average code coverage than Karamcheti-AFL++ and CMFuzz-AFL++ in this PUT, the excessive use of chunk mutators possibly reduces the performance improvement when mixing mutation operators. Although \OurMethodName{}-AFL++ also selected chunk mutators excessively, this is not the case with it since it applies exactly one type of mutation operator at once.
+
+  \noindent\textbf{libxml2-v2.9.2}\ \ In this PUT, the four methods all selected each category of mutation operators at similar rates, in comparison to \texttt{sqlite3\_ossfuzz}. However, CMFuzz and \OurMethodName{} were inferior to the other two methods in average code coverage. This would indicate that the difference of even a few percent affects the performance improvement, especially considering that the only difference between CMFuzz- and Karamcheti-AFL++ is the way of selecting mutation operators and that they mutate seeds in completely the same way after the selection of operators.
+  Moreover, \OurMethodName- and \HavocMAB{}-AFL++ made a completely different choice of batch sizes. Possible explanations for this would be that \HavocMAB{} blends different types of mutation operators and easily makes generated inputs ill-formed when using large batch sizes unlike \OurMethodName{}, or conversely that \HavocMAB{} can find a new execution path with small batch sizes thanks to blending mutation operators. 
+  Note that the seeming inconsistency of this PUT between Figure~\ref{fig:reptition-observations} and Table~\ref{tab:sqlite_batch} comes from the difference between Algorithm~\ref{alg:conv} and \ref{alg:ours}.
+  
+  \begin{table}[tb]
+  \centering
+  \caption{Percentages of batch sizes selected by \OurMethodName{} and \HavocMAB{} (a) for \texttt{sqlite3\_ossfuzz} and (b) for \texttt{libxml2-v2.9.2}. The unit is \%.}
+  \begin{tabular}{lrrrrrrr}
+  \toprule
+    (a) sqlite3 & \( 1 \)   & \( 2 \) & \( 2^2 \) & \( 2^3 \) & \( 2^4 \) & \( 2^5 \) & \( 2^6 \) \\
+  \midrule
+ 
+\OurMethodName{} $[0,    10^2)$   & \textbf{ 39 } & 22 & 14 & 9 & 6 & 5 & 5 \\
+\OurMethodName{} $[10^2, 10^3)$   & 15 & \textbf{ 24 } & 24 & 16 & 10 & 6 & 5 \\
+\OurMethodName{} $[10^3, 10^4)$   & 10 & \textbf{ 25 } & 23 & 18 & 11 & 7 & 5 \\
+\OurMethodName{} $[10^4, 10^5)$   & 5 & 5 & 6 & 7 & 10 & 21 & \textbf{ 46 } \\
+\OurMethodName{} $[10^5, \infty)$ & 9 & 9 & 9 & 11 & 14 & 16 & \textbf{ 31 } \\
+\midrule
+\OurMethodName{} Overall          & 14 & \textbf{ 23 } & 21 & 16 & 10 & 8 & 9 \\
+\HavocMAB{} \cite{HavocMAB}       & 17 & \textbf{ 34 } & 28 & 12 & 5 & 2 & 2 \\
+
+  \bottomrule \\[-0.5em]
+ 
+   \toprule
+    (b) libxml2 & \( 1 \)   & \( 2 \) & \( 2^2 \) & \( 2^3 \) & \( 2^4 \) & \( 2^5 \) & \( 2^6 \) \\
+  \midrule
+ 
+\OurMethodName{} $[0,    10^2)$   & 7 & 12 & 11 & 11 & 11 & 10 & \textbf{ 38 } \\
+\OurMethodName{} $[10^2, 10^3)$   & 3 & 8 & 14 & 16 & 12 & 11 & \textbf{ 36 } \\
+\OurMethodName{} $[10^3, 10^4)$   & 3 & 3 & 4 & 5 & 7 & 8 & \textbf{ 70 } \\
+\OurMethodName{} $[10^4, 10^5)$   & 5 & 6 & 6 & 7 & 8 & 12 & \textbf{ 56 } \\
+\OurMethodName{} $[10^5, \infty)$ & 10 & 10 & 10 & 11 & 11 & 16 & \textbf{ 32 } \\
+\midrule
+\OurMethodName{} Overall          & 4 & 7 & 10 & 11 & 10 & 10 & \textbf{ 48 } \\
+\HavocMAB{} \cite{HavocMAB}       & 21 & \textbf{ 31 } & 26 & 13 & 6 & 2 & 1 \\
+  
+  \bottomrule
+  \end{tabular}
+  \label{tab:sqlite_batch}
+  \label{tab:libxml_batch}
+  
+  \end{table}
+
+  \begin{table}[tb]
+    \caption{Percentages of mutation operators selected by each fuzzer (a) for \texttt{sqlite3\_ossfuzz} and (b) for \texttt{libxml2-v2.9.2}. The unit is \%.}
+    \centering
+    \begin{tabular}{lrrrr}
+    \toprule
+     & \multicolumn{2}{c}{(a) sqlite3} & \multicolumn{2}{c}{(b) libxml2} \\
+         & Unit & Chunk & Unit  & Chunk \\
+
+      \midrule
+      \OurMethodName{} & 24 & \textbf{76} & 6 & \textbf{94}\\
+      \HavocMAB{} \cite{HavocMAB} & 23 & \textbf{77} & 8 &  \textbf{92}\\
+      Karamcheti \cite{AdaptiveFuzzTS} & 39 & \textbf{61} & 9 & \textbf{91} \\
+      CMFuzz \cite{CMFuzz} & 33 & \textbf{67} & 5 & \textbf{95} \\ 
+      \bottomrule
+      \end{tabular}
+      \label{tab:sqlite_mut}
+      \label{tab:limxml_mut}
+  \end{table}
+
+\subsection{Effects on Bugs Found}
+\label{subsec:magma}
+
+Additionally, we conducted an extensive evaluation with MAGMA to check whether these methods increase a number of bugs found.
+
+\begin{table*}[tb]
+  \centering
+  \caption{Number of unique bugs found averaged over 10 instances of each fuzzer in 24 h with ranks and scores averaged over 9 targets. The numbers in the parenthesis are the corresponding standard deviations. \#Unique represents the number of unique bugs found by at least 1 instance of each fuzzer.}
+  \begin{tabular}{lrrrrrr}
+   \toprule
+
+   PUT & 	AFL++ \cite{AFLpp} & MOpt \cite{MOpt} & CMFuzz \cite{CMFuzz}  & Karamcheti \cite{AdaptiveFuzzTS} & \HavocMAB{} \cite{HavocMAB}  & \OurMethodName{}\\
+\midrule
+openssl & 4.10 (0.54) & 4.00 (0.45) & \textbf{4.30} (0.46) & 4.00 (0.00) & 4.10 (0.83) & 4.20 (0.40)\\
+php & 2.40 (0.49) & 2.50 (0.50) & 2.40 (0.49) & \textbf{2.60} (0.49) & 2.40 (0.49) & 2.50 (0.67)\\
+sqlite3 & 3.80 (0.60) & 2.80 (0.60) & 4.00 (0.77) & \textbf{4.50} (0.50) & \textbf{4.50} (0.50) & \textbf{4.50} (0.50)\\
+libtiff & 8.90 (0.83) & 8.80 (0.98) & 9.00 (1.18) & 9.70 (0.78) & 9.00 (0.63) & \textbf{9.90} (1.04)\\
+lua & 0.90 (0.30) & 0.70 (0.46) & 0.60 (0.49) & \textbf{1.00} (0.00) & 0.90 (0.30) & \textbf{1.00} (0.00)\\
+libxml2 & 6.50 (0.50) & 6.00 (0.00) & 6.50 (0.67) & \textbf{6.70} (0.64) & \textbf{6.70} (0.64) & 6.50 (0.50)\\
+poppler & 10.40 (1.69) & 9.60 (0.92) & 10.10 (1.76) & 9.90 (2.12) & 10.40 (0.66) & \textbf{12.20} (1.78)\\
+libpng & 2.70 (0.46) & 2.50 (0.50) & 2.50 (0.50) & \textbf{2.90} (0.30) & 2.70 (0.46) & 2.50 (0.50)\\
+libsndfile & 6.90 (0.30) & \textbf{7.00} (0.00) & 6.80 (0.40) & 6.90 (0.30) & 6.90 (0.30) & \textbf{7.00} (0.00)\\
+\midrule
+Rank Avg & 3.33 & 4.56 & 3.89 & 2.22 & 2.44 & \textbf{1.78}\\
+Score Avg & 91.77 & 84.97 & 88.36 & 96.75 & 93.94 & \textbf{97.45}\\
+\#Unique & 45 & 43 & 45 & 43 & 45 & \textbf{48}\\
+
+\bottomrule
+  \end{tabular}
+  \label{tab:magma_crash_comp}
+  \end{table*}
+
+Table \ref{tab:magma_crash_comp} lists the average number of bugs triggered by the six fuzzers.
+Here, three fuzzers, Karamcheti-, \HavocMAB{}-, and SLOPT-AFL++ ranked higher than AFL++ when compared by average ranks and scores, which is consistent with those metrics in Table~\ref{tab:vs_existing} to some extent.
+At the same time, however, the difference between the fuzzers was overall ambiguous compared to code coverage.
+Also, we could not see any statistical significance except between MOpt-AFL++ and AFL++ in one PUT.
+However, we see this result reasonable, considering that these optimization methods all treat the discovery of a new execution path as a reward and aim at increasing code coverage, not bugs found. In fact, it has recently been recognized that code coverage and the number of bugs found do not have a proportional relationship \cite{FuzzReliability, FuzzBenchAFLppGood}.
+Nevertheless, it is worth mentioning that \OurMethodName{} did not cause a noticeable deterioration although it creates a new input always with a single mutation operator, and on the contrary, it found more unique bugs than AFL++ in entirety, as shown in \#Unique in Table~\ref{tab:magma_crash_comp}.

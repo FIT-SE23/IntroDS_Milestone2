@@ -1,0 +1,182 @@
+
+\section{Method}
+
+\subsection{Preliminaries}
+\input{Figs/overview}
+\paragraph{Overview.} 
+We consider the strict few-shot learning setting~\citep{Perez2021TrueFL}: 
+The training set $\mathcal{D}_{\text{train}} = \{(\bs{x}, y)_i\}$ consists of $K$ training samples per label where $\bs{x} = [x_1, x_2, \dots, x_n]$ is a text sequence with $n$ tokens.
+The development set $\mathcal{D}_{\text{dev}}$ is of the same size as $\mathcal{D}_{\text{train}}$.
+There is no access to additional task-specific unlabeled data.
+The number of training samples $K$ is assumed to be very small (\eg, $K=16$), making it challenging to train a classification model $C_{\phi}$ that generalizes well to unseen data.
+To mitigate such a training data scarcity issue, we propose to first train an autoregressive PLM on $\mathcal{D}_{\text{train}}$, and then use it as a generator $G_{\theta}$ to synthesize a large amount of novel samples $\mathcal{D}_{\text{gen}} = \{(\tilde{\bs{x}}, \tilde{y})_i\}$ that augment the original training set.
+Finally, a classification PLM $C_{\phi}$ is fine-tuned on both $\mathcal{D}_{\text{train}}$ and $\mathcal{D}_{\text{gen}}$ to perform the task.
+An overview of our \method method is shown in Fig.~\ref{fig:overview}.
+
+\paragraph{Text Generation with Autoregressive PLMs.}
+In standard fine-tuning for text generation, an autoregressive PLM $G_{\theta}$ is trained via the maximum likelihood generation loss of each token in a sequence $\bs{x}$ conditioned on previous tokens:
+\begin{equation*}
+% \label{eq:gen}
+\min_{\theta} -\frac{1}{n}\sum_{j=1}^n \log p_{\theta}(x_j|\bs{x}_{<j}),\quad
+p_{\theta}(x_j|\bs{x}_{<j}) = \frac{\exp(\bs{e}_j^\top \bs{h}_j)}{\sum_{j'=1}^{|V|}\exp(\bs{e}_{j'}^\top \bs{h}_j)}.
+\end{equation*}
+where the token generation probability $p_{\theta}(\cdot)$ is usually parameterized using token embeddings $\bs{e}$ and hidden states $\bs{h}$ of a Transformer~\citep{vaswani2017attention} model.
+After training, $G_{\theta}$ can be used to generate novel texts by iteratively sampling tokens from its generation probability distribution.
+
+\paragraph{Prefix-Tuning.}
+Unlike fine-tuning which updates all model parameters $\theta$ of a PLM, prefix-tuning~\citep{Li2021PrefixTuningOC} freezes all pretrained Transformer parameters and only optimizes prefix vectors $\theta_p$ that are prepended to each Transformer layer.
+We use prefix-tuning for training $G_{\theta_p}$ on $\mathcal{D}_{\text{train}}$ because (1) it offers better effectiveness than fine-tuning for small datasets~\citep{Li2021PrefixTuningOC} and (2) the generation models for different labels can share the same backbone Transformer parameters with only the prefix vectors being different, significantly reducing the memory requirement for multi-class classification tasks.
+% After pretraining, $G_{\theta}$ can be directly used to generate new texts by recursively sampling tokens from its output probability distribution. Typically, a temperature hyperparameter $\tau > 0$ is introduced during sampling~\citep{Hinton2015DistillingTK} to adjust the sharpness of the probability distribution:
+% % \yuz{any reference of using $\tau$ in generation?}
+% \begin{equation}
+% \label{eq:temp_prob}
+% p_{\theta}(x_i|\bs{x}_{<i}) = \frac{\exp(\bs{e}_i^\top \bs{h}_i/\tau)}{\sum_{j=1}^{|V|}\exp(\bs{e}_j^\top \bs{h}_i/\tau)},
+% \end{equation}
+% where $\tau \to 0$ approximates greedily picking the most probable next token; $\tau \to \infty$ induces a uniform distribution.
+% Additionally, sampled tokens can be confined to the top-$k$ most probable ones to avoid low-quality tokens.
+% In this work, we find such top-$k$ sampling with temperature is sufficient to produce coherent and meaningful texts as training data for NLU tasks. 
+% Exploring more sophisticated sampling strategies~\citep{Holtzman2020TheCC} is left for future work.
+
+% \input{Tables/prompts}
+\subsection{Label-Discriminative Text Generator Tuning with Meta Weights}
+
+\paragraph{Motivation.} To model the conditional text generation probability $p(\bs{x}|y_l)$ on different labels, a straightforward way is to parameterize a generation model $G_{\theta_{p_l}}$ for each label $y_l$ via a set of prefix vectors $\theta_{p_l}$ so that $p(\bs{x}|y_l)=p_{\theta_{p_l}}(\bs{x})$, and then tune $\theta_{p_l}$ on the training samples $\bs{x}$ with label $y_l$:
+\begin{equation}
+\label{eq:gen}
+\min_{\theta_{p_l}}\mathcal{L}_{\text{gen}},\quad \mathcal{L}_{\text{gen}}(\theta_{p_l}) = -\frac{1}{n}\sum_{j=1}^n \log p_{\theta_{p_l}}(x_j|\bs{x}_{<j}).
+\end{equation}
+\input{Figs/motivation_fig}
+However, such an approach only optimizes the  \emph{generative} likelihood $p(\bs{x}|y_l)$ without accounting for \emph{label discriminativeness} $p(y_l|\bs{x})$ which is essential for generating unambiguous training samples to benefit the final classification task.
+Indeed, we find that optimizing $p(\bs{x}|y_l)$ separately for each label does not necessarily make the generators aware of the distinction over different labels. As shown in Fig.~\ref{fig:motivate}, $\mathcal{L}_{\text{disc}}$ (defined in Eq.~\eqref{eq:disc}) can even increase during training---It is possible that the dominating patterns in the training samples are label-indiscriminate (\eg, a movie review dataset may frequently mention ``the movie''), making the generators of different labels eventually converge to similar distributions, especially when there are limited training samples per label.
+
+To promote the generation of label-discriminative texts, we hope to generate each token $x_j$ so that the probability of the so far generated text sequence $\bs{x}_{\le j}$ is maximized towards label $y_l$ via $\mathcal{L}_{\text{disc}}$:
+\begin{equation}
+\begin{split}
+\label{eq:disc}
+\mathcal{L}_{\text{disc}} &= -\frac{1}{n}\sum_{j=1}^n \log p_{\theta_p}(y_l|\bs{x}_{\le j})\\
+% ,\,\,
+p_{\theta_p}(y_l|\bs{x}_{\le j}) &= \frac{p(x_j|y_l,\bs{x}_{<j})p(y_l)}{\sum_{l'=1}^{L} p(x_j|y_{l'},\bs{x}_{<j})p(y_{l'})} 
+= \frac{p_{\theta_{p_l}}(x_j|\bs{x}_{<j})}{\sum_{l'=1}^{L} p_{\theta_{p_{l'}}}(x_j|\bs{x}_{<j})}
+\end{split}
+\end{equation}
+where $\theta_p = \{\theta_{p_l}\}|_{l=1}^L$, and uniform label prior (\ie, $p(y_l) = 1/L$) is assumed; for non-uniform prior, the result will be up to some scaling.
+
+Although one can directly combine $\mathcal{L}_{\text{disc}}$ with $\mathcal{L}_{\text{gen}}$ to train $G_{\theta_p}$ to enforce distinction across different labels, doing so will result in two undesirable consequences: (1) A hyperparameter needs to be introduced to balance the weights of the two losses, whose optimal value is likely to vary by task; and (2) the generation-irrelevant loss $\mathcal{L}_{\text{disc}}$ will unavoidably interfere the language modeling process, making the resulting model prone to generating less fluent and coherent texts.
+
+\paragraph{Weighted Maximum Likelihood Generator Tuning.}
+To preserve the generative learning of $G_{\theta_{p}}$ while emphasizing label-discriminative tokens, we assume each token is associated with a weight in the maximum likelihood loss.
+Intuitively, when our goal is to generate distinctive texts across different labels as training samples, not all tokens should contribute equally to generator training.
+For example, for sentiment classification tasks, one would expect ``good/bad'' to be more label-discriminative than ``the movie'', and the former should be paid more attention to during training. 
+It is thus natural to revise $\mathcal{L}_{\text{gen}}$ from Eq.~\eqref{eq:gen} to $\mathcal{L}_{\text{w-gen}}$ as in Eq.~\eqref{eq:weigh_gen} by assuming a weight $w_j$ is given for each token.
+\begin{equation}
+\label{eq:weigh_gen}
+\min_{\theta_{p_l}}\mathcal{L}_{\text{w-gen}},\quad \mathcal{L}_{\text{w-gen}}(\theta_{p_l};\bs{w}) = -\sum_{j=1}^n w_j \log p_{\theta_{p_l}}(x_j|\bs{x}_{<j}), \quad  \sum_{j=1}^n w_j = 1.
+\end{equation}
+Note that in $\mathcal{L}_{\text{w-gen}}$, $\bs{w}$ is assumed to be the \emph{hyperparameter} under which $\theta_{p_l}$ is optimized.
+While it is possible to manually design weighting rules for setting $\bs{w}$ to promote label-discriminative learning, they will likely necessitate task-specific knowledge and nontrivial tuning.
+To facilitate the automatic learning of these weights $\bs{w}$, we propose to parameterize them as learnable hyperparameters using the idea of meta-learning.
+\SetKwInput{KwInput}{Input}
+\SetKwInput{KwParameter}{Parameter}
+\SetKwInput{KwOutput}{Output}
+\SetCommentSty{mycommfont}
+\begin{algorithm}[!t]
+\DontPrintSemicolon
+\SetNoFillComment
+\KwInput{$\mathcal{D}_{\text{train}}$: Few-shot training set.}
+\KwParameter{$T$: Number of training steps.}
+\KwOutput{$\theta_{p}$: Prefix parameters for all labels.}
+Initialize $\theta_{p}^{(0)}$ (with task-descriptive prompts) and $\omega^{(0)}$\;
+
+\For{$t \in [0, 1, \dots, T-1]$}    
+{ 
+    $\mathcal{B} \gets \text{Sample a minibatch from }\mathcal{D}_{\text{train}}$\;
+    
+    $\hat{\theta}_{p}^{(t)}\left(\omega^{(t)}\right) \gets$ Take one gradient step to descend $\mathcal{L}_{\text{w-gen}}\left(\theta_{p}^{(t)};\omega^{(t)}\right)$ on $\mathcal{B}$\;
+    
+    $\omega^{(t+1)} \gets$ Take one gradient step to descend $\mathcal{L}_{\text{disc}}\left(\hat{\theta}_{p}^{(t)}\left(\omega^{(t)}\right)\right)$ on $\mathcal{B}$\
+    
+	$\theta_{p}^{(t+1)} \gets$ Take one gradient step to descend $\mathcal{L}_{\text{w-gen}}\left(\theta_{p}^{(t)};\omega^{(t+1)}\right)$ on $\mathcal{B}$\;
+}
+\Return $\theta_{p} = \theta_{p}^{(T)}$\;
+\caption{Meta-Weighted Generator Tuning.}
+\label{alg:meta}
+\end{algorithm}
+\paragraph{Meta Objective.}
+The general idea of meta-learning is to formulate a meta objective to enable automatic learning of hyperparameters. 
+When $\bs{w}$ is a learnable variable, the optimal $\theta_{p_l}^*(\bs{w})={\arg\min}_{\theta_{p_l}}\mathcal{L}_{\text{w-gen}}(\theta_{p_l};\bs{w})$ will be a function of $\bs{w}$.
+Since our goal is to encourage label discriminativeness, we require the optimal $\theta_{p_l}^*(\bs{w})$ obtained under $\bs{w}$ to minimize $\mathcal{L}_{\text{disc}}$ as the meta objective:
+\begin{equation*}
+\label{eq:meta_disc}
+\min_{\bs{w}}\mathcal{L}_{\text{disc}},\quad \mathcal{L}_{\text{disc}}(\theta_{p}^*(\bs{w})) = -\frac{1}{n}\sum_{j=1}^n \log p_{\theta_{p}^*(\bs{w})}(y_l|\bs{x}_{\le j}).
+\end{equation*}
+
+\paragraph{Training Setup and Algorithm.}
+The weight $\bs{w}$ needs to characterize the discriminativeness of each token and thus we parameterize it via a weighting network $\omega$ taking the value of $\mathcal{L}_{\text{disc}}$ as input:
+$$
+w_j(\omega) = \frac{\exp\left(\omega(\mathcal{L}_{\text{disc}}^j)\right)}{\sum_{{j'}=1}^n \exp\left(\omega(\mathcal{L}_{\text{disc}}^{j'})\right)},\quad
+\mathcal{L}_{\text{disc}}^j = -\log p_{\theta_{p}}(y_l|\bs{x}_{\le j}).
+$$
+Following \cite{Shu2019MetaWeightNetLA}, we instantiate $\omega$ to be a feedforward network with only one $100$-dimension hidden layer.
+Instead of solving the optimal $\omega^*$ and $\theta_{p}^*$ via nested optimization loops, we use an online optimization strategy~\citep{Shu2019MetaWeightNetLA} for training efficiency.
+It also guarantees convergence to the critical points of both $\mathcal{L}_{\text{w-gen}}$ and $\mathcal{L}_{\text{disc}}$ under mild conditions.
+Similar to the observations in \cite{Li2021PrefixTuningOC}, we find it beneficial to initialize the prefix vectors $\theta_{p}$ using task-descriptive tokens. 
+The initialization prompts can be found in Appendix~\ref{app:impl_details}.
+The overall training procedure is shown in Algorithm~\ref{alg:meta}.
+
+
+\subsection{Classifier Fine-Tuning}
+
+With the trained generator $G_{\theta_{p}}$, we can synthesize novel training samples $\mathcal{D}_{\text{gen}}$ that augment $\mathcal{D}_{\text{train}}$ for fine-tuning a PLM $C_{\phi}$ for classification.
+The major challenge to effectively leverage $\mathcal{D}_{\text{gen}}$ is that the label noise (\ie, some generated samples may not accurately pertain to the corresponding label) may deteriorate model performance if standard supervised learning is directly used.
+We propose a simple noise-robust training procedure to improve the generalization and stability of training: First fine-tune $C_{\phi}$ on $\mathcal{D}_{\text{train}}$ with standard supervised training, and then continue fine-tuning it on $\mathcal{D}_{\text{gen}}$ by applying \emph{label smoothing}~\citep{Szegedy2016RethinkingTI} and \emph{temporal ensembling}~\citep{Laine2017TemporalEF} as regularization.
+% For temporal ensembling, we record the model predictions $p_{\phi}(\bs{x})$ of $C_{\phi}$ on each training sample $(\bs{x}, y)$ at different training steps, and use the accumulated moving-average predictions $\bar{\bs{z}}$ to regularize the latest model training. 
+% We update ensembled predictions $\bar{\bs{z}}$ once every $B$ batches:
+% \begin{equation}
+% \label{eq:udpate_ens}
+% \hat{\bs{z}} \gets \gamma\hat{\bs{z}} + (1-\gamma)\bs{p}_{\phi}, \, \bar{\bs{z}} \gets \hat{\bs{z}}/(1-\gamma^t),
+% \end{equation}
+% where $\hat{\bs{z}}$ has a zero initialization; $\gamma$ is the momentum parameter; $t$ is the number of updates $\bar{\bs{z}}$ has received; the division $(1-\gamma^t)$ is for bias correction~\citep{Laine2017TemporalEF}. 
+Specifically, given a training sample $(\tilde{\bs{x}}, \tilde{y}) \in \mathcal{D}_{\text{gen}}$, we minimize the following classification loss:
+\begin{equation}
+\label{eq:finetune}
+\min_{\phi}\mathcal{L}_{\text{class}},\,\, \mathcal{L}_{\text{class}}(\phi) = -\sum_{l=1}^{L} q_l \log(p_{\phi}(\tilde{\bs{x}})_l) - \lambda \sum_{l=1}^L \bar{z}_l \log \frac{p_{\phi}(\tilde{\bs{x}})_l}{\bar{z}_l},
+\end{equation}
+where $q_l = \mathbbm{1}(l = \tilde{y})(1-\epsilon) + \epsilon/L$ and $\epsilon$ is the label smoothing weight; $p_{\phi}(\tilde{\bs{x}})$ is the model prediction on $\tilde{\bs{x}}$; $\lambda$ is a regularization weight for temporal ensembling; and $\bar{\bs{z}}$ is the accumulated moving-average model predictions. 
+We also use the ensembled prediction $\bar{\bs{z}}$ to filter out noisy synthesized samples: We only include those samples for training where $\bar{\bs{z}}$ strongly agrees with the label $\tilde{y}$ (\ie, $\bar{z}_{\tilde{y}} > \delta$ where $\delta>0$ is a threshold parameter).
+In Eq.~\eqref{eq:finetune}, the first classification term is the cross-entropy loss with smoothed labels;
+the second regularization term corresponds to temporal ensembling, which requires the current model prediction to be close to its past accumulated predictions. 
+This not only neutralizes the fluctuation in model predictions for better training stability when label noise is present~\citep{Nguyen2020SELFLT} but also helps prevent catastrophic forgetting~\citep{kirkpatrick2017overcoming} of the information learned previously from the few-shot training set $\mathcal{D}_{\text{train}}$.
+Please refer to Appendix~\ref{app:impl_details} for details about the temporal ensembling implementation.
+The overall procedure of classifier fine-tuning is summarized in Algorithm~\ref{alg:classification}.
+
+\SetKwInput{KwInput}{Input}
+\SetKwInput{KwParameter}{Parameter}
+\SetKwInput{KwOutput}{Output}
+\newcommand\mycommfont[1]{\footnotesize\ttfamily\textcolor{blue}{#1}}
+\SetCommentSty{mycommfont}
+\begin{algorithm}[!t]
+\DontPrintSemicolon
+\SetNoFillComment
+\KwInput{$\mathcal{D}_{\text{train}}$: Few-shot training set; $\mathcal{D}_{\text{gen}}$: Synthesized training set.}
+\KwParameter{$T$: Number of training steps.}
+\KwOutput{$\phi$: Trained classification model parameters.}
+$\phi^{(0)} \gets$ Train on $\mathcal{D}_{\text{train}}$ with standard supervised learning
+
+$\bar{\bs{z}} \gets \bs{0}$\; \tcp*[l]{Ensembled prediction initialization}
+
+\For{$t \in [0, 1, \dots, T-1]$}    
+{ 
+    $\mathcal{B} \gets \text{Sample a minibatch from }\mathcal{D}_{\text{gen}}$\;
+    
+    $\phi^{(t+1)} \gets$ Take one gradient step to descend $\mathcal{L}_{\text{class}}$ in Eq.~\eqref{eq:finetune}
+    on $\mathcal{B}$\;
+    
+    $\bar{\bs{z}} \gets$ Accumulate the current model prediction\;
+    
+    Update $\mathcal{D}_{\text{gen}}$ to exclude noisy samples based on $\bar{\bs{z}}$\;
+}
+\Return $\phi = \phi^{(T)}$\;
+\caption{Classification model fine-tuning on $\mathcal{D}_{\text{train}}$ and $\mathcal{D}_{\text{gen}}$.}
+\label{alg:classification}
+\end{algorithm}
+% \vspace{-1em}

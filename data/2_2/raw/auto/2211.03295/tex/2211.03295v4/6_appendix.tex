@@ -1,0 +1,362 @@
+\renewcommand\thefigure{A\arabic{figure}}
+\renewcommand\thetable{A\arabic{table}}
+\setcounter{table}{0}
+\setcounter{figure}{0}
+
+\newpage
+\appendix
+
+\section{Implementation Details}
+\label{app:implement}
+\subsection{Architecture Details}
+\label{app:architecture}
+% fig: framework
+\begin{wrapfigure}{r}{0.5\linewidth}
+    \vspace{-4.5em}
+    \begin{center}
+    \includegraphics[width=1.0\linewidth]{Figs/fig_framework.pdf}
+    \end{center}
+    \vspace{-1.0em}
+    \caption{
+\textbf{Modern ConvNet architecture.} It has 4 stages in hierarchical, and $i$-th stage contains an embedding stem and $N_{i}$ blocks of $\mathrm{SMixer}(\cdot)$ and $\mathrm{CMixer}(\cdot)$ with PreNorm~\citep{acl2019Learning} and identical connection~\citep{he2016deep}. The features within the $i$-th stage are in the same shape, except that $\mathrm{CMixer}(\cdot)$ will increase the dimension to $rC_{i}$ with an expand ratio $r$ as an inverted bottleneck \citep{cvpr2018mobilenetv2}.
+    }
+    \label{fig:framework}
+    \vspace{-1.0em}
+\end{wrapfigure}
+% 
+The detailed architecture specifications of MogaNet are shown in Table~\ref{tab:app_architecture} and Fig.~\ref{fig:moga_framework}, where an input image of $224^2$ resolutions is assumed for all architectures. We rescale the groups of embedding dimensions the number of Moga Blocks for each stage corresponding to different models of varying magnitudes:
+\romannumeral1) MogaNet-X-Tiny and MogaNet-Tiny with embedding dimensions of $\{32, 64, 96, 192\}$ and $\{32, 64, 128, 256\}$ exhibit competitive parameter numbers and computational overload as recently proposed light-weight architectures~\citep{iclr2022mobilevit, cvpr2022MobileFormer, eccv2022edgeformer};
+\romannumeral2) MogaNet-Small adopts embedding dimensions of $\{64, 128, 320, 512\}$ in comparison to other prevailing small-scale architectures~\citep{liu2021swin, cvpr2022convnext};
+\romannumeral3) MogaNet-Base with embedding dimensions of $\{64, 160, 320, 512\}$ in comparison to medium size architectures;
+\romannumeral4) MogaNet-Large with embedding dimensions of $\{64, 160, 320, 640\}$ is designed for large-scale computer vision tasks.
+\romannumeral5) MogaNet-X-Large with embedding dimensions of $\{96, 192, 480, 960\}$ is a scaling-up version (around 200M parameters) for large-scale tasks.
+The FLOPs are measured for image classification on ImageNet~\citep{cvpr2009imagenet} at resolution $224^2$, where a global average pooling (GAP) layer is applied to the output feature map of the last stage, followed by a linear classifier.
+
+\input{Tabs/tab_architecture.tex}
+
+\begin{figure*}[t]
+\vspace{-1.5em}
+\begin{minipage}{0.543\linewidth}
+\centering
+    \input{Tabs/tab_train_conf.tex}
+\end{minipage}
+\begin{minipage}{0.462\linewidth}
+\centering
+    \input{Tabs/tab_train_conf_in21k}
+\end{minipage}
+\end{figure*}
+
+
+\subsection{Experimental Settings for ImageNet}
+\label{app:in1k_settings}
+We conduct image classification experiments on ImageNet~\citep{cvpr2009imagenet} datasets. All experiments are implemented on \texttt{OpenMixup}~\citep{li2022openmixup} and \texttt{timm}~\citep{wightman2021rsb} codebases running on 8 NVIDIA A100 GPUs. View more results in Appendix \ref{app:exp_in1k}.
+
+\paragraph{ImageNet-1K.}
+We perform regular ImageNet-1K training mostly following the training settings of DeiT~\citep{icml2021deit} and RSB A2~\citep{wightman2021rsb} in Table~\ref{tab:in1k_config}, which are widely adopted for Transformer and ConvNet architectures. For all models, the default input image resolution is $224^2$ for training from scratch. We adopt $256^2$ resolutions for lightweight experiments according to MobileViT~\citep{iclr2022mobilevit}. Taking training settings for the model with 25M or more parameters as the default, we train all MogaNet models for 300 epochs by AdamW \citep{iclr2019AdamW} optimizer using a batch size of 1024, a basic learning rate of $1\times 10^{-3}$, a weight decay of 0.05, and a Cosine learning rate scheduler \citep{loshchilov2016sgdr} with 5 epochs of linear warmup~\citep{devlin2018bert}.
+As for augmentation and regularization techniques, we adopt most of the data augmentation and regularization strategies applied in DeiT training settings, including Random Resized Crop (RRC) and Horizontal flip \citep{szegedy2015going}, RandAugment \citep{cubuk2020randaugment}, Mixup~\citep{zhang2017mixup}, CutMix~\citep{yun2019cutmix}, random erasing~\citep{zhong2020random}, ColorJitter \citep{he2016deep}, stochastic depth~\citep{eccv2016droppath}, and label smoothing \citep{cvpr2016inceptionv3}. Similar to ConvNeXt~\citep{cvpr2022convnext}, we do not apply Repeated augmentation \citep{cvpr2020repeat} and gradient clipping, which are designed for Transformers but do not enhance the performances of ConvNets while using Exponential Moving Average (EMA)~\citep{siam1992ema} with the decay rate of 0.9999 by default. We also remove additional augmentation strategies~\citep{cvpr2019AutoAugment, eccv2022AutoMix, Li2021SAMix, 2022decouplemix}, \textit{e.g.,} PCA lighting \citep{Krizhevsky2012ImageNetCW} and AutoAugment~\citep{cvpr2019AutoAugment}.
+Since lightweight architectures (3$\sim$10M parameters) tend to get under-fitted with strong augmentations and regularization, we adjust the training configurations for MogaNet-XT/T following \citep{iclr2022mobilevit, cvpr2022MobileFormer, eccv2022edgeformer}, including employing the weight decay of 0.03 and 0.04, Mixup with $\alpha$ of 0.1, and RandAugment of $7/0.5$ for MogaNet-XT/T. Since EMA is proposed to stabilize the training process of large models, we also remove it for MogaNet-XT/T as a fair comparison. An increasing degree of stochastic depth path augmentation is employed for larger models. In evaluation, the top-1 accuracy using a single crop with a test crop ratio of 0.9 is reported as \citep{iccv2021t2t, yu2022metaformer, guo2022van}.
+
+% \vspace{-0.5em}
+\paragraph{ImageNet-21K.}
+Following ConvNeXt, we further provide the training recipe for ImageNet-21K~\citep{cvpr2009imagenet} pre-training and ImageNet-1K fine-tuning with high resolutions in Table~\ref{tab:in21k_config}. EMA is removed in pre-training, while CutMix and Mixup are removed for fine-tuning.
+
+
+\subsection{Object Detection and Segmentation on COCO}
+\label{app:coco_det_settings}
+Following Swin~\citep{liu2021swin} and PoolFormer~\citep{yu2022metaformer}, we evaluate objection detection and instance segmentation tasks on COCO~\citep{2014MicrosoftCOCO} benchmark, which include 118K training images (\textit{train2017}) and 5K validation images (\textit{val2017}). We adopt RetinaNet~\citep{iccv2017retinanet}, Mask R-CNN~\citep{2017iccvmaskrcnn}, and Cascade Mask R-CNN~\citep{tpami2019cascade} as the standard detectors and use ImageNet-1K pre-trained weights as the initialization of the backbones. As for RetinaNet and Mask R-CNN, we employ AdamW~\citep{iclr2019AdamW} optimizer for training $1\times$ scheduler (12 epochs) with a basic learning rate of $1\times 10^{-4}$ and a batch size of 16. As for Cascade Mask R-CNN, the $3\times$ training scheduler and multi-scale training resolutions (MS) are adopted. The pre-trained weights on ImageNet-1K and ImageNet-21K are used accordingly to initialize backbones. The shorter side of training images is resized to 800 pixels, and the longer side is resized to not more than 1333 pixels. We calculate the FLOPs of compared models at $800\times 1280$ resolutions. Experiments of COCO detection are implemented on \texttt{MMDetection}~\citep{mmdetection} codebase and run on 8 NVIDIA A100 GPUs. View detailed results in Appendix \ref{app:exp_det_coco}.
+
+\subsection{Semantic Segmentation on ADE20K}
+\label{app:ade20k_seg_settings}
+We evaluate semantic segmentation on ADE20K~\citep{Zhou2018ADE20k} benchmark, which contains 20K training images and 2K validation images, covering 150 fine-grained semantic categories. 
+We first adopt Semantic FPN~\citep{cvpr2019semanticFPN} following PoolFormer~\citep{yu2022metaformer} and Uniformer~\citep{iclr2022uniformer}, which train models for 80K iterations by AdamW~\citep{iclr2019AdamW} optimizer with a basic learning rate of $2\times 10^{-4}$, a batch size of 16, and a poly learning rate scheduler. Then, we utilize UperNet~\citep{eccv2018upernet} following Swin~\citep{liu2021swin}, which employs AdamW optimizer using a basic learning rate of $6\times 10^{-5}$, a weight decay of 0.01, a poly scheduler with a linear warmup of 1,500 iterations. We use ImageNet-1K and ImageNet-21K pre-trained weights to initialize the backbones accordingly. The training images are resized to $512^2$ resolutions, and the shorter side of testing images is resized to 512 pixels. We calculate the FLOPs of models at $800\times 2048$ resolutions. Experiments of ADE20K segmentation are implemented on \texttt{MMSegmentation}~\citep{mmseg2020} codebase and run on 8 NVIDIA A100 GPUs. View full comparison results in Appendix \ref{app:exp_seg_ade20k}.
+
+\subsection{2D Human Pose Estimation on COCO}
+\label{app:coco_pose_settings}
+We evaluate 2D human keypoints estimation tasks on COCO~\citep{2014MicrosoftCOCO} benchmark based on Top-Down SimpleBaseline~\citep{eccv2018simple} (adding a Top-Down estimation head after the backbone) following PVT~\citep{iccv2021PVT} and UniFormer~\citep{iclr2022uniformer}. 
+We fine-tune all models for 210 epochs with Adam optimizer \citep{iclr2014adam} using a basic learning rate selected in \{$1\times 10^{-3}, 5\times 10^{-4}$\}, a multi-step learning rate scheduler decay at 170 and 200 epochs. ImageNet-1K pre-trained weights are used as the initialization of the backbones. The training and testing images are resized to $256\times 192$ or $384\times 288$ resolutions, and the FLOPs of models are calculated at both resolutions. COCO pose estimation experiments are implemented on \texttt{MMPose}~\citep{mmpose2020} codebase and run on 8 NVIDIA A100 GPUs. View full experiment results in Appendix \ref{app:exp_2d_pose}.
+
+\subsection{3D Human Pose Estimation}
+\label{app:coco_3d_settings}
+We evaluate MogaNet and popular architectures with 3D human pose estimation tasks with a single monocular image based on ExPose~\citep{eccv2020ExPose}. We first benchmark widely-used ConvNets with the 3D face mesh surface estimation task based on ExPose. All models are trained for 100 epochs on Flickr-Faces-HQ Dataset (FFHQ)~\citep{cvpr2019ffhq} and tested on Stirling/ESRC 3D dataset~\citep{feng2018evaluation}, which consists of facial RGB images with ground-truth 3D face scans. 3D Root Mean Square Error (3DRMSE) measures errors between the predicted and ground-truth face scans. Following ExPose, the Adam optimizer is employed with a batch size of 256, a basic learning rate selected in \{$2\times 10^{-4}, 1\times 10^{-4}$\}, a multi-step learning rate scheduler decay at 60 and 100 epochs. ImageNet-1K pre-trained weights are adopted as the backbone initialization. The training and testing images are resized to $256\times 256$ resolutions.
+Then, we evaluate ConvNets with the hand 3D pose estimation tasks. FreiHAND dataset \citep{iccv2019freihand}, which contains multi-view RGB hand images, 3D MANO hand pose, and shape annotations, is adopted for training and testing. Mean Per-Joint Position Error (PA-MPJPE) is used to evaluate 3D skeletons. Notice that a ``PA'' prefix denotes that the metric measures error after solving rotation, scaling, and translation transforms using Procrustes Alignment. Refer to ExPose for more implementation details. All models use the same training settings as the 3D face task, and the training and testing resolutions are $224\times 224$. Experiments of 3D pose estimation are implemented on \texttt{MMHuman3D}~\citep{mmhuman3d} codebase and run on 4 NVIDIA A100 GPUs. View full results in Appendix \ref{app:exp_3d_pose}.
+
+\subsection{Video Prediction on Moving MNIST}
+\label{app:mmnist_vp_settings}
+We evaluate various Metaformer architectures~\citep{yu2022metaformer} and MogaNet with video prediction tasks on Moving MNIST (MMNIST)~\citep{2014MicrosoftCOCO} based on SimVP~\citep{cvpr2022simvp}. Notice that the hidden translator of SimVP is a 2D network module to learn spatio-temporal representation, which any 2D architecture can replace. Therefore, we can benchmark various architectures based on the SimVP framework. In MMNIST~\citep{icml2015mmnist}, each video is randomly generated with 20 frames containing two digits in $64\times 64$ resolutions, and the model takes 10 frames as the input to predict the next 10 frames. Video predictions are evaluated by Mean Square Error (MSE), Mean Absolute Error (MAE), and Structural Similarity Index (SSIM). All models are trained on MMNIST from scratch for 200 or 2000 epochs with Adam optimizer, a batch size of 16, a OneCycle learning rate scheduler, an initial learning rate selected in \{$1\times 10^{-2}, 5\times 10^{-3}, 1\times 10^{-3}, 5\times 10^{-4}$\}. Experiments of video prediction are implemented on \texttt{OpenSTL}{\footnote{\url{https://github.com/chengtan9907/OpenSTL}}} codebase~\citep{tan2023openstl} and run on a single NVIDIA Tesla V100 GPU. View full benchmark results in Appendix \ref{app:exp_vp_mmnist}.
+
+
+\section{Empirical Experiment Results}
+\label{app:empirical}
+\subsection{Representation Bottleneck of DNNs from the View of Multi-order Interaction}
+\label{app:interaction}
+\paragraph{Multi-order game-theoretic interaction.}
+In Sec.~\ref{sec:rep_bottleneck}, we interpret the learned representation of DNNs through the lens of multi-order game-theoretic interaction~\citep{zhang2020interpreting, deng2021discovering}, which disentangles inter-variable communication effects in a DNN into diverse game-theoretic
+components of different interaction orders. The order here denotes the \textit{scale of context} involved in the whole computation process of game-theoretic interaction. 
+
+For computer vision, the $m$-th order interaction $I^{(m)}(i,j)$ measures the average game-theoretic interaction effects between image patches $i$ and $j$ on all $m$ image patch contexts. 
+%
+Take face recognition as an example, we can consider patches $i$ and $j$ as \textit{two eyes} on this face. Besides, we regard other $m$ visible image patches included on the face. The interaction effect and contribution between the eye's patches $i$ and $j$ toward the task depend on such $m$ visible patches as the context, which is measured as the aforementioned $I^{(m)}(i,j)$.
+If $I^{(m)}(i,j) > 0$ , patches $i$ and $j$ show a positive effect under $m$ context. Accordingly, if $I^{(m)}(i,j) < 0$, we consider$i$ and $j$ have a negative effect under $m$ context.
+%
+More importantly, interactions of low-order mainly reflect \textbf{widely-shared local texture} and \textbf{common} visual concepts. The middle-order interactions are primarily responsible for encoding \textbf{discriminative high-level} representations. 
+However, the high-order ones are inclined to let DNNs memorize the pattern of \textbf{rare outliers} and large-scale shape with \textbf{intensive global interactions}, which can presumably over-fit our deep models~\citep{deng2021discovering, cheng2021game}. Consequently, the occurrence of \textit{excessively low- or high-order} game-theoretic interaction in a deep architecture may therefore be undesirable.
+
+Formally, given an input image $x$ with a set of $n$ patches $N = \{1,\dots,n\}$ (\textit{e.g.}, an image with $n$ pixels in total), the multi-order interaction $I^{(m)}(i,j)$ can be calculated as:
+\begin{equation}
+\begin{aligned}
+    I^{(m)}(i,j) = \mathbb{E}_{S \subseteq N \setminus \{i,j\}, |S|=m}[\Delta f(i,j,S)],
+\end{aligned}
+    \label{eq:interaction}
+\end{equation}
+where $\Delta f(i,j,S) = f(S \cup \{i,j\}) - f(S \cup \{i\}) - f(S \cup \{j\}) + f(S)$. $f(S)$ indicates the score of output with patches in $N \setminus S$ kept unchanged but replaced with the baseline value~\citep{ancona2019explaining}, For example, a low-order interaction (\textit{e.g.,} $m=0.05n$) means the relatively simple collaboration between variables $i,j$ under a small range of context, while a high-order interaction (\textit{e.g.,} $m=0.95n$) corresponds to the complex collaboration under a large range of context. Then, we can measure the overall interaction complexity of deep neural networks (DNNs) by the relative interaction strength $J^{(m)}$ of the encoded $m$-th order interaction:
+\begin{equation}
+\begin{aligned}
+    J^{(m)} = \frac{\mathbb{E}_{x \in \Omega}\mathbb{E}_{i,j}|I^{(m)}(i,j|x)|}{\mathbb{E}_{m^{'}}\mathbb{E}_{x \in \Omega}\mathbb{E}_{i,j}|I^{(m^{'})}(i,j|x)|},
+\end{aligned}
+    \label{eq:strength}
+\end{equation}
+where $\Omega$ is the set of all samples and $0\le m \ge n-2$. Note that $J^{(m)}$ is the average interaction strength over all possible patch pairs of the input samples and indicates the distribution (area under curve sums up to one) of the order of interactions of DNNs.
+In Fig.~\ref{fig:spatial_interaction_app}, we calculate the interaction strength $J^{(m)}$ with Eq.~\ref{eq:strength} for the models trained on ImageNet-1K using the official implementation{\footnote{\url{https://github.com/Nebularaid2000/bottleneck}}} provided by~\citep{deng2021discovering}. Specially, we use the image of $224\times 224$ resolution as the input and calculate $J^{(m)}$ on $14\times 14$ grids, \textit{i.e.,} $n=14\times 14$. And we set the model output as $f(x_S) = \log \frac{P(\hat y = y|x_S)}{1-P(\hat y = y|x_S)}$ given the masked sample $x_S$, where $y$ denotes the ground-truth label and $P(\hat y = y|x_S)$ denotes the probability of classifying the masked sample $x_S$ to the true category.
+\pl{Fig.~\ref{fig:interaction_cnns} and Fig.~\ref{fig:interaction_cnns_gating} compare existing ConvNets with large kernels or gating designs and demonstrate that MogaNet can model middle-order interactions better to learn more informative representations.}
+
+\begin{figure*}[t]
+    \vspace{-2.0em}
+    \centering
+    % \setlength{\abovecaptionskip}{-1cm}
+    \subfloat[]{\label{fig:interaction_cnns}
+    \hspace{-0.75em}
+    \includegraphics[width=0.335\linewidth,trim= 0 10 0 0,clip]{Figs/fig_analysis_interaction_cnns.pdf}
+    }
+    \subfloat[]{\label{fig:interaction_cnns_gating}
+    \hspace{-0.75em}
+    \includegraphics[width=0.335\linewidth,trim= 0 10 0 0,clip]{Figs/fig_analysis_interaction_cnns_gating.pdf}
+    }
+    \subfloat[]{\label{fig:interaction_vits}
+    \hspace{-0.75em}
+    \includegraphics[width=0.335\linewidth,trim= 0 10 0 0,clip]{Figs/fig_analysis_interaction_vits}
+    }
+    \vspace{-1.0em}
+    \caption{
+    \textbf{Distributions of the interaction strength $J^{(m)}$} for \pl{(a) ConvNets with different convolution kernel sizes, (b) ConvNets with gating aggregations,} and (c) Transformers on ImageNet-1K with $224^2$ resolutions. Middle-order strengths mean the middle-complex interaction, where a medium number of patches (\textit{e.g.,} 0.2$\sim$0.8n) participate.
+    }
+    \label{fig:spatial_interaction_app}
+    \vspace{-1.0em}
+\end{figure*}
+
+\paragraph{Relationship of explaining works of ViTs.}
+Since the thriving of ViTs in a wide range of computer vision tasks, recent studies mainly investigate the \textit{why} ViTs work from two directions: (a) Evaluation of robustness against noises finds that self-attentions~\citep{naseer2021intriguing, iclr2022how, zhou2021ibot, li2022A2MIM} or gating mechanisms~\citep{icml2022FAN} in ViTs are more robust than classical convolutional operations~\citep{simonyan2014very, cvpr2016inceptionv3}. For example, ViTs can still recognize the target object with large occlusion ratios (\textit{e.g.,} only 10$\sim$20\% visible patches) or corruption noises. This phenomenon might stem from the inherent redundancy of images and the competition property of self-attention mechanisms~\citep{nips2020linformer, icml2022Flowformer}. Several recently proposed works~\citep{cvpr2022AViT, iccv2021levit} show that ViTs can work with some essential tokens (\textit{e.g.,} 5$\sim$50\%) that are selected according to the complexity of input images by dynamic sampling strategies, which also utilize the feature selection properties of self-attentions. From the perspective of multi-order interactions, convolutions with local inductive bias (using small kernel sizes) prefer low-order interactions, while self-attentions without any inductive bias tend to learn low-order and high-order interactions.
+(b) Evaluation of out-of-distribution samples reveals that both self-attention mechanisms and depth-wise convolution (DWConv) with large kernel designs share similar shape-bias tendency as human vision~\citep{2021shapebias, nips2021partial, cvpr2022replknet}, while canonical ConvNets (using convolutions with small kernel sizes) exhibit strong bias on local texture~\citep{iclr2019shapebias, hermann2020origins}. Current works \citep{cvpr2022replknet} attribute shape or texture-bias tendency to the receptive field of self-attention or convolution operations, \textit{i.e.,} an operation with the larger receptive field or more long-range dependency is more likely to be shape-bias. However, there are still gaps between shape-bias operations and human vision. Human brains~\citep{treisman1980feature, deng2021discovering} attain visual patterns and clues and conduct middle-complexity interactions to recognize objects, while a self-attention or convolution operation can only encode global or local features to conduct high or low-complexity interactions. As the existing design of DNNs only stacks regionality perception or context aggregation operations in a cascaded way, it is inevitable to encounter the representation bottleneck.
+
+
+
+\subsection{Visualization of CAM}
+\label{app:gradcam}
+We further visualize more examples of Grad-CAM~\citep{cvpr2017grad} activation maps of MogaNet-S in comparison to Transformers, including DeiT-S~\citep{icml2021deit}, T2T-ViT-S~\citep{iccv2021t2t}, Twins-S~\citep{nips2021Twins}, and Swin~\citep{liu2021swin}, and ConvNets, including ResNet-50~\citep{he2016deep} and ConvNeXt-T~\citep{cvpr2022convnext}, on ImageNet-1K in Fig.~\ref{fig:app_gradcam}. Due to the self-attention mechanism, the pure Transformers architectures (DeiT-S and T2T-ViT-S) show more refined activation maps than ConvNets, but they also activate some irrelevant parts. Combined with the design of local windows, local attention architectures (Twins-S and Swin-T) can locate the full semantic objects. Results of previous ConvNets can roughly localize the semantic target but might contain some background regions.
+The activation parts of our proposed MogaNet-S are more similar to local attention architectures than previous ConvNets, which are more gathered on the semantic objects.
+
+
+\section{More Ablation and Analysis Results}
+\label{app:ablation}
+In addition to Sec.~\ref{sec:exp_ablation}, we further conduct more ablation and analysis of our proposed MogaNet on ImageNet-1K. We adopt the same experimental settings as Sec.~\ref{tab:ablation}.
+
+\subsection{Ablation of Activation Functions}
+\label{app:ablation_gating}
+We conduct the ablation of activation functions used in the proposed multi-order gated aggregation module on ImageNet-1K. Table~\ref{tab:ablation_gating} shows that using SiLU~\citep{elfwing2018sigmoid} activation for both branches achieves the best performance. Similar results were also found in Transformers, \textit{e.g.,} GLU variants with SiLU or GELU~\citep{hendrycks2016bridging} yield better performances than using Sigmoid or Tanh activation functions~\citep{Shazeer2020GLU, icml2022FLASH}. We assume that SiLU is the most suitable activation because it owns both the property of Sigmoid (gating effects) and GELU (training friendly), which is defined as $x\cdot \mathrm{Sigmoid}(x)$.
+
+\begin{figure*}[ht]
+\vspace{-1.0em}
+\begin{minipage}{0.35\linewidth}
+\centering
+    \input{Tabs/tab_ablation_gate.tex}
+\end{minipage}
+\begin{minipage}{0.65\linewidth}
+\centering
+    \input{Tabs/tab_ablation_conv.tex}
+\end{minipage}
+\vspace{-1.0em}
+\end{figure*}
+
+
+\subsection{Ablation of Multi-order DWConv Layers}
+\label{app:ablation_multiorder}
+In addition to Sec.~\ref{sec:moga} and Sec.~\ref{sec:exp_ablation}, we also analyze the multi-order depth-wise convolution (DWConv) layers as the static regionality perception in the multi-order aggregation module $\mathrm{Moga}(\cdot)$ on ImageNet-1K. As shown in Table~\ref{tab:ablation_conv}, we analyze the channel configuration of three parallel dilated DWConv layers: $\mathrm{DW}_{5\times 5, d=1}$, $\mathrm{DW}_{5\times 5, d=2}$, and $\mathrm{DW}_{7\times 7, d=3}$ with the channels of $C_l$, $C_m$, $C_h$.
+we first compare the performance of serial DWConv layers (\textit{e.g.,} $\mathrm{DW}_{5\times 5, d=1}$+$\mathrm{DW}_{7\times 7, d=3}$) and parallel DWConv layers. We find that the parallel design can achieve the same performance with fewer computational overloads because the DWConv kernel is equally applied to all channels. When we adopt three DWConv layers, the proposed parallel design reduces $C_l+C_h$ and $C_l+C_m$ times computations of $\mathrm{DW}_{5\times 5, d=2}$ and $\mathrm{DW}_{5\times 5, d=2}$ in comparison to the serial stack of these DWConv layers. Then, we empirically explore the optimal configuration of the three channels. We find that $C_l:$ $C_m:$ $C_h$ = 1: 3: 4 yields the best performance, which well balances the small, medium, and large DWConv kernels to learn low, middle, and high-order contextual representations. We calculate and discuss the FLOPs of the proposed three DWConv layers in the next subsection to verify the efficiency. Similar conclusions are also found in relevant designs~\citep{nips2022hilo, nips2022iformer, nips2022hornet}, where global context aggregations take the majority (\textit{e.g.}, $\frac{1}{2} \sim \frac{3}{4}$ channels or context components). We also verify the parallel design with the optimal configuration based on MogaNet-S/B. Therefore, we can conclude that our proposed multi-order DWConv layers can efficiently learn multi-order contextual information for the context branch of $\mathrm{Moga}(\cdot)$.
+
+
+\subsection{FLOPs and Throughputs of MogaNet}
+\label{app:flops_throughput}
+
+\paragraph{FLOPs of Multi-order Gated Aggregation Module}
+We divide the computation of the proposed multi-order gated aggregation module into two parts of convolution operations and calculate the FLOPs for each part.
+\begin{itemize}
+    \item \textbf{Conv1$\times$1.} The FLOPs of 1$\times$1 convolution operation $\phi_{\rm gate}$ , $\phi_{\rm context}$ and $\phi_{\rm out}$ can be derived as:
+    \begin{equation}
+    \begin{aligned}
+        \mathrm{FLOPs}(\phi_{\rm gate}) &= 2HWC^{2}, \\
+        \mathrm{FLOPs}(\phi_{\rm context}) &= 2HWC^{2}, \\
+        \mathrm{FLOPs}(\phi_{\rm out}) &= 2HWC^{2}.
+    \vspace{-0.50em}
+    \end{aligned}
+    \end{equation}
+    \item \textbf{Depth-wise convolution.} We consider the depth-wise convolution ($\mathrm{DW}$) with dilation ratio $d$. The $\mathrm{DW}$Conv is performed for the input $X$, where $X\in \mathbb{R}^{HW\times C_{in}}$. Therefore, the FLOPs for all $\mathrm{DW}$ in Moga module are:
+    \begin{equation}
+    \begin{aligned}
+        \mathrm{FLOPs}(\mathrm{DW}_{5\times 5, d=1}) &= 2HWC_{in}K_{5\times 5}^{2}, \\
+        \mathrm{FLOPs}(\mathrm{DW}_{5\times 5, d=2}) &= \frac{3}{4}HWC_{in}K_{5\times 5}^{2}, \\
+        \mathrm{FLOPs}(\mathrm{DW}_{7\times 7, d=3}) &= HWC_{in}K_{7\times 7}^{2}.
+    \vspace{-0.50em}
+    \end{aligned}
+    \end{equation}
+\end{itemize}
+Overall, the total FLOPs of our Moga module can be derived as follows:
+\vspace{-0.5em}
+\begin{equation}
+\begin{aligned}
+    \mathrm{FLOPs}(\mathrm{Moga}) &= 2HWC_{in}\left[\frac{11}{8}K_{5\times 5}^{2} + \frac{1}{2}K_{7\times 7}^{2}
+    + 3C_{in}\right]\\
+    &= HWC_{in}\left[\frac{471}{4} + 6C_{in}\right].
+    \vspace{-0.5em}
+\end{aligned}
+\end{equation}
+
+% figure: throughput
+\begin{wrapfigure}{r}{0.55\linewidth}
+\centering
+    \vspace{-1.75em}
+    \includegraphics[width=1.0\linewidth]{Figs/fig_acc_throughput.pdf}
+    \vspace{-2.25em}
+    \caption{Accuracy-throughput diagram of models on ImageNet-1K measured on an NVIDIA V100 GPU.}
+    \label{fig:app_throughput}
+    \vspace{-3.75em}
+\end{wrapfigure}
+% \begin{figure}[ht]
+%     \centering
+%     \vspace{-0.5em}
+%     \includegraphics[width=0.825\linewidth]{Figs/fig_acc_throughput.pdf}
+%     \vspace{-1.0em}
+%     \caption{Accuracy-throughput diagram of models on ImageNet-1K measured on an NVIDIA Tesla V100 GPU.}
+%     \label{fig:app_throughput}
+%     \vspace{-1.5em}
+% \end{figure}
+
+\vspace{-1.0em}
+\paragraph{Throughput of MogaNet}
+We further analyze throughputs of MogaNet variants on ImageNet-1K. As shown in Fig.~\ref{fig:app_throughput}, MogaNet has similar throughputs as Swin Transformer while producing better performances than Swin and ConvNet. Since we add channel splitting and GAP operations in MogaNet, the throughput of ConvNeXt exceeds MogaNet to some extent.
+
+% figure: gradcam
+\begin{figure*}[t]
+    \vspace{-1.0em}
+    \centering
+    \includegraphics[width=0.99\linewidth]{Figs/fig_app_gradcam.pdf}
+    \vspace{-0.5em}
+    \caption{
+    Visualization of Grad-CAM activation maps of the models trained on ImageNet-1K.}
+    \label{fig:app_gradcam}
+    \vspace{-0.5em}
+\end{figure*}
+
+\subsection{Ablation of Normalization Layers}
+\label{app:ablation_norm}
+For most ConvNets, BatchNorm~\citep{nips2015batchnorm} (BN) is considered an essential component to improve the convergence speed and prevent overfitting. However, BN might cause some instability~\citep{Wu2021PreciseBN} or harm the final performance of models~\citep{iclr2021characterizing, Brock2021NFNet}. Some recently proposed ConvNets~\citep{cvpr2022convnext, guo2022van} replace BN by LayerNorm~\citep{2016layernorm} (LN), which has been widely used in Transformers~\citep{iclr2021vit} and Metaformer architectures~\citep{yu2022metaformer}, achieving relatively good performances in various scenarios. Here, we conduct an ablation of normalization (Norm) layers in MogaNet on ImageNet-1K, as shown in Table~\ref{tab:ablation_norm}. As discussed in ConvNeXt~\citep{cvpr2022convnext}, the Norm layers used in each block (\textbf{within}) and after each stage (\textbf{after}) have different effects. Thus we study them separately. Table~\ref{tab:ablation_norm} shows that using BN in both places yields better performance than using LN (after) and BN (within), except MogaNet-T with $224^2$ resolutions, while using LN in both places performs the worst.
+Consequently, we use BN as the default Norm layers in our proposed MogaNet for two reasons: (\romannumeral1) With pure convolution operators, the rule of combining convolution operations with BN within each stage is still useful for modern ConvNets. (\romannumeral2) Although using LN after each stage might help stabilize the training process of Transformers and hybrid models and might sometimes bring good performance for ConvNets, adopting BN after each stage in pure convolution models still yields better performance.
+Moreover, we replace BN with precise BN~\citep{Wu2021PreciseBN} (pBN), which is an optimal alternative normalization strategy to BN. We find slight performance improvements (around 0.1\%), especially when MogaNet-S/B adopts the EMA strategy (by default), indicating that we can further improve MogaNet with advanced BN. As discussed in ConvNeXt, EMA might severely hurt the performances of models with BN. This phenomenon might be caused by the unstable and inaccurate BN statistics estimated by EMA in the vanilla BN with large models, which will deteriorate when using another EMA of model parameters. We solve this dilemma by exponentially increasing the EMA decay from 0.9 to 0.9999 during training as momentum-based contrastive learning methods~\citep{iccv2021dino, bao2021beit}, \textit{e.g.,} BYOL \citep{nips2020byol}. It can also be tackled by advanced BN variants~\citep{NIPS2017GhostBN, Wu2021PreciseBN}.
+
+\input{Tabs/tab_ablation_norm.tex}
+
+
+\subsection{Refined Training Settings for Lightweight Models}
+\label{app:advanced_tiny}
+To explore the full power of lightweight models of our MogaNet, we refined the basic training settings for MogaNet-XT/T according to RSB A2~\citep{wightman2021rsb} and DeiT-III~\citep{eccv2022deit3}. Compared to the default setting as provided in Table~\ref{tab:in1k_config}, we only adjust the learning rate and the augmentation strategies for faster convergence while keeping other settings unchanged. As shown in Table~\ref{tab:advanced_tiny}, MogaNet-XT/T gain +0.4$\sim$0.6\% when use the large learning rate of $2\times 10^{-3}$ and 3-Augment~\citep{eccv2022deit3} without complex designs. Based on the advanced setting, MogaNet with $224^2$ input resolutions yields significant performance improvements against previous methods, \textit{e.g.,} MogaNet-T gains +3.5\% over DeiT-T~\citep{icml2021deit} and +1.2\% over Parc-Net-S~\citep{eccv2022edgeformer}.
+Especially, MogaNet-T with $256^2$ resolutions achieves top-1 accuracy of 80.0\%, outperforming DeiT-S of 79.8\% reported in the original paper, while MogaNet-XT with $224^2$ resolutions outperforms DeiT-T under the refined training scheme by 1.2\% with only 3M parameters.
+
+\input{Tabs/tab_advanced_tiny.tex}
+
+\input{Tabs/tab_coco_r_1x_app}
+
+
+\section{More Comparison Experiments}
+\label{app:comparison}
+\subsection{Fast Training on ImageNet-1K}
+\label{app:exp_in1k}
+In addition to Sec.~\ref{sec:exp_in1k}, we further provide comparison results for 100 and 300 epochs training on ImageNet-1K. As for 100-epoch training, we adopt the original RSB A3~\citep{wightman2021rsb} setting for all methods, which adopts LAMB \citep{iclr2020lamb} optimizer and a small training resolution of $160^2$. We search the basic learning in \{$0.006, 0.008$\} for all architectures and adopt the gradient clipping for Transformer-based networks. As for 300-epoch training, we report results of RSB A2 \citep{wightman2021rsb} for classical CNN or the original setting for Transformers or modern ConvNets. In Table~\ref{tab:in1k_app_rsb}, when compared with models of similar parameter size, our proposed MogaNet-XT/T/S/B achieves the best performance in both 100 and 300 epochs training. Results of 100-epoch training show that MogaNet has a faster convergence speed than previous architectures of various types. For example, MogaNet-T outperforms EfficientNet-B0 and DeiT-T by 2.4\% and 8.7\%, MogaNet-S outperforms Swin-T by 3.4\%, and MogaNet-B outperforms Swin-S by 2.0\%. Notice that ConvNeXt variants have a great convergence speed, \textit{e.g.,} ConvNeXt-S achieves 81.7\% surpassing Swin-S by 1.5 and recently proposed ConvNet HorNet-S$_{7\times 7}$ by 0.5 with similar parameters. But our proposed MogaNet convergences faster than ConvNet, \textit{e.g.,} MogaNet-S outperforms ConvNeXt-T by 2.3\% with similar parameters while MogaNet-B/L reaching competitive performances as ConvNeXt-B/L with only 44$\sim$50\% parameters.
+
+\input{Tabs/tab_coco_m_1x_app}
+\input{Tabs/tab_coco_c_3x_app}
+
+\subsection{Detection and Segmentation Results on COCO}
+\label{app:exp_det_coco}
+In addition to Sec.~\ref{sec:exp_det_seg}, we provide full results of object detection and instance segmentation tasks with RetinaNet, Mask R-CNN, and Cascade Mask R-CNN on COCO.
+As shown in Table~\ref{tab:coco_r_1x_app} and Table~\ref{tab:coco_m_1x_app}, RetinaNet or Mask R-CNN with MogaNet variants outperforms existing models when training $1\times$ schedule. For example, RetinaNet with MogaNet-T/S/B/L achieve 45.8/47.7/48.7 AP$^b$, outperforming PVT-T/S/M and PVTV2-B1/B2/B3/B5 by 4.7/4.6/5.8 and 0.3/1.2/1.7/2.6 AP$^b$; Nask R-CNN with MogaNet-S/B/L achieve 46.7/47.9/49.4 AP$^b$, exceeding Swin-T/S/B and ConvNeXt-T/S/B by 4.5/3.1/2.5 and 2.5/2.5/2.4 with similar parameters and computational overloads. Noticeably, MogaNet-XT/T can achieve better detection results with fewer parameters and lower FLOPs than lightweight architectures, while MogaNet-T even surpasses some Transformers like Swin-S and PVT-S. For example, Mask R-CNN with MogaNet-T improves Swin-T by 0.4 AP$^b$ and outperforms PVT-S by 1.3 AP$^m$ using only around 2/3 parameters.
+As shown in Table~\ref{tab:coco_c_3x_app}, Cascade Mask R-CNN with MogaNet variants still achieves the state-of-the-art detection and segmentation results when training $3\times$ schedule with multi-scaling (MS) and advanced augmentations. For example, MogaNet-L/XL yield 53.3/56.2 AP$^b$ and 46.1/48.8 AP$^m$, which improves Swin-B/L and ConvNeXt-B/L by 1.4/2.3 and 0.6/1.4 AP$^b$ with similar parameters and FLOPS.
+
+
+
+\subsection{Sementic Segmentation Results on ADE20K}
+\label{app:exp_seg_ade20k}
+In addition to Sec.~\ref{sec:exp_det_seg}, we provide comprehensive comparison results of semantic segmentation based on UperNet on ADE20K. As shown in Table~\ref{tab:ade20k_upernet_app}, UperNet with MogaNet produces state-of-the-art performances in a wide range of parameter scales compared to famous Transformer, hybrid, and convolution models. As for the lightweight models, MogaNet-XT/T significantly improves ResNet-18/50 with fewer parameters and FLOPs budgets. As for medium-scaling models, MogaNet-S/B achieves 49.2/50.1 mIoU$^{ss}$, which outperforms the recently proposed ConvNets, \textit{e.g.,} +1.1 over HorNet-T using similar parameters and +0.7 over SLaK-S using 17M fewer parameters. As for large models, MogaNet-L/XL surpass Swin-B/L and ConvNeXt-B/L by 1.2/1.9 and 1.8/0.3 mIoU$^{ss}$ while using fewer parameters.
+
+\input{Tabs/tab_ade20k_uper_app}
+\input{Tabs/tab_3d_app}
+
+\subsection{2D Human Pose Estimation Results on COCO}
+\label{app:exp_2d_pose}
+In addition to Sec.~\ref{sec:exp_det_seg}, we provide comprehensive experiment results of 2D human key points estimation based on Top-Down SimpleBaseline on COCO.
+As shown in Table~\ref{tab:coco_pose_app}, MogaNet variants achieve competitive or state-of-the-art performances compared to popular architectures with two types of resolutions. As for lightweight models, MogaNet-XT/T significantly improves the performances of existing models while using similar parameters and FLOPs. Meanwhile, MogaNet-S/B also produces 74.9/75.3 and 76.4/77.3 AP using $256\times 192$ and $384\times 288$ resolutions, outperforming Swin-B/L by 2.0/1.0 and 1.5/1.0 AP with nearly half of the parameters and computation budgets.
+
+\input{Tabs/tab_coco_pose_app}
+
+\subsection{3D Human Pose Estimation Results}
+\label{app:exp_3d_pose}
+In addition to Sec.~\ref{sec:exp_det_seg}, we evaluate popular ConvNets and MogaNet for 3D human pose estimation tasks based on ExPose~\citep{eccv2020ExPose}. As shown in Table~\ref{tab:3d_app}, MogaNet achieves lower regression errors with efficient usage of parameters and computational overheads. Compared to lightweight architectures, MogaNet-T achieves 6.82 MPJPE and 2.36 3DRMSE on hand and face reconstruction tasks, improving ResNet-18 and MobileNetV2 $1\times$ by 1.29/0.04 and 1.51/0.28. Compared to models around 25$\sim$50M parameters, MogaNet-S surpasses ResNet-101 and ConvNeXt-T, achieving competitive results as ConvNeXt-S with relatively smaller parameters and FLOPs (\textit{e.g.,} 27M/6.5G \textit{vs} 52M/11.4G on FFHP). Notice that some backbones with more parameters produce worse results than their lightweight variants on the face estimation tasks (\textit{e.g.,} ResNet-50 and Swin-S), while MogaNet-S still yields the better performance of 2.24 3DRMSE.
+
+\clearpage
+
+\subsection{Video Prediction Results on Moving MNIST}
+\label{app:exp_vp_mmnist}
+In addition to Sec.~\ref{sec:exp_det_seg}, We verify video prediction performances of various architectures by replacing the hidden translator in SimVP with the architecture blocks. All models use the same number of network blocks and have similar parameters and FLOPs. As shown in Table~\ref{tab:vp_app}, Compared to Transformer-based and Metaformer-based architectures, pure ConvNets usually achieve lower prediction errors. When training 200 epochs, it is worth noticing that using MogaNet blocks in SimVP significantly improves the SimVP baseline by 6.58/13.86 MSE/MAE and outperforms ConvNeXt and HorNet by 1.37 and 4.07 MSE. MogaNet also holds the best performances in the extended 2000-epoch training setting.
+
+\input{Tabs/tab_vp_app}
+
+% Table: in1k RSB A3
+\input{Tabs/tab_in1k_app_rsb.tex}
+
+
+\section{\pl{Extensive Related Work}}
+\label{sec:related_work}
+\paragraph{Convolutional Neural Networks}
+% History of Pre-ViT ConvNets and modern ConvNets
+ConvNets~\citep{lecun1998gradient, Krizhevsky2012ImageNetCW, he2016deep} have dominated a wide range of computer vision (CV) tasks for decades. 
+VGG~\citep{simonyan2014very} proposes a modular network design strategy, stacking the same type of blocks repeatedly, which simplifies both the design workflow and transfer learning for downstream tasks.
+ResNet~\citep{he2016deep} introduces identity skip connections and bottleneck modules that alleviate training difficulties (\textit{e.g.,} vanishing gradient). With the desired properties, ResNet and its variants~\citep{bmvc2016wrn, xie2017aggregated, hu2018squeeze, cvpr2022resnest} have become the most widely adopted ConvNet architectures in numerous CV applications. 
+For practical usage, efficient models~\citep{eccv2018shufflenet, 2017MobileNet, cvpr2018mobilenetv2, iccv2019mobilenetv3, icml2019efficientnet, cvpr2020regnet} are designed for a complexity-accuracy trade-off and hardware devices.
+Since the limited reception fields, spatial and temporal convolutions struggle to capture global dependency \citep{Luo2016ERF}. 
+Various spatial-wise or channel-wise attention strategies~\citep{iccv2017Deformable, hu2018squeeze, wang2018non, eccv2018CBAM, iccv2019GCNet} are introduced.
+Recently, taking the merits of Transformer-like macro design~\citep{iclr2021vit}, modern ConvNets~\citep{2022convmixer, cvpr2022replknet, Liu2022SLak, nips2022hornet, iccv2023Oriented1D} show thrilling performance with large depth-wise convolutions~\citep{han2021demystifying} for global contextual features.
+% Among them, HorNet~\citep{nips2022hornet} and FocalNet~\citep{nips2022focalnet} exploit . However, these methods memorize and contextualize features in the regions with pairwise operations repeatedly in parallel, which leads to high computational complexity.
+\pl{
+Among them, VAN~\citep{guo2022van}, FocalNet~\citep{nips2022focalnet}, HorNet~\citep{nips2022hornet}, and Conv2Former~\citep{Hou2022Conv2Former} exploit multi-scale convolutional kernels with gating operations. However, these methods fail to ensure the networks learn the inherently overlooked features \citep{deng2021discovering} and achieve ideal contextual aggregation. Unlike the previous works, we first design three groups of multi-order depth-wise convolutions in parallel followed by a double-branch activated gating operation, and then propose a channel aggregation module to enforce the network to learn informative features of various interaction scales.
+% However, these methods memorize and contextualize features in the regions with pairwise operations repeatedly in parallel, which leads to high computational complexity.
+}
+
+\vspace{-1.0em}
+\paragraph{\pl{Vision Transformers}}
+\pl{
+Transformer~\citep{vaswani2017attention} with self-attention mechanism has become the mainstream choice in natural language processing (NLP) community~\citep{devlin2018bert, brown2020language}.
+Considering that global information is also essential for CV tasks, Vision Transformer (ViT)~\citep{iclr2021vit} is proposed and has achieved promising results on ImageNet~\citep{cvpr2009imagenet}. In particular, ViT splits raw images into non-overlapping fixed-size patches as visual tokens to capture long-range feature interactions among these tokens by self-attention. By introducing regional inductive bias, ViT and its variants have been extended to various vision tasks \cite{carion2020end, zhu2020deformable, chen2021pre, parmar2018image, jiang2021transgan, arnab2021vivit}. Equipped with advanced training strategies~\citep{icml2021deit, eccv2022deit3} or extra knowledge~\citep{nips2021TL, Lin2022SuperViT, eccv2022tinyvit}, pure ViTs can achieve competitive performance as ConvNets in CV tasks. 
+In the literature of \cite{yu2022metaformer}, the MetaFormer architecture substantially influenced the design of vision backbones, and all Transformer-like models~\citep{icml2021deit, 2022convmixer, aaai2022shiftvit} are classified by how they treat the token-mixing approaches, such as relative position encoding~\citep{wu2021rethinking}, local window shifting~\citep{liu2021swin} and MLP layer~\citep{nips2021MLPMixer}, \textit{etc.} 
+Beyond the aspect of macro design, \cite{touvron2021training, yuan2021tokens} introduced knowledge distillation and progressive tokenization to boost training data efficiency. 
+% Hybird ViTs: Swin, Uniformer, Next-ViT
+Compared to ConvNets banking on the inherent inductive biases (\textit{e.g.,} locality and translation equivariance), the pure ViTs are more over-parameterized and rely on large-scale pre-training~\citep{iclr2021vit, Li2023MIMSurvey} by contrastive learning~\citep{cvpr2020moco, zang2022dlme, tnnls2023genurl} or masked image modeling~\citep{bao2021beit, cvpr2022mae, li2022A2MIM, Woo2023ConvNeXtV2} to a great extent. Targeting this problem, one branch of researchers proposes lightweight ViTs~\citep{nips2021vitc, iclr2022mobilevit, nips2022EfficientFormer, chen2022CFViT} with more efficient self-attentions variants~\citep{nips2020linformer}.
+Meanwhile, the incorporation of self-attention and convolution as a hybrid backbone has been vigorously studied~\citep{guo2021cmt, wu2021cvt, nips2021coatnet, d2021convit, iclr2022uniformer, aaai2022LIT, nips2022iformer} for imparting regional priors to ViTs.
+}
+
+
+% \section{Discussions}
+% \label{app:discussion}
+% We discuss the relationship between our proposed MogaNet and prior models and summarize the limitations of MogaNet. We hope MogaNet can be a strong baseline applied to various vision tasks.
+
+% \subsection{Comparison with Prior Art}
+% \label{app:relationship}
+% \paragraph{Motivations and main challenges.}
+% The motivations for our work come from two aspects. As verified in previous work of hybrid architectures~\citep{nips2021coatnet, cvmj2022PVTv2, iclr2022uniformer, pinto2022impartial, iclr2022how}, which combine convolutions and self-attention mechanisms, only using advanced regionality preceptions or context aggregation modules is not enough to learn the optimal visual representation. According to empirical and theoretical analysis~\citep{hermann2020origins, naseer2021intriguing, iclr2022how, cvpr2022replknet, deng2021discovering}, we find that the gap between DNNs and human visions is DNNs have some unnatural bias (\textit{e.g.,} convolution operations are likely to be high-pass filters with the texture bias) and prefer to low-order or high-order interactions. Meanwhile, the efficiency of the model is also  emphasized with the boom of Transformer architectures~\citep{nips2020linformer, aaai2022LIT, iclr2022mobilevit, Lin2022SuperViT, icml2022FLASH, icml2022Flowformer}, which usually require quadratic complexity and might be time-consuming in fine-grained vision tasks.
+% Therefore, we summarize the main challenge is how to leverage the advantages of regionality perceptions and context aggregations to learn more multi-order interactions efficiently.

@@ -1,0 +1,808 @@
+\pdfoutput=1
+\documentclass{article}
+\usepackage{INTERSPEECH2022}
+%\documentclass{article}
+\usepackage{amsmath,graphicx,multirow,url,adjustbox}
+\usepackage{spconf}
+\usepackage{cite}
+\usepackage{color,soul}
+\usepackage{hyperref}
+\usepackage{mathtools}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{stfloats}
+\usepackage[pdf]{graphviz}
+\usepackage{pgfplots}
+\pgfplotsset{width=\linewidth*1.04,compat=1.17}
+\usepackage{subcaption}
+\usepackage{listings}
+\usepackage{url}
+\definecolor{our_green}{HTML}{76b900}
+% \definecolor{our_blue}{HTML}{a4c2f4}
+\definecolor{our_blue}{HTML}{6d9eeb}
+
+%%% Helper code for Overleaf's build system to
+%%% automatically update output drawings when
+%%% code in a \digraph{...} is modified
+\usepackage{xpatch}
+\makeatletter
+\newcommand*{\addFileDependency}[1]{% argument=file name and extension
+  \typeout{(#1)}
+  \@addtofilelist{#1}
+  \IfFileExists{#1}{}{\typeout{No file #1.}}
+}
+\makeatother
+\xpretocmd{\digraph}{\addFileDependency{#2.dot}}{}{}
+
+\newcommand\blfootnote[1]{%
+  \begingroup
+  \renewcommand\thefootnote{}\footnote{#1}%
+  \addtocounter{footnote}{-1}%
+  \endgroup
+}
+
+
+% Example definitions.
+\def\x{{\mathbf x}}
+\def\L{{\cal L}}
+\DeclarePairedDelimiter\ceil{\lceil}{\rceil}
+\DeclarePairedDelimiter\floor{\lfloor}{\rfloor}
+\renewcommand{\arraystretch}{0.9}
+\newcolumntype{Y}{>{\centering\arraybackslash}X}
+
+\setlength{\tabcolsep}{3pt}
+
+
+% --------------------
+
+\title{Multi-blank Transducers for Speech Recognition}
+
+\name{\begin{tabular}{c} Hainan Xu$^1$, Fei Jia$^1$, Somshubra Majumdar$^1$, Shinji Watanabe$^2$, Boris Ginsburg$^1$
+%%% uncomment for arXiv submission
+%\thanks{\vspace{-17pt}Preprint. Submitting to ICASSP-23}
+\end{tabular}
+}
+\address{
+  $^1$NVIDIA, USA, \\
+  $^2$Carnegie Mellon University, PA, USA \\
+\small{\url{hainanx@nvidia.com}} }
+
+\bibliographystyle{IEEEtran}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This paper proposes a modification to RNN-Transducer (RNN-T) models for automatic speech recognition (ASR).
+In standard RNN-T, the emission of a blank symbol consumes exactly one input frame; in our proposed method, we introduce additional blank symbols, which consume two or more input frames when emitted.
+We refer to the added symbols as \emph{big blanks}, and the method \textit{multi-blank RNN-T}.
+For training multi-blank RNN-Ts, we propose a novel \emph{logit under-normalization} method in order to prioritize emissions of big blanks.
+With experiments on multiple languages and datasets, we show that multi-blank RNN-T methods could bring relative speedups of over +90\%/+139\% to model inference for English Librispeech and German Multilingual Librispeech datasets, respectively. The multi-blank RNN-T method also improves ASR accuracy consistently. We will release our implementation of the method in the NeMo (\url{https://github.com/NVIDIA/NeMo}) toolkit. %\footnote{ \url{https://github.com/NVIDIA/NeMo}}
+
+
+\end{abstract}
+
+\noindent\textbf{Index Terms}: ASR, speech recognition, RNN-T, Transducers
+
+\section{Introduction}
+End-to-End (E2E) automatic speech recognition (ASR) systems can directly generate output sequences of text tokens from the input sequence of acoustic features, 
+and have gradually surpassed hybrid ASR models \cite{povey2011kaldi} in terms of popularity and/or accuracy, and a lot of open-source toolkits \cite{watanabe2018espnet,ott2019fairseq,wang2019espresso,kuchaiev2019nemo,ravanelli2021speechbrain} are available. 
+Among the common approaches, Attention-based Encoder and Decoder (AED) \cite{chorowski2015attention,chan2016listen}, Connectionist Temporal Classification (CTC)~\cite{graves2006connectionist} and Recurrent Neural Network Transducers (RNN-T)~\cite{graves2012sequence} are the most commonly used ones. 
+Considerable research efforts have been spent in improving those ASR models, e.g. for computational efficiency \cite{li2019improving,kuang2022pruned,Ghodsi2020stateless,chen2016phone}, more flexible training scenarios \cite{pratap2022star,shinohara22_interspeech}, and different types of regularization methods \cite{xu2021regularizing,xu2021convolutional,yu2021fastemit}.
+\blfootnote{Paper accepted at ICASSP 2023 conference.}
+
+This paper focuses on RNN-T models\footnote{Although when first proposed, the term RNN-T was limited in meaning models that use LSTM encoders and decoders, we here refer to it as a general type of model that incorporates the transducer loss as its training objective.}.
+An RNN-T model consists of an acoustic encoder (or simply, encoder), a decoder (also referred to as a prediction network or a label encoder), and a joint network. The acoustic encoder converts the input acoustic features into a higher-level representation; the decoder extracts the history context information at the label side; the joint network combines the output of the acoustic encoder and the decoder and outputs a probability distribution over the vocabulary. 
+% people's attempt to improve RNN-T 
+RNN-T achieves great performance  but it suffers from the slow inference speed and difficulty to train due to model structure and memory footprint\cite{mahadeokar2021alignment}. 
+\cite{hu2020exploring} proposed using external alignment information to pre-train RNN-T to overcome the training difficulty and showed that pre-training can not only improve accuracy but also reduce the RNN-T model latency.
+\cite{mahadeokar2021alignment} proposed using alignment to restrict RNN-Ts in streaming scenarios.
+\cite{zhang2020transformer,han2020contextnet,gulati2020conformer,radfarconvrnn} all have proposed methods to improve the encoders for RNN-Ts.
+% Conformers \cite{gulati2020conformer} use combinations of CNN layers and self-attention layers to model both  the local and global context of an audio sequence and showed improved ASR performance. \cite{radfarconvrnn} introduced \emph{Convolutional Augmented Recurrent Neural Network Transducers} (ConvRNN-T) where the LSTM-based RNN-T is augmented with a conventional front-end consisting of local and global context CNN encoders and reported better performance than previous architectures as well as less computational complexity. 
+The decoder, as well as the decoding algorithm of the RNN-T, have also been investigated, e.g. 
+\cite{Ghodsi2020stateless,kim2020accelerating,kang2022fast}.
+%proposed using stateless decoders for RNN-T, which simplifies the model architecture and the inference process, and also achieves comparably good performance to original RNN-T architectures. 
+
+In this work, we focus on a relatively less investigated area of research on RNN-Ts -- the blank symbol and the loss function. 
+%We propose a number of changes to RNN-T models including changing the use of blank symbols in RNN-T as well as the computation of the loss function. 
+Unlike standard RNN-Ts with a single blank symbol, we propose a multi-blank method, with additional blank symbols that explicitly model duration, and advance the input $t$ dimension by two or more frames. 
+The method is straightforwardly implemented as an extension to standard RNN-Ts.
+We show that the proposed multi-blank method improves WER and speeds up ASR inference consistently.
+On Librispeech test sets, the method brings relative speedups of up to +92.9\% while also improving  WER. Besides English, we illustrate that the method also helps improve German ASR accuracy with up to +139.6\% speedup on the Multilingual LibriSpeech (MLS) dataset. 
+
+% This paper is structured as follows. In Section 2, we describe the basic RNN-T method and the proposed Multi-blank RNN-T methods, as well as our proposed novel training technique. We evaluate the proposed method in Section 3, followed by various analyses in Section 4. In Section 5, we conclude the study and discuss future work. 
+
+% Research has been devoted to encoder architecture, ~\cite{gulati2020conformer} proposed  conformer which combines convolution neural networks and transformers with fewer parameters and achieves SOTA result. 
+
+
+
+% RNN-T has been implemented in a couple of speech recognition toolkits including Kaldi, etc., RNN-T implementations in most of the tools rely on other dependencies and make the modification to RNN-T hardk, and also suffer from the slow training speed due to the model structure. NeMo has the implementation of RNN-T and use CUDA to accelate it and it's easy to customize for user's own purpose. 
+% The implementation of t multi-blank RNN-T  can be found in \footnote{Readers are referred to the source code at \url{nemo/collections/asr/parts/numba/RNN-T_loss/utils/cuda_utils/gpu_RNN-T_kernel.py} from the NeMo repository for details.}
+
+
+\section{Multi-blank RNN-T}
+
+\subsection{Blank symbol in RNN-T}
+By leveraging a blank symbol in the model design, RNN-T does not need alignment information during training.
+In the RNN-T framework, a label sequence could be augmented by adding an arbitrary number of blanks at any position of the sequence, and during RNN-T model training, for any input sequence, it tries to maximize the probability sum over all augmented sequences of the correct labels. In Figure~\ref{fig:trellis_ori}, we demonstrate an output probability lattice of standard RNN-T model by following~\cite{graves2012sequence}. 
+The probability of  observing the first $u$ output sequence elements in the first $t$ transcription sequence is represented by node $(t, u)$.
+An upward pointing arrow leaving node $(t,u)$ represents $y(t,u)$, the probability of outputting an actual label; and a rightward pointing arrow represents $\O(t,u)$, the probability of outputting a blank at $(t,u)$. 
+Note that when outputting an actual label, $u$ would be incremented by one; and when a blank is emitted, $t$ is incremented by one.
+
+During inference, an RNN-T model emits at least one token per input frame, and produces a sequence of non-blank and blank symbols. Typical RNN-T output looks like this,
+\fbox{$\O$ $\O$ $\O$  $\O$  $\O$ $\O$ \_how  $\O$  $\O$  $\O$ $\O$ $\O$ \_are  $\O$  $\O$  $\O$ $\O$ \_you  $\O$  $\O$ $\O$ $\O$}
+where  $\O$ is the blank symbol. Those blank symbols are omitted in post-processing in order to generate the final ASR outputs. 
+
+\subsection{Multi-blank RNN-T}
+With the example given in the last section, we note that empirically, a typical RNN-T model generates  more blank symbols than non-blanks during inference, which means the model spends a lot of computation generating labels that are not going to be in the final outputs.
+In this work, we propose \emph{multi-blank} RNN-Ts, which not only use the standard blanks like standard RNN-T, but also
+introduces \emph{big blank} symbols. Those big blank symbols could be thought of as blank symbols with explicitly defined \emph{duration}s -- once emitted, the big blank advances the $t$ by more than one, e.g. two or three.
+%as indicated by \textcolor{green}{green} or \textcolor{blue}{blue} arcs in Figure~\ref{fig:trellis_our}. 
+A multi-blank model could use an arbitrary number of blanks with different durations, represented as a set $\mathcal{N}$ containing all
+possible blank durations. We require $1 \in \mathcal{N}$.
+Note, standard RNN-Ts could be seen as a special case of multi-blank RNN-Ts where $\mathcal{N} = \{1\}$.
+
+We compare the probability lattices of standard RNN-T and multi-blank RNN-T in Figures \ref{fig:trellis}.
+Figure~\ref{fig:trellis_ori} is similar to the original Figure from \cite{graves2012sequence}, which has only one standard blank symbol with duration 1 ($\mathcal{N}=\{1\}$);
+% $m=1$ represents standard blank and $\mathcal{N}=\{1\}$ indicates we only use standard blank as in Figure~\ref{fig:trellis_ori}.
+Figure~\ref{fig:trellis_our} uses  two big blanks with durations $m=2$ and $m=3$, thus $\mathcal{N}=\{1, 2, 3\}$. The transition arcs corresponding to big blanks are in colors {\color{our_green}green} and {\color{our_blue}blue}.
+
+
+% we report models with different numbers of big blanks as well as
+% different duration m values. When multiple big blanks are used,
+% we represent the corresponding durations of those big blanks
+% with comma-separated numbers, e.g. “2, 4, 8” means there are
+% three big blanks, with durations 2, 4, and 8 respectively. 
+
+
+% Although there is no constraint on the number of big blanks we can have in a model, for clarity in the presentation, in this section we assume there is only one big blank symbol that advances the time by $m$. 
+% \begin{figure}
+%     \centering
+%     \includegraphics[scale=0.21]{trellis_ori.png}
+%     \caption{Output Probability Lattice of an RNN-T Model with Multi Blanks. We base our example on Figure 1 from  \cite{graves2012sequence}}
+%     \label{fig:trellis_ori}
+% \end{figure}
+
+% \begin{figure}
+%     \centering
+%     \includegraphics[scale=0.21]{trellis_our.png}
+%     \caption{Output Probability Lattice of an RNN-T Model with Multi Blanks. We base our example on Figure 1 from  \cite{graves2012sequence}}
+%     \label{fig:trellis_ori}
+% \end{figure}
+
+\begin{figure}[tb]
+\begin{subfigure}[b]{0.98\linewidth}
+   \centering
+  \centerline{\includegraphics[scale=0.25]{trellis_ori_new.png}}
+%  \vspace{2.0cm}
+%   \centerline{without Multi Blank as in~\cite{graves2012sequence}}\medskip
+    \caption{\emph{Output probability lattice of standard RNN-T. The probability of observing the first $u$ output labels  in the first $t$  frames is represented by node $(t, u)$. An upward pointing arrow leaving node $(t,u)$ represents $y(t,u)$, the probability of outputting an actual label; and a rightward pointing arrow represents $\O(t,u)$, the probability of outputting a blank at $(t,u)$. } }
+    % as in~\cite{graves2012sequence}}
+  \label{fig:trellis_ori}
+\end{subfigure}
+%
+\begin{subfigure}[b]{0.98\linewidth}
+   \centering
+  \centerline{\includegraphics[scale=0.25]{trellis_our_new.png}}
+%  \vspace{1.5cm}
+  \caption{\emph{Output probability lattice with multi-blank RNNT. {\color{our_green} Green} arcs here denote big blanks with duration $2$, represented as $\O_2(t,u)$ and {\color{our_blue} blue}  denotes big blanks with duration $3$, represented as $\O_3(t,u)$. The dashed line is a possible path with the proposed method.}}
+  \label{fig:trellis_our}
+\end{subfigure}
+\caption{Output probability lattice of a standard RNN-T model as in~\cite{graves2012sequence} and of a multi-blank RNNT.
+% Note that when outputting an actual label, $u$ would be incremented by one; and when a blank is emitted, $t$ is incremented by one.
+}
+\label{fig:trellis}
+\end{figure}
+
+\subsection{Forward-backward algorithm}
+% With the multi-blank RNN-T, modifications are needed for the forward-backward algorithm.
+To enable multi-blank RNN-T, the forward-backward algorithm needs to be modified. We follow the notations of \cite{graves2012sequence} for describing the forward-backward algorithm. 
+With the standard RNN-T models, the forward weights ($\alpha$)
+and backward weights ($\beta$) are computed as
+\begin{equation}
+\begin{split}
+    \alpha(t,u)& = \alpha(t,u - 1)y(t,u - 1) + \alpha(t - 1,u)\O(t-1,u),\\
+% \end{equation}
+% % and
+% \begin{equation}
+    \beta(t, u)& = \beta(t, u + 1) y(t, u)+ \beta(t + 1, u)\O(t, u) .
+\end{split}
+\end{equation}
+For multi-blank RNN-Ts, with a predefined $\mathcal{N}$,
+% an extra term would be needed to add to the forward and backward weights corresponding to the big blank symbol.
+we have
+% \begin{equation*}
+% \begin{split}
+%     % \begin{aligned}
+%  \alpha(t, u)  = & \alpha(t - 1, u) \O(t-1, u) +  \alpha(t, u - 1) y(t, u - 1) \\
+%     & \ + \alpha(t - m, u) \O_{\text{multi}}(t-m, u),\\
+%     % \end{aligned}\\
+% % \end{equation*}
+% % % and
+% % \begin{equation*}
+%     % \begin{aligned}
+%     \beta(t, u) = & \beta(t + 1, u) \O(t, u) + \beta(t, u + 1) y(t, u) \\
+%     & \ + \beta(t + m, u) \O_{\text{multi}}(t+m, u),
+%     % \end{aligned}
+% \end{split}
+% \end{equation*}
+\begin{equation}
+\begin{split}
+    % \begin{aligned}
+ \alpha(t, u)=&  \alpha(t, u - 1) y(t, u - 1) + \sum_{m \in \mathcal{N}}\alpha(t-m, u) \O_{m}(t-m, u), \\
+    % \end{aligned}\\
+% \end{equation*}
+% % and
+% \begin{equation*}
+    % \begin{aligned}
+    \beta(t, u) = &\beta(t, u + 1) y(t, u) + \sum_{m \in \mathcal{N}} \beta(t + m, u) \O_m(t, u),\\
+    % \end{aligned}
+\end{split}
+\end{equation}
+where $\O_m(t,u)$ represent the probability of a big blank with duration $m$ at lattice location $(t,u)$.
+\footnote{
+We remind the readers that  like standard RNN-Ts, we need special attention to the boundary cases when $t<m$ for the forward weights or $t + m \geq T$ for the backward weights, where big blank transitions don't exist. In those cases, the big blank weight should be omitted.}
+
+% Also, our implementation adopts the \emph{function merging} method described in \cite{li2019improving}, so additional changes are required during the gradient computation of this loss. \footnote{Readers are referred to the source code at \url{nemo/collections/asr/parts/numba/RNN-T_loss/utils/cuda_utils/gpu_RNN-T_kernel.py} from the NeMo repository for details.}
+
+\subsection{Model inference}\label{inference}
+% When a multi-blank RNN-T model is used for inference, changes are required to fully take advantage of the big blanks. 
+% During decoding, when a big blank, with duration $m$, is emitted,  the decoding loop  increments $t$ (corresponding to encoder outputs) by exactly $m$.
+% This makes the model able to skip a lot of input frames and thus is computationally more efficient.
+In standard decoding algorithms for RNN-Ts, the emission of a blank symbol advances input by one frame.
+Naturally, for inference with multi-blank RNN-T models, we need to change the behavior of the decoding algorithm for big blank emissions.
+With the multi-blank models, when a big blank with duration $m$ is emitted, the decoding loop increments $t$  by exactly $m$.
+This allows the inference to skip  frames and thus become faster.
+
+
+\section{Logits Under-normalization}
+Since emissions of big blanks could bring speedup to inference, we want to prioritize emissions of big blanks.
+We propose a modified RNN-T loss function for this purpose.
+%modifying the normalization steps of logits before the loss computation.
+In standard RNN-Ts,
+the $y(t, u)$ and $\O(t, u)$ terms are probabilities of the correct label or blank emitted at  $(t, u)$ location in the probability lattice.
+This is typically implemented with a log\_softmax function call, so that the logits represent log probabilities
+% i.e. in PyTorch
+\footnote{Note this is just to better illustrate the method. In practice, we adopt the \emph{function merging} method from \cite{li2019improving} which  performs the normalization and summation together. We will release the code upon acceptance of this paper.}:
+\begin{equation}
+    \text{logits} =
+    % \text{torch.nn.log\_softmax(logits)}.
+    \text{log\_softmax}(y).
+\end{equation}
+Here we  \emph{under-normalize} the logits by adding an extra term.
+\begin{equation}\label{logits}
+\text{logits} = 
+% \text{torch.nn.log\_softmax(logits) - sigma},
+\text{log\_softmax}(y) - \sigma,
+\end{equation}
+where $\sigma$ is chosen to be 0.05 in our experiments. 
+%The logits are then treated as log-probabilities to compute the RNN-T loss.
+In the modified RNN-T computation, the weight of a complete path $\pi$ would be the sum of those under-normalized logits, computed as,
+\begin{equation}
+\text{weight}(\pi) = \log P(\pi) - \sigma \cdot |\pi|,
+\end{equation}
+where log P($\pi$) comes from log\_softmax($y$), and $|\pi|$ represents the number of emissions (total number of labels and any types of blanks) in the path $\pi$.
+Note that RNN-T loss requires summing over the weights of all paths\cite{graves2012sequence}. 
+%e.g. with the standard RNN-T loss,
+% \begin{equation*}
+%     \mathcal{L}_\text{RNN-T} = \log \sum_\text{path} P(\text{path}).
+% \end{equation*}
+ With the added terms, the loss does not sum over the probabilities \emph{uniformly}, but applies a weight depending on $|\pi|$, i.e.
+\begin{equation}
+\begin{split}
+    \mathcal{L}_\text{multi-blank RNN-T} &= \log \sum_\pi  \exp (\text{weight($\pi$)}) \\
+    & = \log \sum_\pi \frac{P(\pi)} {\exp(\sigma \cdot |\pi| )}.
+\end{split}
+\end{equation}
+The added weight penalizes longer paths, and therefore  would prioritize the emission of blanks with larger durations since they cover multiple frames and make the path shorter. 
+Note that under-normalization has no effect on the original RNN-T  since all paths are of the same length and thus penalized equally.
+
+% In our RNN-T training, logits computed in Equation \ref{logits} are treated as log probabilities in the RNN-T loss computation. Although they sum up to less than one, we could still interpret them as probabilities: for each frame, the model would reserve around 0.049 (computed as $1 - e^{-0.05}$) probability mass to ``unknown'', which does not take part in the RNN-T computation. By making the ``probabilities'' add up to less than one, 
+% during RNN-T training, the model  prioritizes shorter sequences, therefore prioritizing  emissions of big blanks over standard blanks\footnote{Readers could think of a simple case of two consecutive frames where the model has high confidence to output blanks; the model could either output one big blank, or two consecutive standard blanks. Since probabilities are under-normalized, outputting one big blank would result in better loss than two standard blanks.}. 
+
+
+% However, we notice that this modification of the inference algorithm is only necessary in order to speed up the decoding; an unmodified inference pipeline for standard RNN-T models still works for multi-blank RNN-T models, if we simply treat the multi-frame blanks as standard blank symbols, i.e. increment $t$ by one even if a multi-frame blank symbol is emitted. We will show more details regarding different types of decoding in Section \ref{experiments}.
+
+
+\section{Experiments}\label{experiments}
+%The proposed method does not depend on the architecture of the  encoder, the decoder, or the joint network. 
+%We evaluate our method with two types of baseline models -- a standard Conformer-RNN-T model with an LSTM decoder (represented as \emph{LSTM} below), and a Conformer-RNN-T model with a stateless decoder (represented as \emph{Stateless} below)  similar to that of \cite{prabhavalkar2021less}. 
+We evaluate our methods with a Conformer-RNN-T model with a stateless decoder. We find that the stateless-decoder models consistently outperform  LSTM-decoder models both in terms of accuracy and speed. We actually have done extensive experiments with RNN-Ts with standard LSTM-decoders as well and all our conclusions about the multi-blank methods still hold. 
+% We do not include them in the paper because of the limited space.
+
+Our model extracts acoustic features with frame-rate 10ms and window-size 25ms. The Conformer encoder has a convolution layer at the beginning of the network that performs subsampling on the input.
+The stateless decoders use the concatenation of  embeddings of the last two context words as the output. 
+The models use \emph{byte-pair encoding} \cite{sennrich2015neural} as the text representation, and vocabulary sizes are chosen to be 1024. 
+
+Although theoretically multi-blank RNN-T models require slightly increased computation during training, we observe negligible increases in training time compared to standard RNN-Ts.
+Therefore, for all datasets, we report WER and the decoding time in seconds 
+%\footnote{All reported time numbers are relative, which  use an internal unit that is in the same order of magnitude with a second.} 
+with non-batched greedy inference. We also include the relative speedup factor, represented in percentage, for different types of models compared to the corresponding baseline, which uses standard blank only with $\mathcal{N}=\{1\}$.
+%For multi-blank RNN-Ts, we report models with different numbers of big blanks as well as different duration values. 
+%We also experiment with using multiple big blanks with different durations. 
+% When multiple big blanks are used, we represent the corresponding durations of those big blanks with comma-separated numbers, e.g. ``2, 4, 8'' means there are three big blanks, with durations 2, 4, and 8 respectively.
+For all multi-blank experiments, we use $\sigma = 0.05$.
+% \footnote{
+We did minimal tuning with this parameter as our initial experiments indicate the results aren't sensitive to this value.
+% }.
+
+
+%The speedup
+%factor is computed as baseline-time / model-time - 1, represented in percentage. 
+%Note, the $m$ variable indicating how many frames the added blank symbol consumes could be made different in training and in inference, so we report experiments in different training and inference multi-frame conditions. 
+
+
+%[TODO add dataset info that could possibly help explain the diff of performance of english and german data. ]
+
+\subsection{Librispeech results}
+Our Librispeech models are trained with the full Librispeech dataset\cite{panayotov2015librispeech}, augmented 3-times using speed perturbation factors of 0.9x 1.0x, 1.1x. We use the \emph{conformer-rnnt-large} configuration in NeMo\footnote{See \url{examples/asr/conf/conformer/conformer_transducer_bpe.yaml} in NeMo repository.}, which has around 120M parameters. 
+To figure out the optimal subsampling rates, we first conduct experiments shown in Table \ref{lib_4x_8x}. We see that 4X subsampling gives the best accuracy,
+which we choose as our baseline for comparisons. Since our feature extraction uses a frame-rate of 10ms, this means the equivalent frame-rate used in each decoding step is 40ms.
+
+% \begin{figure}
+%     \centering
+%     \includegraphics[scale=0.28]{4816.png}
+%     \caption{WER and Inference time for Conformer-T with stateless decoder, under different sub-sampling rates. Inference time is computed on  Librispeech test-other with batch=1.}
+%     \label{lib_4x_8x}
+% \end{figure}
+
+\begin{table}
+    \centering
+    \begin{tabular}{ccc}
+        \toprule
+        \multirow{2}{*}{ subsampling} & \multicolumn{2}{c}{LS test-other} \\
+    \cmidrule(lr){2-3}     
+        &  WER ($\%$) & time (sec)\\
+     \midrule
+       4x   & 5.43  & 243\\
+     \midrule
+      8x   & 5.56 & 150\\
+      \midrule
+      16x & 6.38 & 106\\
+     \bottomrule
+    \end{tabular}
+    \caption{Baseline Conformer-RNNT (Large) with different sub-sampling rates in the encoder: WER ($\%$), and inference time (seconds) for Librispeech test-other. The inference time is computed on the whole test-other dataset with batch=1}
+    \label{lib_4x_8x}
+\end{table}
+
+% \begin{table}
+%     \centering
+%     \begin{tabular}{cccc}
+%         \toprule
+
+%      subsampling   & decoder  & test-other & time\\
+%      \midrule
+%      \multirow{2}{*}{4x}    & LSTM &  5.72 & 287\\
+%       & stateless   & 5.43  & 243\\
+%      \midrule
+%     \multirow{2}{*}{8x}  & LSTM &  5.83 & 178 \\
+%       & stateless   & 5.56 & 150\\
+%       \midrule
+%      \multirow{2}{*}{16x}  & LSTM & 6.76 & 122 \\
+%       & stateless & 6.38 & 106\\
+%      \bottomrule
+%     \end{tabular}
+%     \caption{WER of Different subsampling Rates for Librispeech}
+%     \label{lib_4x_8x}
+% \end{table}
+
+The comparisons with multi-blank methods are shown in Table \ref{fig:librispeech_stateless}. 
+From the results, 
+we see that in all cases, multi-blank RNN-T models achieve better WERs than standard RNN-T, and their inference is faster. 
+More speedup is seen with models using big blanks with larger durations. We see speedups over 90\% in two of our models that use big blanks with duration up to 8. 
+Here we  point out that our best models are able to achieve  inference speed between that of  8X  and 16X models in Figure~\ref{lib_4x_8x}. Moreover, unlike higher sub-sampling rates that hurt WERs, our methods give better WER numbers.
+% \footnote{
+Readers are reminded that for models with the 8X and 16X subsampling, the subsampling at the beginning of the encoder directly impacts the computational complexity of the later self-attention operations, hence part of the speedup actually comes from reduced encoder computation, while in our approach all speedup comes from the decoding loops.
+% }.
+% However, with sub-sampling techniques, the WER degrades, while our methods actually give better WER numbers
+
+% \begin{table}
+%     \centering
+%     \begin{tabular}{ ccccccc  }
+%     \toprule
+    
+%    \multirow{2}{*}{$\mathcal{N}$} & \multicolumn{3}{c}{test-clean}  & \multicolumn{3}{c}{test-other}  \\
+    
+%     \cmidrule(lr){2-4} \cmidrule(lr){5-7}
+    
+%        & WER & time  & speedup & WER & time &  speedup\\
+%     \midrule
+%  \multicolumn{1}{c}{baseline}  & 2.48 & 293 & - &  5.72 & 287 & - \\
+
+%      \{1, 2\}  & 2.47 & 204 & +43.6\% & 5.53 & 202 & +42.1\% \\
+
+% \bottomrule
+%     \end{tabular}
+%     \caption{Librispeech Results, LSTM Decoder}
+%     \label{fig:librispeech_lstm}
+% \end{table}
+
+
+% \begin{table}
+%     \centering
+%     \begin{tabular}{ cccc  }
+%     \toprule
+    
+%   \multirow{2}{*}{$\mathcal{N}$} & \multicolumn{3}{c}{test-other}  \\
+    
+%     \cmidrule(lr){2-4}
+    
+%       &  WER & time &  speedup\\
+%     \midrule
+%  \multicolumn{1}{c}{baseline}  &  5.72 & 287 & - \\
+
+%      \{1, 2\}  & 5.53 & 202 & +42.1\% \\
+
+% \bottomrule
+%     \end{tabular}
+%     \caption{Librispeech Results, LSTM Decoder}
+%     \label{fig:librispeech_lstm}
+% \end{table}
+
+% \begin{table}
+%     \centering
+%     \begin{tabular}{ cccccccc  }
+% %    \begin{tabular}{ p{0.5cm} c p{0.5cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c   }
+%     \toprule
+%      \multirow{2}{*}{$\mathcal{N}$} &  \multicolumn{3}{c}{test-clean}  & \multicolumn{3}{c}{test-other}  \\
+%     \cmidrule(lr){2-4} \cmidrule(lr){5-7}
+%        & WER & time  & speedup & WER & time &  speedup \\
+%     \midrule
+
+
+%      \multicolumn{1}{c}{baseline} & 2.26 & 248 & - &5.43 & 243 & - \\
+
+%     \{1, 2\} & 2.20 & 178 & +39.3\% & 5.24 & 174 & +39.7\% \\
+
+%     \{1, 3\}  & 2.32 & 155 & +60.0\% & 5.37 & 150 & +62.0\% \\
+%     \{1, 2, 4\} & 2.27 & 143 & +73.4\% & 5.32 & 140 & +73.6\% & \\
+%     \{1, 2, 4, 8\} & 2.25 & 127 & +95.3\% & 5.37 & 126 & +92.9\% \\
+%     \{1,2,3,4,5,6,7,8\}&  2.26 & 126 & +96.8\%  & 5.27 & 126 & +92.9\% \\
+
+%     \bottomrule
+%     \end{tabular}
+%     \caption{Librispeech  Results, Stateless Decoder}
+%     \label{fig:librispeech_stateless}
+% \end{table}
+
+
+\begin{table}
+    \centering
+    \begin{tabular}{ ccccc  }
+    \toprule
+     {multi-blank } &  \multicolumn{3}{c}{LS test-other}  \\
+    \cmidrule(lr){2-4} 
+     config $\mathcal{N}$  & WER ($\%$) & time (sec)  & speedup ($\%$) \\
+    \midrule
+
+
+     \multicolumn{1}{c}{
+     baseline}  &5.43 & 243 & - \\
+    \{1, 2\} &  5.24 & 174 & 39.7 \\
+    % \{1, 3\}  &  5.37 & 150 & +62.0\% \\
+    \{1, 2, 4\} &  5.32 & 140 & 73.6 & \\
+    \{1, 2, 4, 8\} &  5.37 & 126 & 92.9 \\
+    \{1,2,3,4,5,6,7,8\}&    5.27 & 126 & 92.9 \\
+
+    \bottomrule
+    \end{tabular}
+    \caption{Librispeech test-other: WER(\%), inference time (seconds), and relative speedup for RNN-T and different multi-blank configurations. Inference time is computed with batch=1. Multi-blank config $\mathcal{N}$ is the  set of blank durations the model supports, including the standard blank. For example, \{1,2,4\} means the model has a standard blank (with duration 1), and big blanks with durations 2 and 4.}
+    \label{fig:librispeech_stateless}
+\end{table}
+
+
+
+
+
+\subsection{German ASR results}
+
+For German experiments, we use our internal German dataset which consists of around 2070 hours of audio data and 813,000 utterances. 
+We use RNN-T models with stateless decoders identical to the Librispeech models reported in the previous section and report results on the German test sets in VoxPopuli \cite{wang2021voxpopuli} and Multilingual Librispeech (MLS) \cite{pratap2020mls}.
+The results are shown in Table \ref{fig:german_stateless_4x}.
+We see similar trends compared to Librispeech models. Multi-blank methods bring speedups up to around 90\% for the VoxPopuli dataset, and around 140\% on MLS, while improving ASR accuracy when $\mathcal{N} = \{1,2,4,8\}$. Consistent accuracy improvements and various speedup factors are seen with other configurations as well, with a maximum WER gain of over 1\% absolute, when $\mathcal{N} = \{1,2,4\}.$
+
+% We have a hypothesis explaining why we see relatively
+% smaller speedup for German datasets in Section \ref{smaller}.
+
+% \begin{table}
+%     \centering
+%     \begin{tabular}{ccccccc}
+%     \toprule
+%      \multirow{2}{*}{$m$} &  \multicolumn{3}{c}{Voxpopuli} & \multicolumn{3}{c}{MLS} \\
+%     \cmidrule(lr){2-4} \cmidrule(lr){5-7}
+%        & WER & time  & speedup & WER & time &  speedup\\
+%     \midrule
+%      \multicolumn{1}{c}{baseline} & 8.96 & 271 & - & 3.98 & 661 & - \\
+%       2 & 7.93 & 188 & +44.2\%  & 3.91 & 430 & +53.7\% \\
+
+% %\midrule
+%      % 2, 4 & 1, 1 & 7.86 &  272 & +\% & 3.94 & 662 & +\%  \\
+%      % 2, 4 & 1, 2 & 7.86 &  269 & +\% & 3.94 & 644 & +\% \\
+%      % 2, 4 & 2, 2 & 7.89 &  212 & +\% & 3.88 & 461 & +\% \\
+% %%%%%     2, 4 & 7.92 &  212 & +27.8\% & 3.89 & 445 & +48.5\% \\ 
+%     \bottomrule
+%     \end{tabular}
+%     \caption{German  Results, LSTM Decoder}
+%     \label{fig:german_lstm_4x}
+% \end{table}
+
+\begin{table}
+    \centering
+    \begin{tabular}{ccccccc}\toprule
+    {multi-blank }&  \multicolumn{3}{c}{German VoxPopuli} & \multicolumn{3}{c}{German MLS} \\
+    \cmidrule(lr){2-4} \cmidrule(lr){5-7}
+     config $\mathcal{N}$  & WER & time  & speedup ($\%$) & WER & time &  speedup ($\%$)\\
+    \midrule
+
+
+     \multicolumn{1}{c}{baseline} & 8.67 & 230 & - & 4.00 & 544 & - \\
+
+%\midrule
+     % 2, 4 & 1, 1 & 7.53 & 232 & \% & 3.94 & 554& \% \\
+     % 2, 4 & 1, 2 & 7.59 & 227 & \% & 3.94 & 528& \% \\
+     % 2, 4 & 2, 2 & 7.60 & 183 & \% & 3.92 & 396& \% \\
+%%%%%     2, 4 & 7.76 & 180 & +27.8\% & 3.93 & 380& +43.2\% \\   
+    \{1,2\}   & 8.27 & 166 & 38.6 & 3.86 & 363 & 49.9 \\
+%    \{1,3\}   & 8.15 & 144 & +59.7\% & 3.93 & 299 & +81.9\% \\
+    \{1,2,4\} & 7.66 & 134 & 71.6 & 3.96 & 272 & 100.0 \\
+    \{1,2,4,8\} & 7.89 & 122 & 88.5 & 3.89 & 227 & 139.6 \\
+    \{1,2,...,7,8\}& 7.82 & 121 & 90.1 &  3.85 & 230 & 136.5  \\
+    \bottomrule
+    \end{tabular}
+    \caption{German ASR results: WER(\%), inference time (seconds), and relative speedup for standard and different multi-blank RNN-Ts. Inference time is computed with batch=1. See Table \ref{fig:librispeech_stateless} for explanation  of multi-blank config $\mathcal{N}$.}
+    \label{fig:german_stateless_4x}
+\end{table}
+
+
+
+% We also report experiment results where we use two multi-blank symbols. In those experiments, we use the stateless label encoder model architecture and fix the training case so that one of them consumes 2 frames and the other consumes 4 frames. The results are shown in Table \ref{fig:german_2blank}
+
+% \begin{figure}[h]
+%     \centering
+%     \begin{tabular}{ccccc}\toprule
+%     decode $m_1, m_2$ & vox WER & time & mls WER & time \\
+%     \midrule
+%     1, 1 & 7.5 & 279 & 3.9 & 692 \\
+%     1, 2 & 7.6 & 271 & 3.9 & 661 \\
+%     2, 2 & 7.6 & 216 & 3.9 & 480 \\
+%     2, 3 & 7.7 & 214 & 3.9 & 476 \\
+%     2, 4 & 7.8 & 212 & 3.9 & 467 \\
+
+
+%     \bottomrule
+%     \end{tabular}
+%     \caption{German Voxpopuli/MLS Test Numbers, Two Added Blank Symbols}
+%     \label{fig:german_2blank}
+% \end{figure}
+
+
+
+
+\section{Analysis}
+
+\subsection{Impact of under-normalization for training}
+%In this Section, we show the impact of our proposed under-normalization method by comparing models trained with such method and without. 
+We  compare our Librispeech models' ASR accuracy and inference speed on test-other in Table \ref{under}, with our without logit under-normalization. We see that without under-normalization, smaller speedup could be seen, but models with big blanks of long durations don't necessarily run faster, e.g. \{1,2,4,8\} is actually slower than \{1,2,4\}. However, with under-normalization, much bigger speedup factors could be achieved without significant changes in ASR accuracy, and we consistently see bigger speedup when using big blanks with longer durations. 
+
+
+\begin{table}[t]
+    \centering
+    \begin{tabular}{ cccccccc  }
+%    \begin{tabular}{ p{0.5cm} c p{0.5cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c   }
+    \toprule
+     {multi-blank} &  \multicolumn{3}{c}{normal soft-max}  & \multicolumn{3}{c}{logits under-norm}  \\
+    \cmidrule(lr){2-4} \cmidrule(lr){5-7}
+     config $\mathcal{N}$  & WER & time  & speedup ($\%$)& WER & time &  speedup ($\%$)\\
+    \midrule
+    baseline & 5.43 & 243 & - \\
+    \{1,2\} & 5.37 & 212 & 14.6 & 5.24 & 174 & 39.7 \\
+    \{1,2,4\} & 5.21 & 195 & 24.6 & 5.32 & 140 & 73.6  \\
+    \{1,2,4,8\} & 5.28 & 196 & 24.0 & 5.37 & 126 & 92.9 \\
+    \{1,2,...,7,8\} & 5.18 & 192 & 26.6 & 5.27 & 126 & 92.9 & \\
+
+    \bottomrule
+    \end{tabular}
+    \caption{WER(\%), inference time(sec) and relative speedup(\%), on Librispeech test-other, with/without logits under-normalization during training. See Table \ref{fig:librispeech_stateless} for explanation  of multi-blank config $\mathcal{N}$.}
+    \label{under}
+\end{table}
+
+\subsection{Big blank emission frequency}
+We study the distribution of model emissions during  inference, shown in
+%The models are the same ones we used for Tables \ref{fig:librispeech_stateless} and \ref{under}.
+%The collected statistics are shown in 
+Figure~\ref{blank_frequency}, where we plot the number of emission counts for different types of symbols with different models on Librispeech test-other. The model is marked with ``UN'' when it is trained with logits under-normalization. 
+We can see without under-normalization, standard blank emission is suppressed a bit, but longer big blanks are not frequently emitted; however, when under-normalization is used during training, standard blank emissions are drastically decreased, and longer blanks appear significantly more frequently. Readers are reminded that the total length of the bars for each model represents the total number of emissions, which also equals the number of decoding steps during inference. This explains the more significant speedup for models trained with under-normalization.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[scale=0.3]{blank_freq_1011.png}
+    \caption{Emission distribution on Librispeech test-other. UN means the model is trained with logits under-normalization.}
+    \label{blank_frequency}
+\end{figure}
+
+\subsection{Efficient batched inference for multi-blank transducers}
+The multi-blank RNN-T method is ideal for on-device speech recognition in that it brings significant speedup in recognition speed as well as better accuracy. With that being said, the method also supports batched inference to run on the server side.
+In Section \ref{inference}, we mentioned that during inference, when a big blank symbol is emitted, it should advance the input $t$  by the duration corresponding to the big blank. This makes it non-trivial to implement exact batched inference for multi-blank RNN-Ts, since different utterances in the same batch might output blanks with different durations, making it hard to fully parallelize the computation.
+
+% Here we investigate the effects of running inference with the different $\mathcal{N}$ values used during training. 
+% Table~\ref{different_m_lib} shows the our Librispeech results with different $\mathcal{N}$ configurations. 
+% We could see that, the models still perform well when running inference with smaller big blank durations than in training, with minor perturbations in WERs.
+% %This shows, that the multi-blank RNN-T design, not only has the potential to improve inference speed but also acts as a regularizer and trains the model to be more robust. This also allows efficient batched-inference methods to be developed for multi-blank RNN-T models.
+% %\footnote{The difficulty with batched inference is when some utterances in the batch emit big blanks but others don't. With this observation, it is safe to advance one frame only even for utterances that emit big blanks, making better parallelization possible  in batched inference. We leave this as future work.}. 
+
+% \begin{table}
+%     \centering
+%     \begin{tabular}{ cccc  }
+% %    \begin{tabular}{ p{0.5cm} c p{0.5cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c   }
+%     \toprule
+%     $\mathcal{N}_\text{train}$ & $\mathcal{N}_\text{infer}$ & test-clean & test-other \\
+%     \midrule
+%     \multirow{2}{*}{\{1,2\}} & \{1,2\} & 2.20 & 5.24 \\
+%      & \{1,1\} & 2.17 & 5.10 \\
+%     \midrule
+% %     \multirow{2}{*}{\{1,3\}} & \{1,3\} & 2.32 & 5.37 \\
+% % %     & \{1,2\} & 2.28 & 5.35 \\
+% %      & \{1,1\} & 2.31 & 5.32 \\
+% %      \midrule
+%     \multirow{4}{*}{\{1,2,4,8\}} & \{1,2,4,8\} & 2.25 & 5.37 \\
+%      & \{1,2,4,4\} & 2.22 & 5.36 \\
+%      & \{1,2,2,2\} & 2.21 & 5.22 \\
+%  %    & \{1,1,1,2\} & 2.28 & 5.26 \\
+%      & \{1,1,1,1\} & 2.30 & 5.29 \\
+%     \bottomrule
+%     \end{tabular}
+%     \caption{Librispeech, inference with unmatched $\mathcal{N}_\text{train}$ and $\mathcal{N}_\text{infer}$. When we run inference with $\mathcal{N}_\text{train} = \{1, 2\}$ and $\mathcal{N}_\text{infer} = \{1, 1\}$, this means we take a model trained with $\mathcal{N} = \{1, 2\}$, and during inference when either a standard blank or a big blank with duration 2 is emitted, $t$ would be advanced  by 1.}
+%     \label{different_m_lib}
+% \end{table}
+
+% \begin{table}
+%     \centering
+%     \begin{tabular}{ cccc  }
+% %    \begin{tabular}{ p{0.5cm} c p{0.5cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c p{0.2cm} c   }
+%     \toprule
+%     $m_\text{train}$ & $m_\text{infer}$ & Voxpopuli & MLS \\
+%     \midrule
+%     \multirow{2}{*}{2} & 2 & 8.27 & 3.86 \\
+%      & 1 & 7.76 & 3.79 \\
+%     \midrule
+%     \multirow{3}{*}{3} & 3 & 8.15 & 3.93 \\
+%      & 2 & 7.66 & 3.87 \\
+%      & 1 & 7.36 & 3.88 \\
+%      \midrule
+%     \multirow{3}{*}{2,4} & 1,1 &  &  \\
+%      & 2,2 &  &  \\
+%      & 2,4 &  & \\     
+%     \bottomrule
+%     \end{tabular}
+%     \caption{German  Results, Stateless Decoder}
+%     \label{different_m_de}
+% \end{table}
+
+% This  allows us to implement an efficient batch-inference algorithm for multi-blank RNN-Ts.
+% However, the observation that $\mathcal{N}_\text{infer}$ does not necessarily have to equal $\mathcal{N}_\text{train}$ makes it possible to implement efficient but inexact batched inference algorithms for multi-blank RNN-Ts.
+We propose an \emph{inexact} batched inference method: if different utterances in a batch emit blanks of different durations, we increment $t$  by the minimum of those durations, e.g. if at frame $t$, different utterances emit blanks of durations 1, 2, and 4, then the $t$ is incremented by 1 for the next step in the batched decoding. This  allows for better parallelization for different utterances in the same batch.
+
+We run the proposed method for batched inference with multi-blank RNN-T models ($	\mathcal{N}=\{1,2,4,8\}$) on the Librispeech test-other dataset and report the results in Table \ref{batch}. 
+We see with the baseline, larger batch-sizes speed up model inference with diminishing returns, since large batch-sizes would result in more wasted computation due to padding; for multi-blank models, when the batch-size goes from 1 to 8, the improved parallelism brings speedup in inference; however, after that, it becomes slower again. Besides the padding factors, this is also because with larger batches, it is less likely for all utterances to emit big blanks of large durations, and thus it has to perform more decoding steps by picking the minimum of those durations.
+Also, we notice slight differences in WER with different batch-sizes. This is because this batched inference method is not equivalent to running utterances in a non-batched mode (hence the method is inexact), in that
+when a big blank is emitted for an utterance, the decoding process  might not advance the $t$ exactly according to the predicted duration, but pick a smaller duration instead, and this might result in  small perturbations in the ASR outputs.
+
+\begin{table}[]
+    \centering
+    \begin{tabular}{cccccc}
+    \toprule
+ \multirow{2}{*}{batch-size} & \multicolumn{2}{c}{baseline}  & \multicolumn{3}{c}{multi-blank} \\
+  \cmidrule(lr){2-3} \cmidrule(lr){4-6}
+         & WER(\%) & time (sec) & WER(\%) & time (sec) & speedup (\%)\\
+        \midrule
+        1  & 5.43 & 243 & 5.37 & 126 & 92.9  \\
+        2  & 5.43 & 169 & 5.40 & 90 & 87.8 \\
+        4  & 5.43 & 134 & 5.40 & 78 & 71.8 \\
+        8  & 5.43 & 114 & 5.37 & 77 & 48.1 \\
+        16 & 5.43 & 103 & 5.35 & 80 & 28.8 \\
+%        32 & 5.43 & 118 & 5.29 & 103 \\
+         \bottomrule
+    \end{tabular}
+    \caption{WER(\%) and inference time (sec) on Librispeech test-other with different batch-sizes. For multi-blank models, when different utterances in a batch emit blanks of different durations, $t$ is advanced by the minimum of those durations, making this an \emph{inexact} inference method, resulting in small differences in WERs. Speedup is computed relative to the baseline model with the same batch-size.}
+    \label{batch}
+\end{table}
+ 
+
+
+% \begin{figure}[h]
+%     \centering
+%     \includegraphics[scale=0.32]{de_blank_frequency.png}
+%     \caption{Emission Distribution of German Models. [TODO re-draw]}
+%     \label{de_blank_frequency}
+% \end{figure}
+
+
+% \begin{table}
+%     \centering
+%     \begin{tabular}{c c c c c}
+%     \toprule
+%         model & $m_\text{train}$ & $m_\text{infer}$ & blank & multi-frame blank \\
+%     \midrule
+%          & 2 & 2 & 74.6 & 23.5  \\ 
+%          & 3 & 2 & 73.6 & 9.8  \\
+%         RNN-T & 3 & 3 & 73.6 & 8.6  \\
+%          & 2,4 & 2,2 & 39.7 & 35.2, 4.2 \\
+%          & 2,4 & 2,4 & 40.5 & 34.8, 3.1 \\
+%     \midrule
+%          & 2 & 2 & 57.9 & 23.5 \\
+%          & 3 & 2 & 73.6 & 9.8 \\
+%         Stateless & 3 & 3 & 73.6 & 8.6 \\
+%          & 2,4 & 2,2 & 35.2 & 41.3,1.9 \\
+%          & 2,4 & 2,4 & 35.8 & 40.5,1.8 \\
+        
+        
+%     \bottomrule
+%     \end{tabular}
+%     \caption{Relative Frequency of Emitting  Blanks}
+%     \label{blank_frequency}
+% \end{table}
+
+%Explaining why models with 2 multi-frame blank symbols have better ASR accuracy is our ongoing work. 
+
+% \subsection{Blank emission consistency}
+% In this section, we investigate the multi-frame blank consistency of different models. For RNN-T models, we call an emission of a multi-frame blank of duration $m$ ``consistent'', if when we run standard decoding with the model, the model emits blank symbols for their subsequent $m - 1$ frames; otherwise, we call this emission inconsistent. We measure the consistency percentage of our models on the Librispeech test-other dataset, and report the results in Table \ref{consistency}. We can see that, all of the model achieve decent blank consistency, although the consistency \% never went above 85\% in any cases. We  conclude that,  based on the WER number reported in Table \ref{fig:librispeech_1blank}, even if the model
+% emits ``inconsistent'' big blanks, it does not necessarily impact the WER most of the time.
+
+% \begin{table}[]
+%     \centering
+%     \begin{tabular}{c cc}
+%     \toprule
+%         model & $m$ & consistency \% \\
+%         \midrule
+%         RNN-T & 2 & 68.9 \\
+%         stateless & 2 & 81.8 \\
+%         stateless & 3 & 78.2 \\
+%         RNN-T & 2,4 & 78.3 (2), 87.2 (4) \\
+%         stateless & 2,4 & 84.7 (2), 84.3 (4) \\
+%         \bottomrule
+%     \end{tabular}
+%     \caption{Multi-frame Blank Consistency \% on Librispeech Test-other}
+%     \label{consistency}
+% \end{table}
+
+% \subsection{Why we see less speedup for German ASR?}\label{smaller}
+% We observe that relative speedup with the multi-blank methods for German is smaller compared to our Librispeech models. As the  architectures are identical for those models, we investigate this in terms of the data itself. We report the number of words and total duration of our test datasets in Table \ref{datasets}.
+
+% \begin{table}[]
+%     \centering
+%     \begin{tabular}{c c c}
+%     \toprule
+%     \multicolumn{2}{c}{data}   & \#words per sec \\
+%     \midrule
+%      \multirow{2}{*}{Librispeech} & test-clean & 2.703 \\
+%       & test-other & 2.722 \\
+%       \midrule
+%      \multirow{2}{*}{German} & voxpopuli & 2.299 \\
+%      & mls & 2.366 \\
+%      \bottomrule
+%     \end{tabular}
+%     \caption{Number of words per seconds of different datasets}
+%     \label{datasets}
+% \end{table}
+
+% Note during inference, the model runs the encoder computation once per utterance, and then follows the decoding loop which iteratively generates output tokens. Table \ref{datasets} indicates that German has a smaller average number of words spoken per second. This means on average, there are fewer
+% decoding steps for German than Librispeech if we have same length of audio. Since our algorithm only improves the decoding steps, we see overall smaller speedup for German models with multi-blank methods than Librispeech models. This hypothesis is also corroborated by the fact that among voxpopuli and mls datasets, we see larger speedups for mls since it has a slightly larger speech rate than voxpopuli.
+
+% \subsection{Extreme subsampling Rates}
+% We run experiments to see if multi-blank RNN-T models work with extreme subsampling rates. We report experiments with subsampling-rate = 16x. For such a high subsampling rate, the models naturally would emit fewer blanks, let alone consecutive blanks, so we would expect to see less speedup effect of the model and only see the regularization effects.
+
+%\subsection{Relative speedup VS utterance length}
+
+\section{Conclusion and Future Work}
+In this paper, we propose \emph{multi-blank RNN-T models}, which include standard blanks and also \emph{big blanks}, whose emission consumes multiple frames.
+We show with multiple datasets in different languages that this design helps speed up the model inference and improves ASR accuracy.
+In order to prioritize the emission of big blanks, we proposed a special RNN-T training method, which performs under-normalization of the logits before RNN-T computation, and brings further speedup to inference.
+Our best models  bring between +90\% to +140\% relative speedup for inference on different datasets, while achieving better ASR accuracy. 
+%We also show that efficient batched inference could be performed with such models.
+For future work, we will work on implementing beam-search for multi-blank RNNTs as well as evaluating the models in streaming modes; we will also perform analysis to investigate exactly why multi-blank models give better WERs than standard RNNT models.
+% e.g. using variable-length blanks, etc. We will work on improving our batched-inference algorithm as well.
+
+\bibliography{refs}
+\end{document}
+
+

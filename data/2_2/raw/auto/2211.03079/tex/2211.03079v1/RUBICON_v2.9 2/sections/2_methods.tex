@@ -1,0 +1,203 @@
+% \begin{methods}
+\clearpage
+
+
+% \section{Material \& Methods} \label{sec:methods}
+
+% \subsection{Overview}
+% \mech is a hardware-optimized basecaller to perform fast and accurate basecalling. We develop \mech by using two machine learning techniques. First, we develop quantization-aware basecaller architecture search (\nas) while taking into account direct hardware metrics, such as latency. \nas-designed basecallers outperform manually-designed basecallers because \nas performs a joint search for optimal neural network architecture and  quantization for neural network weights and activations to find a basecaller architecture that provides the highest accuracy at low latency.  The output of \nas is a hardware-optimized basecaller that significantly outperforms manually designed basecallers.  Second, we develop \strim that removes skip connections present in modern basecallers to achieve substantial resource and storage reductions while incurring no loss in accuracy. %Unlike all the previous basecallers, we remove skip connections to reduce hardware storage and resource requirements.  %Third, we apply pruning to remove network connections that are considered unimportant to keep the network performance unchanged. We apply three different pruning techniques, including unstructured, structured, and group pruning. 
+% \clearpage
+\subsection{\framework}
+\gsss{Figure~\ref{fig:framework} shows the key components of \framework. It consists
+of five modules. \nas (\circled{1}) and \strim (\circled{2}) are two novel  techniques that are specifically designed for specializing and optimizing machine learning-based basecallers.  \framework provides support for \texttt{Pruning} (\circled{3}), which is a popular model compression technique where we discard network connections that are unimportant to neural network performance~\cite{lecun1989optimal,han2015deep,han2015learning,frankle2018lottery}. We integrate \texttt{Training} (\circled{4}) and \texttt{Basecalling} (\circled{5}) modules from the official ONT basecalling pipeline~\cite{bonito}. For both the \texttt{Pruning} and \texttt{Training} modules, we provide the capability to use knowledge distillation~\cite{bucilua2006model,hinton2015distilling} for faster convergence and to increase the accuracy of the target neural network.} %We perform hardware-neural co-design to develop \mech.
+
+\begin{figure*}[h]
+  \centering
+  \includegraphics[width=\linewidth]{images/framework2.pdf}
+  \vspace{-24pt}
+  \caption{Overview of \framework framework. }
+  \label{fig:framework}
+%   \vspace{-12pt}
+\end{figure*}
+
+\subsubsection{Quantization-Aware Basecaller Architecture Search (\nas)}
+\hfill\\
+\nas automates the process of finding hardware-aware genomics basecaller.  Figure~\ref{fig:nas} shows the workflow overview of \nas. The raw sequencing data \circled{1} is provided as input to \nas, which can be obtained through sequencing a new sample, downloading from publicly-available databases, or computer simulation. \nas uses such a set of data as training ($\mathbb{D}_{train}$) and evaluation set ($\mathbb{D}_{eval}$) while automatically designing a basecaller. To achieve a basecaller design that provides high throughput, we add hardware constraints \circled{2} to \nas. % we add basecaller throughput using different neural network architectures is essential for model design and deployment.
+ A hardware-aware basecaller can better use the underlying hardware features and greatly accelerate inference speed. As a result, it improves the overall basecalling efficiency.   
+
+\begin{figure*}[h]
+  \centering
+  \includegraphics[width=\linewidth]{images/NAS_2.pdf}
+  \vspace{-10pt}
+  \caption{Overview of \nas. \nas evaluates a different set of candidate operations for convolution (\texttt{conv}) and quantization bits. In the figure, we show different options for kernel size (\texttt{KS}) (e.g., 3, 5, 9, etc.) and quantization bits  (4-b, 8-b, and 16-b) for each network layer. The identity operator removes a layer to get a shallower network. }
+  \label{fig:nas}
+  \vspace{12pt}
+\end{figure*}
+
+\nas \circled{3} leverages automated machine learning (AutoML) algorithms~\cite{zoph2016neural} to design an efficient hardware basecaller by exploring and evaluating different neural network architectures from a pre-defined search space. The search space $\mathcal{M}$ consists of the possible neural network architectural options while $\mathbb{M}$ $\in$ $\mathcal{M}$  is a sub-architecture. The goal is to find an optimal sub-architecture $\mathbb{M}^\ast$ using Equation~\ref{eq:nas_train}  that minimizes the training loss ($\mathcal{L}_{train}$) while going over $\mathbb{D}_{train}$ and gives maximum accuracy with the  $\mathbb{D}_{eval}$.
+\begin{equation}
+ \mathbb{M}^\ast=\argmax_{\mathbb{M} \in \mathcal{M}}  Eval (\mathbb{M}, \argmin \mathcal{L}_{train} (w^\ast(\mathbb{M}), \mathbb{D}_{train}); \mathbb{D}_{eval})\label{eq:nas_train}
+\end{equation}
+
+where $w^\ast(\mathbb{M})$ represent the weights of sub-architecture $\mathbb{M}^\ast$.
+
+
+
+
+
+% Neural architecture search (NAS) allows designing efficient neural networks by automatically exploring the huge design-space of different architectural options.  NAS algorithms explore and evaluate different neural network architectures from a large search space.  Modern techniques, referred to differentiable NAS (DNAS),  Quantization is the reduction of the bit precision at which calculations are performed in a NN to reduce the memory and computational complexity~\citep{hawks2021ps}. Quantization-aware NAS, accounting for the bit precision during neural architecture search, allows to efficiently explore the different precision options. 
+
+\head{\nas Search Space} We define the search space $\mathcal{M}$ as sufficiently large to enable a powerful neural architecture search.  A larger space enables the search algorithm to cover more architectures so that the chance of finding a powerful architecture is increased. However, a larger search space makes the search algorithm more difficult to converge. %Therefore, we perform a sensitivity study of basecalling to different neural network components to determine the range of architecture searches. %We provide our sensitivity analysis results in supplementary section.  
+
+
+Our model search space has sequentially connected blocks, where each block receives input from its direct previous block.  We formulate the NAS problem for hardware-aware genomics basecaller as finding: (a) the computational operations in each basic block of a basecaller, including operations in a skip connection block, and (b) 
+quantization bit-width for weights and activations for each neural network layer to perform low precision computation. Quantization is the reduction of the bit-width precision at which calculations are performed in a neural network to reduce memory and computational complexity. Adding quantization exploration dramatically increases the model search space ($\sim$6.72$\times$10$^{20}$ more viable options in our search space). However, performing a joint search for computational blocks and quantization bits is crucial because: (1) optimizing these two components in separate stages could lead to sub-optimal results as the best network architecture for the full-precision model is not necessarily the optimal one after quantization, and (2) independent exploration would also require considerable search time and energy consumption because of many viable design options~\cite{ren2021comprehensive}.  Therefore, \nas searches for both the computational operations present in each basic block of a basecaller and the quantization bits used by these computational operations.  
+
+
+%  Changeable parameters include the number channels, the number of kernels, block removal, precision bit-width for both weights and activations (factor 8 for hardware acceleration), and the number of times a block is repeated. In total, during the NAS search, we explore 6 Million neural network options.
+
+% \head{Importance for Hardware Acceleration} We perform a hardware-neural co-design, since we use latency as the direct hardware metric. NAS allows us to automatically explore the complete design space of architectural options for basecalling. Adding the precision bit-width for both weights and activations (i.e., quantinzation) into the search space, makes NAS specialize basecalling to low precision computation, rather than traditional way of using same 32-bit precision for all the layers present in a basecaller.
+
+
+
+\head{\nas Seach Algorithm}  \nas evaluates different neural network architectures using differentiable neural architecture search (DNAS)~\cite{liu2018darts,luo2018neural,xie2021weight}. DNAS follows a weight-sharing approach of reusing weights of previously optimized architectures from the neural architecture search space. For example, sub-architecture $\mathbb{M}_1$ has only one additional layer than sub-architecture $\mathbb{M}_2$. In such a scenario, $\mathbb{M}_1$  can use most weights from $\mathbb{M}_2$. Therefore, the search procedure gets accelerated in DNAS compared to training each sub-architecture individually.
+
+DNAS formulates the entire search space as a super-network and distills a target network from this super-network. Traditional NAS approaches~\cite{zoph2016neural} often sample many different architectures from the search space and train each architecture from scratch to validate its performance. Such an approach requires heavy computational resources that could lead to thousands of GPU hours of overhead. One way to overcome this issue is to use NAS with heuristic-based methods~\cite{real2017large,xie2017genetic}, such as genetic algorithms that select individual architectures from the current \emph{population} to be \emph{parents} and uses them to produce the \emph{children} for the next generation. However, such methods still suffer from the problem of retraining each sample architecture from scratch.  Therefore, DNAS provides an efficient solution by sharing computation among different architectures, as many of them have similar properties.
+
+In \nas, we construct an over-parameterized super-network with all possible candidate options. The super-network shares weights among sub-architecture.  During the search phase, \nas searches for the right: (a) the architectural parameter $\alpha$: likelihood that an operator will be preserved in the final architecture; and (b) the network weights $w$: convolution kernel and batch norm coefficients. We use ProxylessNas~\cite{cai2018proxylessnas}  to binarize architectural parameter (i.e., $\alpha \in$ \{0,1\}) to reduce  memory consumption during the search phase. At the end of the search phase, the operators with the highest architectural weight are preserved, while others are eliminated. Since the NAS search procedure is focused on optimizing the super-network, the final sub-network architecture $\mathbb{M}^\ast$, with all the preserved operators, is retrained to convergence to fully optimize its network weights. 
+
+\head{Quantization-Aware Hardware Metric} Current state-of-the-art basecallers~\cite{wick2019performance,neumann2022rodan,konishi2021halcyon,xu2021fast,lou2020helix,perevsini2021nanopore,pages2022comprehensive,ambernas_zhang2021automated} are hardware-agnostic. They only focus on improving the accuracy without paying attention to its inference efficiency. Therefore, these basecallers are over-provisioned with a large number of parameters and model size (see Section~\ref{suppsec:overprovision}).  We overcome this inefficiency in \nas by adding hardware constraints, in terms of inference latency, to the \nas search phase. Thus, \nas aims to find an efficient neural network architecture for basecalling that is also optimized for hardware implementation. During the search process, \nas sequentially selects a sub-network from the super-network. The expected latency of the sub-network is the sum of the latencies of each operation in the network. Before the start of the \nas search phase, we profile the latencies of operations present in the search space to build a latency estimator. We also incorporate the latency while using different quantization bit-widths for the weights and activation in our latency estimator.  This latency estimator is utilized to guide the \nas search process.  
+
+\nas's objective function ($\mathcal{L}_{\nas}$) minimizes a joint cross-entropy error to: (a) provide better basecalling accuracy by minimizing the training loss ($\mathcal{L}_{train}$) while going over $\mathbb{D}_{train}$, and (b) minimize a regularization term ($\mathcal{L}_{reg}$) to find a sub-network $\mathbb{M}$ with inference latency ($\mathbb{E}_{\mathbb{M}}$) that satisfies our inference latency constraints.  We add  latency constraints by using a target latency parameter ($\mathbb{E}_{tar}$) to the regularization term $\mathcal{L}_{reg}$ to guide the search process. For example, in case if we want a small model, then we can provide a higher $\mathbb{E}_{tar}$ value, or vice versa.
+
+% by penalizing networks that are too slow/fast. 
+
+
+
+%Past works, build latency models for different hardware devices (CPU, GPU, FPGA, etc.), however, in this work we use a latency predictor for one device that can serve as a proxy for other hardware devices.
+
+
+
+\begin{align*}
+\mathcal{L}_{\nas}=\mathcal{L}_{train}+\lambda\mathcal{L}_{reg}\\
+\mathcal{L}_{reg}=(\mathbb{E}_{\mathbb{M}}-\mathbb{E}_{tar})/\mathbb{E}_{tar}
+\end{align*}
+
+\noindent where $\lambda$ is a parameter to control the tradeoff between the basecalling accuracy and the model latency. 
+
+
+
+\subsubsection{\strim: Skip Connection Removal by Teaching}
+\hfill\\
+Deep neural networks often rely on skip connections or residual connections to improve training convergence~\cite{szegedy2017inception}. Skip connections help mitigate the
+vanishing gradient problem~\cite{hochreiter1998vanishing} that occurs during the training stage. As a neural network trains under stochastic gradient descent (SGD)~\cite{amari1993backpropagation}, it
+adjusts its trainable parameters (e.g., weights) via backpropagation~\cite{amari1993backpropagation}. Backpropagation passes the partial computations of one layer’s
+gradient back to the previous layer, repeating this process for all layers via the chain rule~\cite{werbos1990backpropagation}. However, as more layers are added to a neural model, the partial gradient computation may lead to extremely small (i.e., \emph{vanishing}) values for the layers far back in the backpropagation path, preventing a deep neural model from converging.
+Skip connections address this issue by connecting one layer’s output to a non-consecutive layer’s input, providing a direct path for propagating the error through the layers so that the gradient no longer vanishes.  In the forward path, skip connections provide an
+identity mapping of their input to their output, allowing deep neural networks to overcome the saturation problem (insignificant increase in accuracy while increasing the model's size and layers)~\cite{szegedy2017inception}.
+
+
+
+
+Similarly, deep learning-based basecallers~\cite{wick2019performance,neumann2022rodan,konishi2021halcyon,xu2021fast,lou2020helix,perevsini2021nanopore,pages2022comprehensive,ambernas_zhang2021automated} incorporate skip connections to help mitigate the vanishing gradient and saturation problems. 
+%when training deep neural networks and . During neural network training, these connections provide a direct path for propagating the error through the layers and dealing with the vanishing gradient problem, allowing deep networks to learn properly and converge during training. In the forward path, skip connections provide an identity mapping of their input to their output, which is essential for avoiding saturation in deep neural networks training.
+\gss{However, adding skip connections introduce the following three issues for hardware acceleration. First, skip connections increases the data-lifetime. The layers whose activations are reused in subsequent layers must wait for this activation reuse (or buffer the activations in memory) before accepting new input and continuing to compute.  This leads to high resource and storage requirements due to data duplication. Second, they introduce irregularity in neural network architecture as these connections span across non-adjacent layers.  Third, skip connections require additional computation to adjust the channel size to match the channel size at the non-consecutive layer's input. Thus, increasing model parameters and model size. Therefore, networks without skip connections have more regular topologies that translate well to hardware acceleration.
+To this end, we propose \strim, a first skip connection remover for basecallers. 
+% Therefore, networks without skip connections are less accurate but have more regular topologies that translate well to hardware acceleration. 
+
+
+% However, skip connections introduce irregularity in neural architectures, which
+% generally reduces hardware efficiency. %An important consideration when deploying neural networks in resource-constrained environments. 
+% On the one hand, networks without skip connections are less accurate but have more regular topologies that translate well to hardware acceleration. Their stacks of convolutional layers all process data whose lifetimes last only one layer, so only simple buffering is required. On the other hand, skip connections increase the neural model's accuracy but have an irregular design that is ill-suited for hardware acceleration. Since skip connections span multiple layers, they increase the lifetime of their input activations, which increases memory utilization and bandwidth requirements.
+ 
+
+% However, these skip connections create a non-trivial issue for efficient hardware implementations. These skip connections increase the data lifetime; the layers whose activations are reused in subsequent layers must wait for this activation reuse (or buffer the activations elsewhere) before accepting new input and continuing to compute. This leads to high resource and storage requirements due to data deduplication. Therefore, it is crucial to remove skip connections for an efficient hardware basecaller.
+
+ \strim performs a gradual skip removal process with knowledge distillation (KD)~\cite{bucilua2006model,hinton2015distilling}. KD is a model compression technique where a shallower model (\textit{student}) learns to mimic a pre-trained bigger model (\textit{teacher}) by transferring learned knowledge and label representation from the teacher to the student. 
+% During KD, the knowledge is transferred by minimizing a loss function ($\mathcal{L}_{S}$) where the student network learns to replicate the teacher's outputs.
+As shown in Figure~\ref{fig:skiptrim}, \strim starts with a pretrained over-parameterized model as the teacher, which is not updated during the training of the student network.  We use our final \nas model as the student network. We achieve skip removal by letting the teacher teach the student to perform well on basecalling.  At the start of every training epoch, \strim removes a skip connection from a block, starting from the input side, while performing KD. This is done until all skip connections are removed from the student network.  \strim gets the best of both worlds: a highly accurate and topologically regular neural network without skip connections.
+
+
+During the \strim, we perform a forward pass of both the student and the teacher model, while we perform a backward pass only for the student model to update its weights. The loss to update the student network's weight during the backward pass ($\mathcal{L}_{\strim}$) is calculated with Equation~\ref{eqn:loss_skip_final}, where we use a weighing of the actual student loss ($\mathcal{L}_{S}$) and distillation loss ($\mathcal{L}_{D}$) using an alpha ($\alpha$) hyper-parameter.  The student and the teacher model compute probabilities $f_{T}$ and $f_{S}$ for output labels (i.e., nucleotides A, C, G, T) in the forward pass, respectively.  We use cross entropy ($\mathcal{L}_{CR}$) in the probability distributions to calculate the distillation loss ($\mathcal{L}_{D}$) as in Equation~\ref{eqn:loss_skip_distill}. The temperature ($\tau$) variable is used for \emph{softening} the probability distributions, i.e., it  controls the weight of knowledge from the teacher network for a student network to absorb. As we raise the $\tau$, the resulting soft label probability distribution becomes richer in information. 
+}
+\begin{align}
+\mathcal{L}_{\strim}=\alpha\mathcal{L}_{S}-(1-\alpha)\mathcal{L}_{D} \label{eqn:loss_skip_final}\\
+where \mathcal{L}_{D}= \mathcal{L}_{CR}(f_{T}/\tau,f_{S}/\tau)\label{eqn:loss_skip_distill}
+\end{align} 
+
+\begin{figure*}[h]
+  \centering
+  \includegraphics[width=0.9\linewidth]{images/skip_removal2.pdf}
+%   \vspace{-20pt}
+  \caption{Overview of \strim process for three epochs. We start with a large, overprovisioned floating-point precision model as the teacher network and our \nas mixed-precision model as the student network. During the training, \strim removes a skip connection from the student network every \texttt{n} epoch, starting with the first skip connection encountered in the network from the input.}
+  \label{fig:skiptrim}
+%   \vspace{-12pt}
+\end{figure*}
+ 
+
+% \head{Importance for Hardware Acceleration} Although skip connections make it easier to train deep neural networks, they add complexity to neural network hardware implementations. Realizing one skip connection requires an extra addition and one optional scaling stage (implemented as a convolutional layer or padding) plus memory for buffering its data.
+
+% 2.1 Overview: goal and each NAS, pruning, skip removal
+
+% (2.2 background for each step/ under each subsection) 
+
+% 2.3 Deciding the order
+
+% 2.4 NAS (back, DSE, exploiting for acceleration: benefits)
+
+% 2.5. Pruning  (back, DSE, exploiting for acceleration:benefits)
+
+% 2.6 Skip removal  (back, DSE, exploiting for acceleration:benefits)
+
+% Figure~2\vphantom{\ref{fig:02}} 
+
+
+
+
+
+\subsubsection{Pruning: Pushing the Limits of a Basecaller}
+\hfill\\
+ Pruning is a model compression technique where we discard network connections that are unimportant to network performance without affecting the inference accuracy~\cite{lecun1989optimal,han2015deep,han2015learning,frankle2018lottery}. In a neural network, weights very close to zero contribute very little to the model's inference. Performing convolution on such weights is equivalent to performing multiplication with zero~\cite{kang2019accelerator}. Therefore, removing such weights could reduce redundant operations, in turn providing higher throughput and lower memory footprint both during the training and inference phase of a neural network.  %To further optimize our basecaller for computation and resources, we use neural network pruning to  remove unimportant network weights.
+
+Figure~\ref{fig:pruning} shows two different pruning techniques that we use to evaluate the limits of a basecaller: (a) unstructured pruning, and (b) structured pruning. Unstructured or element pruning is a fine-grain way of pruning individual weights in a neural network without applying any structural constraints.  This approach leads to the highest model compression~\cite{gale2019state}. However, this method presents a major problem that the non-pruned weights have a very sparse structure that is unsuitable for acceleration on any hardware platform.  Therefore, unstructured pruning does not improve the actual inference run-time performance of a network.
+
+\begin{figure*}[h]
+  \centering
+  \includegraphics[width=0.7\linewidth]{images/pruning3_only.pdf}
+%   \vspace{-20pt}
+  \caption{Two different pruning techniques applied to 1-dimensional convolution.}
+  \label{fig:pruning}
+%   \vspace{-12pt}
+\end{figure*}
+
+A structured way of pruning weights from a neural network is more amenable to hardware acceleration. In structure pruning, we remove a larger set of weights while maintaining a dense structure of the model~\cite{kruschke1991benefits, liu2018rethinking}. Hence, this leads to a network with fewer parameters that require not only fewer computations but also less memory overhead during the runtime by generating lighter intermediate representation. However, structured pruning dramatically affects the structure of subsequent layers present after the pruned layer. % and the overall model accuracy. %There are two different ways to apply structured pruning in terms of the coarseness of pruning: (1) group pruning (\gp): less coarse, and (2) channel pruning (\cp): more coarse. 
+Therefore, structured pruning is a coarse-grain pruning method that can be drastic to model accuracy. 
+
+
+% Therefore, not only are such networks lighter to store, due to fewer parameters, but also they require less computations and generate lighter intermediate representations, hence needing less memory during runtime. 
+% \gp removes weights in a pattern that allows to skip convolution operations for a group of weights in a channel, whereas \cp removes weights in a complete channel that dramatically affects the subsequent layer and the overall model accuracy. %Group pruning and channel pruning are 
+% The benefit of \gp is that it allows us to provide pruning constraints to perform hardware-aware pruning that can be adjusted based on the underneath hardware architecture. By aligning the group to the operating boundary of a hardware's processing element, we can efficiently utilize internal buffers and multipliers. The group determines the number of weights and activations fetched to match the number of multipliers on the hardware. By using such a pruning approach, we can still achieve a higher pruning ratio with a reduction in processing and memory demands without drastically affecting the model accuracy.
+
+
+%Unstructured pruning lead to irregular patterns in the remaining non-zero weights, leading to sparse model structure. Such models can reach high pruning ratios but are inefficient to process on hardware because of non-uniform distribution between the activations and weights. On the other hand, group and channel pruning are structured pruning that lead to dense models. These pruning techniques retain regular structure of the model that are efficient to process on the hardware. 
+
+% The group pruning is applied to a weight group aligned with the operating boundary of a hardware's processing element, leading to efficient utilization of internal buffers and multipliers. 
+
+
+% % \head{Importance for Hardware Acceleration}
+% We apply pruning for two reasons. First, to further optimize our basecaller for hardware computation and resources by  removing unimportant network weights. Second, to analyze if NAS was able to find an optimal architecture.
+
+
+\subsubsection{\mech Architecture}
+\hfill\\
+Figure~\ref{fig:rubicon} shows the architecture of \mech. We develop \mech using \nas and \strim. The \mech architecture is composed of 28 quantized convolution blocks containing $\sim$3.3 million model parameters. Each block consists of  quantized grouped 1-dimensional convolution and quantized pointwise 1-dimensional convolution where every layer is quantized to a different domain. The convolution operation is followed by batch normalization (Batch Norm)~\cite{ioffe2015batch} and quantized rectified linear unit (ReLU)~\cite{agarap2018deep} activation function. The final output is passed through a connectionist temporal classification (CTC)~\cite{graves2006connectionist} layer to produce the decoded sequence of nucleotides (A, C, G, T). CTC is used to provide the correct alignment between the input and the output sequence.  Formally,  in a learning task, $\mathcal{X}$ represents feature space with label $\mathcal{Y}$, where a machine learning model is responsible for estimating a function $f$: $\mathcal{X} \to \mathcal{Y}$.  \mech  first splits a long read in electrical-signal format (e.g., millions of signals) into multiple smaller chunks (e.g., thousands of signals per chunk) and then basecalls these chunks.  \mech uses the input signal (or squiggle) as $\mathcal{X}$ to predict nucleotides as label $\mathcal{Y}$. The CTC layer assigns a probability for of all possible labels in  $\mathcal{Y}$ given an $\mathcal{X}$ at each time-step. The nucleotide with the highest probability is selected as the final output.
+
+\begin{figure}[h]
+  \centering
+%   \includesvg{images/rubicon.svg}
+  \includegraphics[width=0.5\linewidth]{images/rubicon_4.pdf}
+%   \vspace{-20pt}
+  \caption{Overview of \mech architecture. The normalized input signal is passed through a succession of quantized convolution blocks. Each block is composed of several processing steps (convolution, batch normalization, and activation). We represent the quantization as a tuple $<$weight, activation$>$. Initial layers use a higher precision for weights and activation, while the final layers use a lower precision. The final output is passed through a connectionist temporal classification (CTC) to produce the decoded sequence of nucleotides.}
+  \label{fig:rubicon}
+%   \vspace{-12pt}
+\end{figure}

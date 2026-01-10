@@ -1,0 +1,84 @@
+\section{Method}
+\subsection{Problem Formulation}
+A well-calibrated model is expected to output prediction confidence (e.g., the highest probability after softmax activation) comparable to or aligned with its task accuracy (i.e., empirical likelihood). For example, given 100 examples with the prediction confidence of 0.8 (or 80\%), we expect that 80 examples will be correctly classified. Following~\citet{icml17}, we estimate the calibration error by empirical approximations. Specifically, we partition all examples into $K$ bins of equal size according to their prediction confidences. Formally, for any $p\in[\ell_k,u_k)$, we define the empirical calibration error as:
+\begin{equation}
+\hat{\mathcal{E}}_k=\frac{1}{|\mathcal{B}_k|}\Big|\sum_{i\in\mathcal{B}_k}\big[\mathbbm{1}(\hat{y}_i=y_i)-\hat{p}_i\big]\Big|,
+\end{equation}
+where $y_i$, $\hat{y}_i$ and $\hat{p}_i$ are the true label, predicted label and confidence for $i$-th example, and $\mathcal{B}_k$ denotes the bin with prediction confidences bounded between $\ell_k$ and $u_k$.
+To evaluate the calibration error of classifiers, we further adopt a weighted average of the calibration errors of all bins as the Expected Calibration Error (ECE)~\citep{DBLP:conf/aaai/NaeiniCH15}:
+\begin{align}
+    \textrm{ECE} =\sum_{k=1}^K\frac{|\mathcal{B}_k|}{n} \hat{\mathcal{E}}_{k},
+    \label{eq:ece}
+\end{align}
+where $n$ is the example number and lower is better.
+Note that the calibration goal is to minimize the calibration error without significantly sacrificing prediction accuracy. 
+
+
+\subsection{Our Approach}
+
+Generally, text classification models are optimized by Maximum Likelihood Estimation (MLE), which minimizes the cross-entropy loss between the predicted and actual probability over $k$ different classes.
+To minimize the calibration error, we add a regularization term to the original cross-entropy loss as a multi-task setup.
+
+Our intuition is that if the error of the model on example $i$ is more significant than its error on example $j$ (i.e., example $i$ is considered more difficult for the classifier), then the magnitude of attributions on example $i$ should not be greater than the magnitude of attributions on example $j$. Moreover, we penalize the magnitude of attributions with the model confidence~\cite{DBLP:conf/acl/XinTYL20}, as the high error examples also should not have high confidence. Compared to the prior post-calibration methods (e.g., temperature scaling learns a single parameter with a validation set to rescale all the logits), our method is more flexible and sufficient to calibrate the model during training.
+
+% The magnitude of attributions is gathered by  $\ell_{2}$ normalization.
+Formally, given a training set $\mathcal{D} =$ $\{(\boldsymbol{x}_{1},y_{1})$$,\cdots,$$(\boldsymbol{x}_{n},y_{n})\}$ where $\boldsymbol{x}_{i}$ is the embeddings of input tokens and $y_{i}$ is the one-hot vector corresponding to its true label, an attribution of the golden label for input $\boldsymbol{x}_i$ is a vector $\boldsymbol{
+a}_i = (a_{i1},\cdots,a_{il})$, and $a_{ij}$ is defined as the attribution of $x_{ij}$ ($l$ is the length). Here, attention scores are taken as the self-attention weights induced from the start index to all other indices in the penultimate layer of the model; this excludes weights associated with any special tokens added. Then, the token attribution $a_{ij}$ is the normalized attention score~\cite{FRESH} scaled by the corresponding gradients $\nabla \alpha_{ij}= \frac{\partial \hat{y}}{\partial \alpha_{ij}}$~\cite{serrano-smith-2019-attention}. At last, our training minimizes the following loss: 
+\vspace{-2mm}
+\begin{equation}
+\label{loss_function}
+    \mathcal{L}_{CME} = \mathcal{L}_{classify} + \lambda \mathcal{L}_{calib},
+\end{equation} where $\lambda$ is a weighted hyperparameter. The $L_{calib}$ is calculated as follows:
+\vspace{-2mm}
+
+\begin{align}
+    \mathcal{L}_{calib} &= \sum_{1\leq i,j\leq n}\Psi_{i,j} \mathbbm{1}[e_i > e_j], \label{eqn:atten1}\\
+    % \Psi_{i,j}=max\left\{ 0, t(\boldsymbol{x}_i) - t(\boldsymbol{x}_j)\right\}^{2}, \label{eqn:atten2} \\
+     \Psi_{i,j} &= \max[0, t(\boldsymbol{x}_i) - t(\boldsymbol{x}_j)]^{2}, \label{eqn:atten2} \\
+    t(\boldsymbol{x}_i) &=  \lVert{ a_{ij}}\rVert_2 * c_i, \label{eqn:atten3}
+\end{align}
+%  L_{2}\left ( a_{ij} \right )
+where $e_i$ and $e_j$ are the error of example $i$ and example $j$, the confidence $c_i$ is estimated by the max probability of output~\cite{DBLP:conf/iclr/HendrycksG17}, with the L2 aggregation. The products could be further scaled by $\sqrt{l}$. 
+In practice, strictly computing $L_{calib}$ for all example pairs is computationally prohibitive. Alternatively, we only consider examples from the mini-batch (similar lengths) of the current epoch. In other words, we consider all pairs where $e_i$ = 1 and $e_j$ = 0 where $e$ is calculated by using zero-one error function. The comparisons of example pairs can also be calculated from more history after every epoch or by splitting examples into groups, and we leave it to future work. 
+
+\begin{algorithm}[t!]
+ \small
+\caption{{\small{Explanation-based Calibrated Training}}}\label{euclid}
+ \textbf{Inputs} : Train set $\mathcal{D}$, Number of epochs $T$, Learning rate $\eta$, Optimizer $G$.
+\\
+\textbf{Output}: Calibrated Text Model $M$
+\begin{algorithmic}[1]
+%\Require
+%\Require{}
+%\Require{$\mathcal{Q}$: }
+% \State {Let $\mathcal{Q}$ : Empirical Probability Matrix $\in \mathbb{R}^{B \times K}$}
+% \State {Random initialization of $\Theta$}
+\State Random Initialize $\thetav$.
+\For{epoch $= 1 \ldots T$}
+    \State{Split $\mathcal{D}$ into random mini-batches \{$b$\}.}
+    \For{a batch $b$ from $\mathcal{D}$}{}
+        \State{Backward model $M$ for $\nabla_{\thetav} \mathcal{L}_{classify}(\thetav,\mathcal{Y})$.}  
+        %\State{Update $\Theta$ by SGD using Loss}
+        \State{Calculate the attribution by scaled attention.}
+        \State{Computes absolute value of attributions.}
+        \State{Normalized it by applying \textrm{Softmax} function.}
+        % \If{current step $\in \mathcal{S}$}
+        %     \State{$\hat{p}$ = softmax($\Theta,\mathcal{D}$)}
+        %     \State{$\mathcal{Q} \leftarrow CalEmpProb(\hat{p},B)$}
+        % \EndIf
+        \State{Calculate $\mathcal{L}_{CME}$ by Eqn.~\ref{loss_function},~\ref{eqn:atten1},~\ref{eqn:atten2},~\ref{eqn:atten3}.}
+        \State{Optimize the model parameters $\thetav$ by G:}
+        \State{\hspace*{\algorithmicindent}$\thetav \leftarrow  \thetav - \eta \nabla_{\thetav}\mathcal{L}_{CME}(\thetav,\mathcal{Y})$.}  
+    \EndFor
+    %\For{$x,y \in \mathcal{D}$}
+    %\State{
+    %\EndFor
+\EndFor
+\end{algorithmic}
+\label{alg:alg}
+
+\end{algorithm}
+
+Full training details are shown in Algorithm~\ref{alg:alg}. To compute the gradient w.r.t the learnable weight independently, we retain the computation graph in the first back-propagation of classification loss. The model explanations are dynamically produced during training and then used to update the model parameters, which can be easily applied to most off-the-shelf neural networks. \footnote{Code is available here: \url{https://github.com/crazyofapple/CME-EMNLP2022/}}
+
+

@@ -1,0 +1,160 @@
+\section{MiddleGAN}
+
+
+Before we discuss our MiddleGAN, we need to discuss the original GAN on which MiddleGAN is based. In the original GAN \cite{goodfellow2014generative}, the generator $G$ and the discriminator $D$ engage in a minimax game in which $G$ tries to minimize a value objective $V(G,D)$ whereas $D$ tries to maximize it. $V(G,D)$ is defined in Equation \ref{eq:original_GAN}, in which $p$ is the distribution of the real samples and $q$ is the distribution of the noise. A key observation obtained from Equation \ref{eq:original_GAN} is that $G$'s effort is to generate $G({z})$ whereas ${z}$ is an input noise such that $G({z})$ will be in-distribution with the distribution of the real samples $p$.
+
+\begin{equation} 
+\label{eq:original_GAN}
+\begin{split}
+\underset{G}{\min} \; \underset{D}{\max} \; V(G,D) 
+&= \mathds{E}_{{x} \sim p({x})} [\log(D({x})) \\
+&+ \mathds{E}_{{z} \sim q({z})} [\log(1-D(G(z)))]
+\end{split}
+\end{equation}
+
+%In the setting of domain adaptation, we have the source distribution $p_s$ and the target distribution $p_t$, and we hypothesis that if there is a distribution $p_m$ right in the middle of the feature space of $p_s$ and $p_t$, $p_m$ represents the features that are invariant across the source and the target distribution. We propose a variation of GAN, called the MiddleGAN, that can generate samples belonging to $p_m$. 
+
+Based on the key observation that we obtain from Equation \ref{eq:original_GAN}, in MiddleGAN we propose to employ two discriminators, $D_s$ and $D_t$. $D_s$ tries to distinguish a generated sample from real source domain samples, and $D_t$ tries to distinguish a generated sample from real target domain samples. The generator $G$ engages in a two-way minimax game with the two discriminators. The samples it generates will be in the middle of the feature space of the source and the target domains. Below, we empirically prove that the generated samples in $p_m$ are represented by the features that are invariant across the source and target domains.
+
+Formally, the objective function of $D_t$, $D_s$, and $G$ is described by Equation \ref{eq:middle_GAN}. 
+
+\begin{equation} 
+\label{eq:middle_GAN}
+\begin{aligned}
+& \underset{G}{\min} \; \underset{D_s, \: D_t}{\max} \; V(G,D_s, D_t) \\
+&= \mathds{E}_{{x}_s \sim p_s({x}_s)} [\log(D({x}_s))] 
++  \mathds{E}_{{z} \sim q({z})} [\log(1-D_s(G(z)))] \\
+&+\mathds{E}_{{x}_t \sim p_t({x}_t)} [\log(D({x}_t))]+ \mathds{E}_{{z} \sim q({z})} [\log(1-D_t(G(z)))]
+\end{aligned}
+\end{equation}
+
+\begin{figure}
+\centering
+\includegraphics[width=0.5\textwidth]{figures/middlegan_flowchart.png}
+\caption{In this Figure we describe how to use the MiddleGAN to generate fake, domain agnostic samples and how to use those domain agnostic samples to train the classifier that eventually performs the classification task on the target domain. }
+\label{fig:middlegan_flowchart}
+\end{figure}
+
+In the previous paragraphs we have described how to generate samples that are similar to both the source samples and the target samples. Recall that we have argued that we will feed these samples during training to the classifier that performs the final classification task on the target domain (in a supervised fashion). In this case, how do we obtain the labels of the generated samples? The labels of the generated data is the same as the labels of the source and target samples that are used to generate them. In other words, only source samples of a particular class and target samples of that particular class get to be used to generate fake samples of this class. We repeat the generation process for all classes in the source and target domains to generate fake samples. %\hnote{This is very important detail and can we put it into Figure 1? It is better to make it more explicit that our generation is per-class.}
+
+Note that in the setting of unsupervised domain adaptation, the labels of the target domain are not available. How do we obtain those labels to train the generator and classifier? We propose to use an existing unsupervised domain adaptation algorithm, Fixbi, to obtain psedo-labels for the target domains. Then, we use the psedo-labels of the target domain, together with the labels of the source domain, to train the generator and the classifier.
+
+%ADDA \cite{tzeng2017adversarial}
+
+Figure \ref{fig:middlegan_flowchart} shows the flowchart of how to use the generated domain agnostic samples to train the classifier that eventually performs classification on the target domain. In Figure \ref{fig:middlegan_flowchart}, $\epsilon$ is noise, $X_s$ and $X_t$ are the source samples and target samples respectively, and $X_m$ is the generated samples by $G$. During the training of MiddleGAN, the three neural networks $G$, $D_s$, and $D_t$ engaged in a minimax game. The process of MiddleGAN training (in the purple box) is repeated for all classes in the source domain (and the target domain). During the training of the classifier, both $X_s$, $X_t$, and $X_m$ and their labels are used.
+
+\subsection{Theoretical Results}
+We first discuss the two discriminators $D_s$ and $D_t$ given a fixed $G$. We propose Theorem \ref{th:optimal_ds_dt} regarding the optimal values for $D_s$ and $D_t$, represented as $D^{*}_s$ and $D^{*}_t$
+
+\begin{restatable}[]{theorem}{dsdt}
+\label{th:optimal_ds_dt}
+Given $p_m$, the distribution of samples generated by a fixed generator $G$, the optimal values for the parameters of $D_s$ and $D_t$ are $ D^{*}_s = \frac{p_s}{p_s + p_m} $ and $ D^{*}_t = \frac{p_t}{p_t + p_m} $.
+\end{restatable}
+
+%\begin{proof}
+%See the Appendix for proof.
+%\end{proof}
+
+
+\begin{proof}
+The value objective $V(G, D_s, D_t)$ can be expanded.
+
+\begin{equation}
+\begin{aligned}
+V(G, D_s, D_t) & = \int_{x_s} p_s(x_s) \log(D_s(x_s)) dx_s \\
+&+ \int_{x_t} p_t(x_t) \log(D_t(x_t)) dx_t \\
+&+ \int_z q(z) \log(1-D_s(G(z)))dz \\
+&+ \int_z q(z) \log(1-D_t(G(z)))dz \\
+&= \int_{x_s} p_s(x_s) \log(D_s(x_s)) dx_s \\
+&+ p_m(x_s)\log(1-D_s(x_s))dx_s \\
+&+ \int_{x_t} p_t(x_t) \log(D_t(x_t)) \\
+&+ p_m(x_t)\log(1-D_s(x_t))dx_t \\
+\end{aligned}
+\end{equation}
+
+We observe that $p_s$, $p_t$ and $p_m$ belong in $\mathds{R}$. For the source discriminator $D_s$, any pair of $p_s$ and $p_m$ in the form of $p_s \: \log(y) + p_m \: (1- \log(y))$, $p_s \: \log(y) + p_m \: (1- \log(y))$ achieves its maximum value at $\frac{p_s}{p_s + p_m}$ \cite{goodfellow2014generative}. Similarly, for the target discriminator $D_t$, any pair of $p_t$ and $p_m$ in the form of $p_t \: \log(y) + p_m \: (1- \log(y))$, $p_t \: \log(y) + p_m \: (1- \log(y))$ achieves its maximum value at $\frac{p_t}{p_t + p_m}$.
+\end{proof}
+
+Now we bring forth Theorem \ref{th:g} which proposes that there exists an optimal solution for the parameters of not only $D_s$ and $D_t$, but also $G$.
+\begin{restatable}[]{theorem}{globalminimum}
+\label{th:g}
+There exists a global minimum for the virtual training criterion $C(G)$ defined as 
+\begin{equation}
+    C(G) = \underset{D_s, \: D_t}{max} V(G, D_s, D_t).
+\end{equation}
+In other words, there exists an optimal solution for the parameters of the generator $G$.
+\end{restatable}
+
+%\begin{proof}
+%See the Appendix for proof.
+%\end{proof}
+
+\begin{proof}
+Goodfellow et al. \cite{goodfellow2014generative} have proved that, in the original GAN where there is only one discriminator $D$ and one generator $G$, the virtual training criterion can be written as the following:
+
+\begin{equation}
+\centering
+\begin{aligned}
+C_{original}(G) &= \underset{D}{max} \; V(G, D) \\
+&= -log(4) + KL(p\parallel \frac{p+p_m}{2}) + KL(p_m\parallel \frac{p+p_m}{2})
+\end{aligned}
+\end{equation}
+in which $p$ is the distribution of the real samples and $p_m$ is the distribution of generated fake samples, and KL is the Kullback–Leibler divergence. With two discriminators, our virtual training criterion $C(G)$ can be rewritten as:
+
+\begin{equation}
+\label{eq:C_G_JSD}
+    \begin{aligned}
+    C(G) =& -log(4) + KL(p_s\parallel \frac{p_s+p_m}{2}) + KL(p_m\parallel \frac{p_s+p_m}{2}) \\
+    & -log(4) + KL(p_t\parallel \frac{p_t+p_m}{2}) + KL(p_m\parallel \frac{p_t+p_m}{2}) \\
+    =& -2log(4) + 2JSD(p_s \parallel p_m) + 2JSD(p_t \parallel p_m)
+    \end{aligned}
+\end{equation}
+
+In Equation \ref{eq:C_G_JSD}, JSD is the  Jensen–Shannon divergence. To find the global minimum, $M(G)$, we want to obtain
+
+\begin{equation}
+\label{eq:C_G_JSD_centroid}
+    \begin{aligned}
+    M(G) &= \underset{p_m}{argmin} -2log(4) + 2JSD(p_s \parallel p_m) + 2JSD(p_t \parallel p_m)
+    \end{aligned}
+\end{equation}
+We observe in Equation \ref{eq:C_G_JSD_centroid} that we are looking for the optimal value  of the JSD centroid defined as $Centroid^{*} = arg \;\underset{Q}{min} \sum_{i=1}^{n} JSD (P_i \parallel Q)$ in which $P_i$ and $Q$ are distributions.
+We can see that the generator is essentially looking for the JSD controid of the source domain distribution $p_s$ and the target domain distribution $p_t$. The convexity of the problem has been proved in \citep{nielsen2020generalization}. 
+\end{proof}
+
+
+\subsection{Guaranteed Domain Agnosticism of Generated Samples}
+\label{sec:feat_invariance}
+Are the samples generated by the MiddleGAN similar to both the source and the target domains? In this section we use two examples to show that fake samples in the distribution $p_m$ are similar to both the samples in the source and target distributions $p_s$ and $p_t$. %Again, if we can generate many samples that are similar to samples from both domains, a classifier trained on the combination of the training sets of the source and the target domains as well as the fake samples will implicitly learn to use domain invariant features to perform classification.
+
+To test if the generated samples are indeed similar to both the source and target samples (domain agnostic), we propose a simple, but effective way to attest it. We treat the original, unaltered MNIST \cite{deng2012mnist} as the source domain. MNIST is a dataset that contains pictures of 10 classes of handwritten digits. For the target domain, we alter the MNIST dataset by rotating each sample 180 degrees. Then, we use the MiddleGAN to generate the intermediate samples. After obtaining the fake samples, we perform the first round of an experiment by training a classifier (Inception v3 with the last layer replaced to have 10 neurons to correspond to ten classes of handwritten digits) on the combination of the training sets of both the source and the target domains as well as the fake samples. We achieve an accuracy of 99.4\% on the source domain's testing set and an accuracy of 99.4\% on the target domain's testing set (Accuracy is calculated in terms of whether the classifier correctly classifies a sample that is of one of the ten classes of handwritten digits). We use a learning rate of 0.0002 and the Adam optimizer and train 5 epochs. Note that the difference between the source and target domains in the first round of the experiments is only caused by the direction of the MNIST samples. To demonstrate if the fake samples are robust to the difference (i.e. domain agnostic), we rotate those fake samples by 180 degree as well. Then, we train a classifier with the same structure using the same hyperparameters including the learning rate, the optimizer, and the training epochs. Then, we train the classifier on the combination of the training sets of both the source and the target domains as well as the \textbf{rotated} fake samples. We have achieved an accuracy of 99.4\% on the source testing set and 99.3\% on the target testing set.
+
+\begin{table}[h]
+    \centering
+    
+    \begin{tabular}{ ccc } 
+    \hline
+                & Source Acc.     & Target Acc.\\
+    \hline
+
+    Upright fake samples     & 99.4\%    & 99.4\%  \\ 
+    Rotated fake samples     & 98.9\%    & 99.3\% \\
+
+    \hline
+    \\
+    \end{tabular}
+    \caption{The results from the two rounds of experiments. There is no significant change to the performance measured in accuracy on both the source and target's testing sets.}
+
+    \label{table:fake_robust}
+\end{table}
+
+From Table \ref{table:fake_robust} we conclude that there is no significant change to the performance of the classifier, despite that one's training samples contain only upright fake samples and the other's training samples contain only rotated fake samples. \textbf{This indicates that the fake samples are domain agnostic because whether or not we rotate them it makes no difference.}
+
+We have included another example to demonstrate that the fake samples generated by the MiddleGAN are similar to both the source and the target domains. Figure \ref{fig:women_men_middle} contains three subfigures. The first subfigure (from CelebA Dataset \cite{liu2015faceattributes}) contains 64 real samples of cis gender women (the source domain). The second subfigure (from CelebA Dataset \cite{liu2015faceattributes}) contains 64 samples of cis gender men (the target domain). The third subfigure contains 64 samples of fake samples (generated by the MiddleGAN) that visually have both the characteristics of femininity and masculinity. Therefore, it is attested visually that the fake samples generated by MiddleGAN has the similarity of both the source and the target domains. Upon the inspection by two human inspectors, both agree that the generated samples have both feminine and masculine features. In other words, the generated samples are similar to both the source and target domains.
+
+\begin{figure*}
+\centering
+\includegraphics[width=1\textwidth]{figures/women_men_middle.png}
+\caption{The left figure is from the source, real samples of cis gender women. The middle figure is from the target, real samples of cis gender men. The right samples are fake samples generated by MiddleGAN. As we can observe, the fake samples contain both feminine and masculine facial features.}
+\label{fig:women_men_middle}
+\end{figure*}

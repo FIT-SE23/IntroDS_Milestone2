@@ -1,0 +1,246 @@
+\section{Method and Models}
+We propose a reweighting model that employs a %simple 
+graph-based ranking algorithm to exploit the %document 
+structures encoded in long legal case decisions. %.  
+%Our method is inspired by the two-level hierarchy design from long scientific article summarization \cite{dong-etal-2021-discourse} and early summarization work tailored for legal document structures \cite{farzindar-lapalme-2004-legal}.
+
+\subsection{Discourse-Aware Backbone Model}\label{sec:main_paper_hiporank}
+The HipoRank (Hierarchical and Positional Ranking) model recently developed by \citet{dong-etal-2021-discourse} constructs a directed graph for document representation using document section and sentence hierarchies.
+%\footnote{We include a more detailed introduction of the algorithm in Appendix \ref{sec:hiporank}.}. 
+HipoRank computes the centrality score of each sentence as 
+\begin{equation}
+    c(s_i^{I}) = \mu_1 c_{inter} (s_i^{I}) + c_{intra}(s_i^{I})
+\end{equation} where $s_i^{I}$ refers to the $i$-th sentence in $I$-th section. $\mu_1$ is a tunable hyper-paramter, $c_{inter}(s_i^{I})$ computes the sentence's similarity to other section representations and  $c_{intra}(s_i^{I})$ computes the average similarity of the current sentence with all others in the same section. 
+%, we refer to the original article. 
+HipoRank then selects the top-K ranked sentences as the  summary. More details of the algorithm are provided in Appendix \ref{sec:hiporank}.
+Directly applying HipoRank to our data yielded multiple challenges (e.g.,  redundant neighboring sentences %based on computed scores
+(recall Figure \ref{fig:output_figure}) as well as too many sentences from the ends of the article were selected).
+
+\subsection{Multiple Views of Document Structure}\label{sec:views}
+
+Before creating a HipoRank %hierarchical 
+document graph, 
+the document must be split into sections and sentences. %Although HipoRank is agnostic to the %section/sentence 
+%splitting methods, 
+The scientific %document 
+datasets previously used with HipoRank %in the HipoRank study 
+were already split \cite{dong-etal-2021-discourse}.   We investigate {\it the summarization impact of using different approaches to automatically compute linear sections of the document structure}.
+%in the same section.}.
+Figure~\ref{fig:three_view} shows different structures for the same  case.
+%\footnote{We reprocessed the original HTML files to obtain the original document structures, which may lead to minor sentence formatting problems comparing to the other two structures that used non HTML data preprocessed by \citet{xu-2021-position-case}.}. % can be found in 
+%Appendix \ref{apendix:three_views}.
+
+\textbf{Original Document Structure}
+This approach extracts the structure by processing the %raw 
+{\it HTML files}. We use a heuristic to mark the section names with an italic and bold format as the %section
+boundaries and segment the documents into multiple continuous sections. It is worth noting that 297 of the 1049 test case documents do not come with explicit section splits, thus we treat them as whole text spans\footnote{The Original Structure method processed HTML source files and split sentences using a legal %domain-specific 
+sentence splitter (\url{https://github.com/jsavelka/luima_sbd}). The Topic and Thematic views used non-HTML data preprocessed by \citet{xu-2021-position-case}, but used the same sentence splitter.}.
+%\footnote{We use the sentence splitter from \url{https://github.com/jsavelka/luima_sbd}, as is used in the original CanLII dataset \cite{xu-2021-position-case}.}.
+
+%\paragraph
+\textbf{Topic Segment View} Meanwhile, we also explore using a traditional, {\it domain-independent linear text segmentation} algorithm. We use  C99 \cite{choi-2000-advances} but with advanced sentence representation from SBERT \cite{reimers-gurevych-2019-sentence} to group neighboring sentences into topic blocks. %We represent the sentences with
+%recent advanced sentence representations using SBERT \cite{reimers-gurevych-2019-sentence}.
+
+\textbf{Thematic Stage View}
+Early studies found that legal documents tend to have well-defined, 
+{\it domain-dependent thematic structures} \cite{farzindar-lapalme-2004-legal} or rhetorical roles \cite{saravanan-etal-2008-automatic}. Following work that extracts stage views in conversations (introductions → problem exploration →
+problem solving → wrap up) \cite{chen-yang-2020-multi}, we extract thematic stages
+through a Hidden Markov Model (HMM). A fixed order of stages is imposed and only consecutive transitions are allowed between neighboring stages.  We again represent the sentences %with recent advanced sentence representations 
+using SBERT \cite{reimers-gurevych-2019-sentence} and set the number of stages as 5, including the starting Decision Data, Introduction, Context, Judicial Analysis, and Conclusion, as introduced by \citet{farzindar-lapalme-2004-legal}. 
+ 
+ \begin{figure*}[t!]
+\centering
+ \includegraphics[width=0.85\linewidth]{Figs/three_views.001.jpeg}
+  \caption{Different document structure views of a legal case decision (ID: c\_2003skpc17) from our CANLLI test set. Original case sentences are annotated with \textcolor{red}{Issue}, \textcolor{reasonblue}{Reason}, and \textcolor{conclusiongreen}{Conclusion} labels. On the left side, the \textcolor{green}{green}, \textcolor{yellow}{yellow} and \textcolor{cyan}{blue} boxes refer to thematic stage, topic segmentation and the original document structure, respectively. The boxes mean the corresponding sentences on the right hand side are grouped into the same segments. For instance, for the first blue box, the original article is split by the italicized and bolded section name of ``The Fact''. }
+  \label{fig:three_view}
+\end{figure*}
+
+\textbf{CanLII Header Removing}\label{sec:header_removing} Preliminary analysis demonstrated that the raw CanLII documents fail to distinguish the less important headers at the beginning  (i.e., the descriptive text before the main  content, for example,  the content above the grey splitting line and BASIS OF CLAIM in Figure \ref{fig:output_figure}). Generated summaries also tend to cover  a large portion of such information. We thus propose a legal case decision preprocessing procedure following certain heuristics\footnote{See Appendix \ref{sec:appendix_heuristics} for details.} to remove those headers, and demonstrate the improved summarization quality (for all views of document structure) in Section \ref{sec:result}. 
+
+%We process the original articles into different sections using these three different document structures (one example in Figure \ref{fig:three_view}), and experiment with the state-of-the-art unsupervised extractive baseline HipoRank \cite{dong-etal-2021-discourse} model.
+
+
+ 
+% We illustrate the effects of the three methods of document segmentation in Figure \ref{fig:three_view}. It is worth noting that, comparing to the original document structure split by section names, the topic segmentation will produce more fine-grained subparts. But different strategies to segment the document can have diverse effects. For instance, for the highlighted first blue segments, the \textit{issue} sentence is grouped together with all previous headers. Meanwhile, as shown in the last highlighted yellow span, the \textit{reason} sentence is connected with its neighboring sentences, thus can aid for better contextual representation. 
+
+% TODO: Start with hiporank with different inputs.
+% TODO: Section 2 reweighting (ours)
+%  Yet, there exists drastic difference between the scientific domain and legal domain.  
+
+\subsection{Reweighting the Centrality Score}\label{sec:dynamic_selection}
+
+
+%Secondly, the original algorithm computed the sentence centrality score only once and greedily select the top-K ranked sentences as the summary. Our analysis \ref{sec:analysis} demonstrate that such approach fail to select sentences in the middle of context which are less similar to others, but carrying the \textit{reasoning} argument role of the legal case. % To tackle the problem of selecting headers (the meta data of the case, as shown in Figure  and the difficulty of reasoning sentences,
+% we thus introduce a novel iterative reweighting framework that dynamically update the weights of the candidate nodes based on already selected sentences ( \S \ref{sec:dynamic_selection}). 
+
+% \subsection{Legal Document Summarization}\label{sec:difference}
+
+% \subsection{Hierarchical Directed Graph for legal document}
+% Most existing work (TextRank, LexRank, PacSum) build the graph by only considering the sentence similarity and relative order of sentences in the document, which fails to capture the rich document structure of texts. \citet{dong-etal-2021-discourse} introduces a two-level directed hierarchical model that explicitly models the section structures in the scientific articles.
+
+% Different from the clear organizations of sections in scientific articles, the legal case documents sometimes do not come with well-structured format, we instead utilize the multi-views extracted from \S \ref{sec:views}. Similar to prior work, HipoRank formulated the  summarization generation
+% as a node selection problem, where those
+% nodes (i.e., sentences) that are semantically similar
+% to others are picked in the final summary. They proposed a section-level hierarchy, based on the assumption that sentences belonging to different sections are less similar and instead used a section embedding to model the sentence to other section relationship, thus reducing the cost of computation. Different from the strict restrictions on the cross-section sentence edges, we allow for randomized sentence-to-sentence edges, aiming at avoiding the negative effects of under-representation of section. We additionally introduce the weighted parameters to model the distance between either sentence-section or sentence-sentence edges, as inspired by \cite{liu-sigir-2021-distance}.
+
+
+%Another drawback of 
+The HipoRank document graph %built by HipoRank %is that it 
+will not change once built, and the important sentences are greedily selected based on the aggregated centrality scores. %Such a method 
+This may introduce redundancies in selecting similar sentences and ignore the contents in the middle of the source case decisions that are more important once the argumentative sentences at the beginning and end are taken into account. We propose a novel reweighting approach that can tackle this problem. A prior attempt \cite{tao2021unsupervised}  on multi-round selection looked at the local similarity between %those 
+selected sentences. They iteratively recompute the sentence to sentence similarities between the selected summary sentences and recompute the final sentence centrality scores after each sentence selection. Instead, we are focusing on modeling  the relationship between the selected sentence and the other candidate sentences.  Their method is also not directly applicable to longer text due to the $n^2$ time complexity of computation given large numbers of sentences (on average 205 sentences for CanLII dataset). 
+\begin{algorithm}
+\caption{Reweighting Algorithm}\label{alg:cap}
+\begin{algorithmic}
+\Require computed centrality score $c(s_i^{I})$ for all sentence s, $c_{intra}(d)$ for different section d 's embedding, and a threshold \textit{g} for phase transition and maximum summary length $max_{len}$.
+
+\State $Summ \gets []$
+\State \textbf{PHASE 1} 
+\While{$len(Summ) \leq g * max_{len}$}
+
+    \State $Summ.append(topK(\{c(s_i^{I})\})$
+\EndWhile \\
+\State{\textbf{PHASE 2}} %\\
+\While{$len(Summ) \leq max_{len}$}
+\State $c(s_i^{I}) \gets c(s_i^{I}) - sim(c_{intra}(I), c_{intra}(J)) * \mu_2$ 
+\Comment{J is the section index of last selected sentence, $\mu_2$ is a hyperparameter}
+\State $Summ.append(top-1({c(s_i^{I})}))$
+\EndWhile
+
+\textbf{Return} Summ
+\end{algorithmic}
+\label{algorithm_1}
+\end{algorithm}
+
+Our approach can be divided into two phases, as shown in Algorithm \ref{algorithm_1}. In the first phase, we assume that important argumentative sentences at the two ends of the document can be easily detected (as shown in Figures \ref{fig:output_figure} and \ref{fig:three_view}, legal case documents generally start by introducing the issues and end with  conclusions).  A quantitative analysis of the top-5 selected sentences in CanLII in fact provides an 80\% coverage of issue or conclusion sentences.   We thus set up a threshold to pick the first k sentences based on the original document graphs. Afterward, we gradually downweight the sentence's centrality score using the location of the latest selected sentence, that is, we set a penalty score for sentences that are placed as a neighbor of the current sentence selected for the summary. Our rationale %behind such a procedure 
+is that %we observe 
+reasoning sentences are more likely to be located in different sections in the middle that are not shared with issues and conclusions. %As shown in Figure \ref{fig:three_view}, in legal cases the issues and conclusions are generally placed on the two ends of the article while the reasoning sentences are distributed in the middle. 
+% \begin{table*}[h!]
+% \small
+% % \scriptsize 
+%     \centering
+%     % \setlength\tabcolsep{2.1pt}
+%     \renewcommand{\arraystretch}{1}%Tighter
+%     \begin{tabular}{c|l|ccc|ccc}
+%     %\begin{tabular}{l|lllc|lllc|p{0.9cm}ll}
+%     \toprule
+%       ID & Model  &  R-1 & R-2 & R-L  & BS \\
+%          \midrule
+%          \multicolumn{6}{c}{{Oracles}} \\
+%          \midrule
+%           1 & IRC & 57.92 & 35.72 & 55.05 &88.15 \\
+%         2 &  EXT & 61.41 & 40.44 & 59.08 & 88.19 \\
+          
+%     \midrule 
+%     \multicolumn{6}{c}{{Supervised Extractive }} \\
+%     \midrule
+%     3 & BERT\textsubscript{EXT} - selection & 40.78 & 17.63 & 37.75 & 84.05 \\
+%     4 & SummRunnar & & & & \\
+%      5 & SentCLR & & & & \\
+%     \midrule
+%     \multicolumn{6}{c}{{Supervised Abstractive}} \\
+%     \midrule
+%     6 & BART & 47.93 & 22.34 & 44.74 &  86.16 \\
+%     7 & LED & 49.56 & 23.78 & 46.48  & 86.75\\
+%     \midrule 
+%         \multicolumn{6}{c}{{Unsupervised Extractive}} \\
+%         \midrule 
+%       8 & LSA & 38.15 & 18.22 & 35.76 & 84.63  \\
+%           9& LexRank & 38.63 & 17.70 & 35.87 & 84.40 \\
+%             10 & TextRank   & 36.70 & 16.19 & 34.00 & 83.53&  \\
+%             11 & PACSUM & 39.24 & 14.31 & 36.80 & 81.64\\
+%           \midrule 
+%           \multicolumn{6}{c}{{HipoRank with different structures}} \\
+%           \midrule
+%                   12 & HipoRank (Original) & 43.42 & 18.04&  40.38 &  83.90 \\
+%           13 & C99-topic & 42.03 & 16.89 & 39.32 &  83.59\\
+%           14  & HMM-stage & 42.11 & 17.03 & 39.48 &  83.85 \\
+%           \midrule 
+%           15 & Original w/o header & 43.59 & 18.41 & 40.74 & 84.41 \\
+%           16 & C99-topic w/o header & 44.32 & 18.57 & 41.50 & \textbf{84.56} \\
+%           17 & HMM-stage w/o header & 43.76 & 18.52 & 41.07 & 84.53 \\
+%           \midrule 
+%         %   18 & Original Dynamic & 43.99 & 18.88 & 41.24 & 83.94\\
+%         %   19 & C99-topic Dynamic & 43.76 & 18.25 & 41.04 & 83.81 \\
+%         %     20 & HMM-stage Dynamic & 43.43 & 17.89 & 40.69& 83.93 \\
+%         % \midrule 
+    
+%           18 & Original Dynamic + w/o H & 44.36 & 18.98& 41.63 &  84.43\\
+%           19 & C99-topic Dynamic + w/o H & \textbf{45.33} & \textbf{19.77} & \textbf{42.54} & 84.50\\
+%             20 & HMM-stage Dynamic + w/o H & 44.54 & 18.76 & 41.88 & 84.31 \\
+%             \hline 
+%             21 & C99-topic Dynamic + w/o H + sparse sent2sec & 44.84 & 19.28 & 42.07 & -- \\
+%             \hline 
+%             22 & Original Dynamic + w/o H + sent2sent reward & 44.18 & 18.86 & 41.37 & -- \\
+%         \midrule
+%     \bottomrule
+%      \end{tabular}
+%     \caption{Different Structure's Performance.}
+%     \label{tab:unsupervised_results}
+% \end{table*}
+
+% \begin{table*}[h!]
+% % \small
+%     \centering
+%     \renewcommand{\arraystretch}{1}%Tighter
+%     \begin{tabular}{c|l|cc|cc}
+%     %\begin{tabular}{l|lllc|lllc|p{0.9cm}ll}
+%     \toprule
+%         & & \multicolumn{2}{c}{\textbf{CanLII}} & \multicolumn{2}{c}{\textbf{BillSum}} \\
+%       ID & Model  &  R-1/R-2/R-L  & BS & R-1/R-2/R-L  & BS\\
+%          \midrule
+%          \multicolumn{6}{c}{{Oracles}} \\
+%          \midrule
+%           1 & IRC & 58.04/36.02/55.28 & 87.94 & N/A & N/A \\
+%         2 &  EXT (ROUGE-L, F1) & 59.38/38.77/56.94 &87.85  & 56.04/37.50/53.10 & 87.30\\
+        
+   
+          
+%     \midrule 
+%     \multicolumn{6}{c}{Baselines} \\
+%     \midrule
+%     \multicolumn{6}{l}{\textit{supervised}} \\
+%     % 3 & BERT\textsubscript{EXT} - selection & 40.78 & 17.63 & 37.75 & 84.05 \\
+%     3 & BERT\_EXT & \textit{43.44}/\textit{17.84}/\textit{40.36} & \textit{84.47} & 39.57/15.89/35.08 &  83.54 \\
+%     %  5 & SentCLR & & & & \\
+%     % \midrule
+%     % \multicolumn{6}{c}{{Supervised Abstractive}} \\
+%     % \midrule
+   
+%     % 6 & BART & 50.50/25.58/46.82 &  87.25& \\
+%     % 7 & LED & 53.72/28.75/ 50.17 & 87.55&\\
+%     % \midrule 
+%         \multicolumn{6}{l}{\textit{unsupervised}} \\
+%         % \midrule 
+%       4 & LSA & 37.22/17.82/34.87 & \underline{\textit{84.48}} & 40.44/18.07/36.31 &  83.70 \\
+%           5 & LexRank & 37.90/\underline{\textit{18.17}}/35.62 &  84.32 &  41.26/\textbf{\underline{\textit{21.19}}}/37.43 & 84.02\\
+%             6 & TextRank  & 36.70/16.19/34.00 & 83.51 & 36.38/16.93/30.84 & \textbf{\textit{\underline{84.49}}}\\
+%             7 & PACSUM & 40.01/15.68/37.37 & 83.52  & 40.71/18.23/37.00 & 83.08  \\
+%             8 & HipoRank (Original Structure) &  \underline{41.61}/17.13/\underline{\textit{38.73}}  & 83.55  & \underline{\textit{42.41}}/19.48/\underline{\textit{38.65}} & 83.24 \\
+%           \midrule 
+%           \multicolumn{6}{c}{{Document Structure with HipoRank backbone}} \\
+%           \midrule
+%                 %   12* & Original 
+%           9 & C99-topic & 41.33/16.48/38.45 &  83.53 & 41.82/18.62/37.94& 83.57 \\
+%           10  & HMM-stage & 40.71/15.64/37.93 & 83.57 & \textbf{42.97}/{20.37}/\textbf{39.24} & {83.90} \\
+%         %   \midrule 
+%           11 & Original Structure w/o header & 42.56/17.96/39.62 & 83.62 & N/A & N/A \\
+%         %   & Original w/o header + truncation & 42.85/17.46/39.88 \\ 
+%           12 & C99-topic  w/o header & 43.25/18.02/40.25 & \textbf{84.48} & N/A & N/A   \\
+        
+%           13 & HMM-stage  w/o header & 42.64/17.38/39.76 & 83.57 & N/A & N/A \\
+          
+%           \midrule 
+%               \multicolumn{6}{c}{{Document Structure with HipoRank backbone + reweighting Algorithm}} \\
+%               \midrule
+%           14 & Original Structure* & 43.18/{18.35}/40.26 &  84.20  & 42.30/19.73/38.69 & 83.11 \\ 
+%           15 & C99-topic* & \textbf{43.89}/\textbf{18.67}/\textbf{41.00} &  {84.34} & 40.78/17.95/37.02 & 83.15\\
+%             16 & HMM-stage* & {43.28}/17.80/40.40 &  84.22 & 42.09/19.83/38.48 & 83.56\\ 
+%             % 17 & Ours + sentence\_relation & 43.26/18.33/40.38 & \\
+            
+%         \midrule
+%     \bottomrule
+%     \end{tabular}
+%     \caption{The automatic evaluation results on CanLII and BillSum test sets, \textbf{bold} represents the best non-oracle extractive score, \textit{italic} for the best baselines and \underline{underline} for best unsupervised baseline. Model name with stars, we use the without header version of CanLII dataet as input and keep the original BillSum data.} % need to make sure the notation is obvious. 
+%     \label{tab:unsupervised_results}
+% \end{table*}

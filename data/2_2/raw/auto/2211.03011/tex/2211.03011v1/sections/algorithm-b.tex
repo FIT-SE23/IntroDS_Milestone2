@@ -1,0 +1,25 @@
+We first consider optimizing the AIS-generator as follows: (i)~use parametric families of functions/distributions to model each component of the recursively updatable AIS generator (history-based feature map $\aisfunction_\timestep$, the update function $\hat f$, the reward predictor $\hat \cost$, and the transition kernel $\hat \transition$); (ii)~consider a weighted average of $(\hat \cost(Z_t, A_t) - \cost(S_t, A_t))^2$ and $d_{\mathfrak{F}}(\hat P(\cdot | Z_t, A_t), P(\cdot | S_t, A_t))^2$ as an auxiliary loss; (iii)~use gradient descent to optimize the AIS-generator. 
+
+
+\begin{wrapfigure}{R}{0.6\textwidth}
+  %\vskip -2\baselineskip
+  \centering
+  \includegraphics[width=0.55\textwidth]{Results/schematic.png}
+  \caption{Algorithm/Agent architecture} \label{fig:blk-diag}
+\end{wrapfigure} 
+We use a time-series approximator such as LSTM or GRU to represent the history-based feature maps. The internal layer of such recurrent neural networks automatically acts as the update function $\hat f$. We use a multilayerd perception (MLP) layer to represent the reward approximator $\hat \cost$ and use an appropriate class of kernel approximators such as softmax or a mixture of Gaussians to represent $\hat \transition$. Let $\zeta$ denote the parameters of all components of the AIS-generator. The loss function for the AIS-generator may written as
+\begin{equation}
+  \aisloss(\aisparams) = \frac{1}{\Timestep}\sum_{t = 0}^{\Timestep}\Big(
+    \lambda (\hat{\cost}(\Ais_{\timestep}, \Action_\timestep; \aisparams)  - \cost(\State_\timestep, \Action_\timestep))^{2} 
+  + (1-\lambda) \ipm(\hat\transition(\cdot | \Ais_\timestep, \Action_\timestep\ ;\aisparams),\transition(\cdot | \State_\timestep, \Action_\timestep)^{2}\Big),\label{eq:ais-loss}
+\end{equation}
+where $\Timestep$ is the length of the episode or the rollout length and $\lambda \in (0,1)$ is a hyper-parameter. 
+
+We can combine the learning of the parameters of the AIS-generator with a policy-gradient algorithm using multi-timescale stochastic approximation~\cite{borkar2008stochastic}. In particular, let $\mu(\cdot;\actorparams):\aisspace \to \Delta(\actionspace)$ be a parameterised stochastic policy with parameters $\actorparams$. Let $\performance(\actorparams,\aisparams)$ denote the performance of the policy $\mu(\cdot ;\ \actorparams)$. The policy gradient theorem~\citep{pgt,Williams2004SimpleSG,baxter-bartlett} states that for a rollout horizon $\Timestep$, we can estimate $\grad_\actorparams \performance$ as $\hat \grad_{\actorparams}\performance(\actorparams_\timestep,\aisparams_\timestep) = \sum_{\timestep=1}^{\Timestep}\discount^{\timestep-1}\cost_{\timestep}(\sum_{\tau =1}^{\timestep}\grad_{\actorparams}\log(\mu(\Action_\timestep|\Ais_\timestep ;\ \actorparams_\timestep)))$. Following a rollout of length $\Timestep$, we can then update the parameters $\{(\aisparams_i, \actorparams_i  )\}_{i \geq 1}$ as follows:
+    \begin{subequations}\label{eq:pgt-update}
+             \begin{align}
+                \aisparams_{i+1} = \aisparams_i + \aislr_i \grad_\aisparams\aisloss(\aisparams_i), &&
+                \actorparams_{i+1} = \actorparams_i + \actorlr_i \hat\grad_{\actorparams}\performance(\actorparams_{i},\aisparams_{i})\label{eq:actor-update},
+            \end{align}
+    \end{subequations}
+    where the step-size $\{\aislr_{i}\}_{i \geq 0}$ and $\{\actorlr_{i}\}_{i \geq 0}$ satisfy the standard conditions: $\sum_{i} \aislr_{i} = \infty$, $\sum_{i}\aislr_{i}^{2}< \infty$, $\sum_{i} \actorlr_{i} = \infty$ and $\sum_{i}\actorlr_{i}^{2}< \infty$. Moreover, one can ensure that the AIS generator converges faster by choosing an appropriate $\actorlr$ such that, $\lim_{i \to \infty} \frac{\actorlr_{i}}{\aislr_{i}} = 0$. Moreover, we can use similar ideas to develop an Actor-Critic algorithm. As such, in addition to a parameterised policy $\policy(\cdot; \actorparams)$ and AIS generator $(\aisfunction_\timestep(\cdot;\aisparams), \hat f, \hat r, \hat\transition)$ we can also a parameterised critic $\hat\valuefunction(\cdot;\criticparams):\featurespace \to \real$, where $\criticparams$ are the parameters for the critic. 

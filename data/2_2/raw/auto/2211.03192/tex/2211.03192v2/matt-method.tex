@@ -1,0 +1,150 @@
+In this section we present our approach, where we first describe the objective we seek to optimize, followed by a network design suited for this objective, and last we describe our specific approach to optimization.
+
+\subsection{Integration-free learning}
+\label{sec:integrationfree}
+The flow map is an important mathematical tool that is utilized by numerous visualization techniques. To mathematically represent the flow map, let us consider a time-dependent flow field $\boldsymbol{\nu} : \mathbb{R}^n \times \mathbb{R} \rightarrow \mathbb{R}^n$, where $\boldsymbol{\nu}(\mathbf{x}(t), t)$ describes the vector of a particle at time $t$ with spatial position $\mathbf{x}(t) \in \mathbb{R}^n$. The trajectory of a mass-free particle, advected under the influence of the flow field $\boldsymbol{\nu}$, is governed by the following ordinary differential equation:
+\begin{equation}
+\frac{d \mathbf{x}(t)}{d t} = \boldsymbol{\nu}(\mathbf{x}(t),t) , \quad \mathbf{x}(t_0) = \mathbf{x}_0,
+\end{equation}
+where $\mathbf{x}_0$ represents the initial position of the particle at starting time $t_0$. Integrating this differential equation under a specified time span $\tau$ gives us the flow map $\Phi$, which varies in initial position $\mathbf{x}_0$, starting time $t_0$, and time span $\tau$:
+\begin{equation}
+    \Phi(\mathbf{x}_0, t_0, \tau): \mathbb{R}^n \times \mathbb{R} \times \mathbb{R} \rightarrow \mathbb{R}^n = \mathbf{x}_0 + \int_{t_0}^{t_0+\tau} \boldsymbol{\nu}(\mathbf{x}(t),t) dt.
+\end{equation}
+In practice, the computation of the flow map depends on (1) a means of interpolating the vector field at arbitrary space-time coordinates within the domain, and (2) a choice of numerical integration scheme, e.g. Euler or Runge-Kutta. Integrating for long time spans, however, can become a computational bottleneck when coupling the flow map with a particular visualization technique. This motivates the need for alternative flow map representations that can mitigate the expense of numerical integration.
+
+In this work, we seek neural representations of flow maps, which we will denote $\hat{\Phi}$, that are (1) scalable to optimize, (2) efficient to evaluate, and (3) serve as accurate approximations. Satisfying all criteria, at once, is challenging with prior methods, as the choice of network design, objective(s) to be optimized, and data required for optimization, are all important considerations that interrelate. A standard approach~\cite{han2021exploratory,sahoo2022neural} is to collect a dense set of samples of the flow map, and optimize a neural network to reproduce these samples, either directly as its output~\cite{han2021exploratory}, or indirectly through integrating a learned vector field~\cite{sahoo2022neural}. However, to ensure good generalization, the number of flow map samples to collect needs to be quite large -- at least on the order of the vector field resolution -- with each sample requiring expensive numerical integration. Further, coordinate-based networks need to be sufficiently large for accurate learning, and thus combined, the dataset size and network complexity can lead to expensive training, and inefficient evaluation.
+
+Our work foregoes the need for numerically integrating the vector field altogether. Instead, we optimize for \emph{flow map derivatives}, rather than the raw flow map output, taking advantage of the following basic property of a flow map:
+\begin{equation}
+    \label{eq:composition-exact}
+    \frac{\partial \Phi(\mathbf{x}, t, \tau)}{\partial \tau} = \boldsymbol{\nu}(\Phi(\mathbf{x},t,\tau), t+\tau).
+\end{equation}
+In other words, the derivative of the flow map taken with respect to time span $\tau$, at position $\mathbf{x}$ and time $t$, can be found by (1) evaluating the flow map at the given inputs, and (2) accessing the vector field at the flow map's positional output, at time $t+\tau$. A flow map representation whose derivative is satisfied at all positions and times will, by construction, produce valid integral curves. Specifically, upon fixing position and time, evaluating the representation in increasing time span $\tau$ will yield a curve whose tangent vectors match the vector field as defined in Eq.~\eqref{eq:composition-exact}.
+
+Of course, this approach assumes full access to the flow map itself, which is ultimately what we are trying to find. To help formulate a well-defined optimization problem, we identify two basic properties of a flow map that we expect any approximation should satisfy. Herein we refer to the neural flow map representation as $\hat{\Phi}$.
+
+\begin{figure}[!t]
+  \centering
+ 	\includegraphics[width=\linewidth]{figures/self-supervision.pdf}
+	\caption{Our approach is based on a criterion of self-consistency, where the flow map derivative under some time span $\tau$ should match the flow map's instantaneous velocity at this location. A flow map whose instantaneous velocity initially matches the vector field can give us a linear approximation (left), violating self-consistency. By optimizing over a range of time spans, our approach aims to adjust the flow map such that this criterion is satisfied (right).}
+    \label{fig:self-supervision}
+\end{figure}
+
+\textbf{(P1) Identity mapping.} When we integrate a particle for a time span of $\tau = 0$, then the flow map $\hat{\Phi}$ should return the starting position, irrespective of the starting time:
+\begin{equation}
+    \label{eq:identity}
+    \hat{\Phi}(\mathbf{x}, t, 0) = \mathbf{x},
+\end{equation}
+We argue that any approximation $\hat{\Phi}$ should \emph{exactly} satisfy identity preservation. Otherwise, a small perturbation $\boldsymbol{\delta} \in \mathbb{R}^n$ yielding $\hat{\Phi}(\mathbf{x}, t, 0) = \mathbf{x}+\boldsymbol{\delta}$ would lead to an accumulation in error for repeated evaluation of the flow map approximation $\hat{\Phi}$.
+
+\begin{figure*}[!t]
+  \centering
+ 	\includegraphics[width=\linewidth]{figures/simple_network_design_v2.pdf}
+	\caption{Standard coordinate-based networks (a) serve as simple models for flow maps, but are difficult to control and optimize. In contrast, our proposed network design (b) permits a clear delineation between the instantaneous velocity of the flow map, and integration for nonzero time spans ($\tau$), achieved via $\tau$-scaled residual connections. This leads to a simplified derivative network (c) at $\tau = 0$, one that is straightforward to fit to the vector field, and subsequently, stabilize flow map optimization.}
+    \label{fig:illustrative_network}
+\end{figure*}
+
+\textbf{(P2) Instantaneous velocity.} For a time span of $\tau = 0$, if we compute the derivative of the flow map $\hat{\Phi}$ with respect to time span, then it should return the evaluation of the field $\boldsymbol{\nu}$ at the provided position $\mathbf{x}$ and time $t$:
+\begin{equation}
+    \label{eq:zero_tau_deriv}
+    \frac{\partial \hat{\Phi}(\mathbf{x}, t, 0)}{\partial \tau} = \boldsymbol{\nu}(\mathbf{x}, t).
+\end{equation}
+A neural flow map representation $\hat{\Phi}$ whose derivative poorly approximates the vector field, e.g. points in a different direction, can lead to particle trajectories that diverge from actual trajectories. Indeed, upon a simple first-order approximation, we have:
+\begin{equation}
+    \label{eq:zero_advect}
+    \hat{\Phi}(\mathbf{x}, t, \varepsilon) \approx \hat{\Phi}(\mathbf{x}, t, 0) + \varepsilon \boldsymbol{\nu}(\mathbf{x}, t).
+\end{equation}
+and thus, if the derivative of $\hat{\Phi}$ at $\tau = 0$ is poorly approximated, then this negatively impacts the action of the flow map itself. Also note that failing to preserve the identity mapping \textbf{(P1)} can further compound error.
+
+Assuming the above properties hold, we propose the following criterion of \emph{self-consistency} for learning flow maps:
+\begin{equation}
+    \label{eq:composition-detail}
+    l_s(\mathbf{x},t,\tau) = \bigg\lVert \frac{\partial \hat{\Phi}(\mathbf{x}, t, \tau)}{\partial \tau} - \frac{\partial \hat{\Phi}(\hat{\Phi}(\mathbf{x}, t, \tau),t+\tau,0)}{\partial \tau} \bigg\rVert.
+\end{equation}
+Here we have replaced the vector field in Eq.~\eqref{eq:composition-exact} with the flow map derivative. Hence, assuming property \textbf{(P2)} holds, the derivative of the flow map at $\tau = 0$ will faithfully represent the vector field. By minimizing this objective over the full domain via:
+\begin{equation}
+    \label{eq:composition-expectation}
+    \mathcal{L}_s = \mathbb{E}_{(\mathbf{x},t) \in \mathcal{D}, \tau \in \mathcal{T}} \left[ l_s(\mathbf{x},t,\tau) \right],
+\end{equation}
+where $\mathcal{D}$ is the spatiotemporal domain, and $\mathcal{T} = [\tau_{min}, \tau_{max}]$ is an interval of time spans we aim to support in our approximation, we can ensure global self-consistency. Such a property is fundamental to \emph{any} flow map, but it is possible for $\hat{\Phi}$ to minimize Eq.~\eqref{eq:composition-expectation}, while remaining a poor approximation of $\Phi$. However, if instantaneous velocity is well-satisfied \textbf{(P2)}, and remains fixed, if not minimally changed, during optimization, then this will limit the space of flow maps that satisfy Eq.~\eqref{eq:composition-expectation}.
+
+To provide intuition for our approach, if a flow map initially satisfies properties \textbf{(P1)} and \textbf{(P2)} then this can give a simple linear approximation, as shown in Fig.~\ref{fig:self-supervision} (left). However, the self-consistency criterion will naturally report a high loss for a sufficiently-large $\tau > 0$. By optimizing over a range of time spans $\mathcal{T}$, we can incrementally improve on self-consistency: first for small time spans, given \textbf{(P2)} holds, and then for larger time spans, as notionally depicted in Fig.~\ref{fig:self-supervision} (right). This idea of incrementally building the flow map has precedence in the literature~\cite{hlawatsch2010hierarchical}, but in our approach we eliminate the need for numerical integration, and instead \emph{only} require access to the original vector field. But critical to our approach, we require that the flow map approximation satisfy properties \textbf{(P1)} and \textbf{(P2)}. We next turn to a novel network design suited for these ends.
+
+\subsection{A network design for flow maps}
+\label{sec:networkdesign}
+
+Coordinate-based neural networks, in particular ones based on sinusoidal positional encodings~\cite{sitzmann2020implicit,tancik2020fourier,fathony2021multiplicative}, are a natural choice for our flow map network design. Specifically, position ($n$ dimensions), time (1 dimension), and time span (1 dimension) can collectively be treated as individual coordinates as input to a multi-layer perceptron (MLP)~\cite{sitzmann2020implicit,tancik2020fourier}, whose output corresponds to the flow map prediction, please see Fig.~\ref{fig:illustrative_network}(a). However, such an approach fails to guarantee property \textbf{(P1)} by design, and instead, the identity mapping must be learned. Moreover, the input-based derivatives of MLPs are themselves nontrivial neural networks~\cite{sitzmann2020implicit}, and do not permit a distinction between instantaneous velocity \textbf{(P2)} and flow map derivatives of nonzero time span. This presents complications for ensuring a stable composition-based objective (c.f. Eq.~\eqref{eq:composition-detail}).
+
+Rather than use a standard coordinate-based network we propose a 2-tiered network design, please see Fig.~\ref{fig:illustrative_network}(b) for an overview. The first network, which we denote a $f_{\nu} : \mathbb{R}^n \times \mathbb{R} \rightarrow \mathbb{R}^d$ learns a $d$-dimensional spatiotemporal representation of the domain that is tasked with property \textbf{(P2)}, learning a representation of instantaneous velocity. We condition the representation $f_{\nu}$ with a given time span $\tau$, via the following multiplicative scaling:
+\begin{equation}
+\label{eq:z0}
+\mathbf{z}^{(0)} = \sigma_{\nu}(\tau \mathbf{m}^{(0)}) \odot f_{\nu}(\mathbf{x},t),
+\end{equation}
+where $\mathbf{m}^{(0)} \in \mathbb{R}^d$ is a learnable vector aimed to reconcile the scaling of $\tau$ -- initially expressed in terms of the physical domain -- for the neural representation. The function $\sigma_{\nu}$ is a nonlinearity that serves to squash values into a predetermined range, in practice this is set as a hyperbolic tangent, while $\odot$ indicates element-wise multiplication. The second network, which we denote $f_{\tau} : \mathbb{R}^n \times \mathbb{R} \rightarrow \mathbb{R}^d$, similarly learns a $d$-dimensional spatiotemporal representation but one that is specific to the flow map for nonzero time spans. We combine the two representations, $f_{\nu}$ and $f_{\tau}$, through a residual connection:
+\begin{equation}
+\label{eq:z1}
+\mathbf{z}^{(1)} = \mathbf{z}^{(0)} + \sigma_{\nu}\left(\tau \mathbf{m}^{(1)}\right) \odot \sigma_{\tau}\left(\mathbf{z}^{(0)} \odot (W^{(1)} f_{\tau}(\mathbf{x},t)) \right),
+\end{equation}
+where $\mathbf{m}^{(1)} \in \mathbb{R}^d$ serves the same purpose as $\mathbf{m}^{(0)}$, and $W^{(1)} \in \mathbb{R}^{d \times d}$ is a learnable linear transformation. 
+\new{
+A consequence of the above construction is that the derivative w.r.t $\tau$ when $\tau = 0$ evaluates to
+\begin{equation}
+ \frac{d \mathbf{z}^{(1)}}{d \tau} = \frac{d \mathbf{z}^{(0)}}{d \tau} = \left(\sigma_{\nu}' \mathbf{m}^{(0)}\right) \odot f_{\nu}(\mathbf{x},t).   
+\end{equation}
+}
+Subsequent representations are formed via residual connections, \new{in order to preserve the above derivative}:
+\begin{equation}
+\label{eq:zl}
+\mathbf{z}^{(l)} = \mathbf{z}^{(l-1)} + \sigma_{\nu}\left(\tau \mathbf{m}^{(l)}\right) \odot \sigma_{\tau}\left(W^{(l)} \mathbf{z}^{(l-1)} \right),
+\end{equation}
+and, finally the last layer $L$ applies a single linear transformation to give us the output position, wherein we also include a skip connection for the input position:
+\begin{equation}
+\label{eq:zlast}
+\hat{\Phi}(\mathbf{x},t,\tau) = \mathbf{x} + W^{(L)} \mathbf{z}^{(L-1)}.
+\end{equation}
+
+Returning to our properties, we note that this network design, by construction, satisfies the identity mapping \textbf{(P1)}, so long as the chosen activation function $\sigma_{\nu}$ satisfies $\sigma_{\nu}(0) = 0$. The multiplicative scaling performed at each layer ensures that all representations will be zero vectors throughout the network. Critically, we \emph{do not} introduce bias vectors, in order to guarantee this identity mapping. More importantly, \new{the designed residual connections} lead to a particularly simple network for the flow map derivative at $\tau = 0$ \textbf{(P2)}:
+\begin{equation}
+\label{eq:zderiv}
+\frac{d \hat{\Phi}(\mathbf{x},t,0)}{d \tau} = W^{(L)} (\mathbf{m}^{(0)} \odot f_{\nu}(\mathbf{x},t)).
+\end{equation}
+Please see the appendix for the supporting derivation. There are two implications of this result. First, instantaneous velocity of the flow map does not depend on the representation $f_{\tau}$, as depicted in Fig.~\ref{fig:illustrative_network}(c); in fact it is entirely decoupled from the rest of the network (c.f. Eqs.~\eqref{eq:z1} and~\eqref{eq:zl}). Hence, we can directly optimize instantaneous velocity of the flow map for the vector field $\boldsymbol{\nu}$ using Eq.~\eqref{eq:zderiv}, without making reference to the remainder of the model. In turn, a flow map that satisfies instantaneous velocity helps ``prime'' the model in satisfying the self-consistency criterion, and ensures stability, e.g. we can choose to freeze the parameters associated with $f_{\nu}$, and $W^{(L)}$ when optimizing Eq.~\eqref{eq:composition-expectation}, and the network's representation of instantaneous velocity will remain unchanged. Secondly, the simplicity of this derivative network ensures that we can easily optimize for the vector field. \new{In contrast, for a standard MLP (c.f. Fig.~\ref{fig:illustrative_network}) its instantaneous velocity would amount to an involved derivative network~\cite{sitzmann2020implicit} to be optimized. This network is no different in structure for $\tau > 0$, and as a consequence, optimizing for both instantaneous velocity, and derivatives for $\tau > 0$, would require a careful balancing act.}
+
+We remark that our network bears similarity to prior work on flow map representations~\cite{bilovs2021neural,han2021exploratory}. In particular, the distinction between spatiotemporal coordinates and time span is considered by Han et al.~\cite{han2021exploratory}, yet the ability to distinguish properties of the flow map for $\tau = 0$ time span is not studied. Our network design is inspired by Bilo{\v{s}} et al.~\cite{bilovs2021neural}, where they similarly consider residual connections. However, we make more precise the role of residual architectures in regards to flow map derivatives, and the relationship with the vector field, this being the only source of supervision in our work.
+
+What remains is a specific instantiation of functions $f_{\nu}$ and $f_{\tau}$. Though in principle these could be arbitrary neural networks, in practice we adapt prior work on learnable feature grids~\cite{takikawa2021neural,weiss2021fast,muller2022instant}, where the parameters of the model are, in part, comprised of learnable spatiotemporal feature grids, each of varying resolution. For each feature grid we perform linear interpolation to obtain a feature vector, and concatenate the vectors obtained across all grids. We then apply a shallow MLP to the concatenated vector. For simplicity, grid cells are accessed exactly, rather than hashed as proposed in M{\"u}ller et al.~\cite{muller2022instant}. The bulk of the network parameters thus lie in the feature grids, rather than MLP weights, and so in practice the dimensionality $d$ need not be too large -- in practice we set $d = 64$. As a result, the cost of evaluating the network is inexpensive, requiring (1) interpolation of feature vectors from a set of grids, and (2) applying several matrix-vector multiplication operations (c.f. Eqs.~\eqref{eq:z0}--\eqref{eq:zlast}).
+
+
+\subsection{Optimization Scheme}
+\label{sec:optimization}
+
+% overview of optimization scheme
+Our optimization scheme proceeds in two phases. In the first phase we optimize for the flow map's instantaneous velocity, while in the second phase we optimize for the self-consistency criterion, in order to learn the flow map over the full spatiotemporal domain, and varying time spans.
+
+\textbf{Vector field optimization.} To find the flow map's instantaneous velocity, we minimize the following objective:
+\begin{equation}
+    \mathcal{L}_{\nu} = \mathbb{E}_{(\mathbf{x},t) \in \mathcal{D}} \left[ \lVert W^{(L)} (\mathbf{m}^{(0)} \odot f_{\nu}(\mathbf{x},t)) - \boldsymbol{\nu}(\mathbf{x},t) \rVert \right].
+\end{equation}
+This amounts to optimizing over the parameters of $f_{\nu}$, e.g. the multi-level feature grid, shallow MLP, vector $\mathbf{m}^{(0)}$, and final projection $W^{(L)}$. We emphasize that it is only this phase of optimization that requires the vector field for supervision. The relevant portion of the model (c.f. Fig.~\ref{fig:illustrative_network}(c)) can encode the vector field in a persistent manner, even as we optimize for the flow map in the subsequent phase, and thus we may discard the vector field post optimization. For large-scale vector fields that may not fit in memory, this gives us the opportunity to learn a compressed vector field representation, e.g. one that can fit in memory for use in the next optimization phase, as well as at inference time.
+
+\begin{figure}
+  \centering
+ 	\includegraphics[width=1\linewidth]{figures/opt_illustration_alt.pdf}
+	\caption{We illustrate how flow map optimization incrementally learns longer time spans over the course of optimization. Initially (40 steps), the flow map provides us with a linear approximation, owing to its instantaneous velocity well-representing the vector field. Over optimization, the flow map becomes more accurate in its predictions for longer time spans. }
+    \label{fig:optim}
+\end{figure}
+
+\textbf{Flow map optimization.} To learn the flow map, we are guided by the proposed self-consistency criterion of Eq.~\eqref{eq:composition-detail}. Although we often find taking just a single step is sufficient for giving accurate flow maps, for certain datasets, we find it useful to instead take multiple steps in optimizing this loss. More specifically, we define $\bar{\Phi}(\mathbf{x},t,\varepsilon) = (\hat{\Phi}(\mathbf{x},t,\varepsilon),t+\varepsilon,\varepsilon)$ to be the resulting position, subsequent time step, and time span $\varepsilon$, from applying the flow map. Then for some target time span $\tau$, we can compose the flow map into multiple steps $k \in \mathbb{Z}^{+}$ as follows:
+\begin{equation}
+\label{eq:steps}
+\hat{\Phi}_k(\mathbf{x},t,\tau) = \underbrace{\bar{\Phi} \, \circ \, \bar{\Phi} \, \circ \, \cdots \, \circ}_{k-1} \bar{\Phi}(\mathbf{x},t,\frac{\tau}{k}).
+\end{equation}
+We then redefine our self-consistency loss as:
+\begin{equation}
+    \label{eq:comp-loss}
+    l_s(\mathbf{x},t,\tau) = \bigg\lVert \frac{\partial \hat{\Phi}(\mathbf{x}, t, \tau)}{\partial \tau} - \frac{\partial \hat{\Phi}(\hat{\Phi}_k(\mathbf{x}, t, \tau),t+\tau,0)}{\partial \tau} \bigg\rVert.
+\end{equation}
+
+Experimentally, we find that the number of steps $k$ to take can be set in proportion to the time span. In particular, for a given time span $\tau$ if we let $\tau_g$ be this value's expression in grid units of the field's time domain, then we find it sufficient to set $k(\tau) = \lceil \sqrt{\tau_g} \rceil$. Given that our network architecture permits efficient evaluation, this is reasonably cheap to compute, especially in relation to full numerical integration. For further efficiency, we find that the right-hand side of Eq.~\eqref{eq:comp-loss} can be frozen during optimization, and hence we only optimize for the flow map derivative under nonzero time span $\tau$.
+
+During flow map optimization, we may freeze the network dedicated to instantaneous velocity, if not fine-tune it with a learning rate much smaller than the flow map portion of the network, e.g. approximately 2 orders of magnitude less. \new{Moreover, $\tau$-scaled residual connections ensure that the derivative network for nonzero $\tau$ is not overly complex, e.g. for small $\tau$ it will remain close to the derivative at $\tau = 0$.} We find the ability of the flow map to well-represent small time spans (c.f. Eq.~\eqref{eq:zero_advect}) significantly helps stabilize optimization, and in practice, we find that the flow map incrementally improves on larger time spans over the course of optimization, please see Fig.~\ref{fig:optim} for an illustration.

@@ -1,0 +1,454 @@
+\documentclass{article}
+
+
+
+
+% Optional math commands from https://github.com/goodfeli/dlbook_notation.
+
+
+\usepackage{hyperref}
+\usepackage{url}
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2022
+
+
+% ready for submission
+
+\PassOptionsToPackage{round}{natbib}
+\usepackage{natbib}
+
+\usepackage{preprint,times}
+%\input{math_commands.tex}
+
+
+
+
+
+\usepackage{algpseudocode}
+\usepackage{amssymb,amsmath,amstext,amstext,amsthm}
+\usepackage{bbm}
+\usepackage{enumitem}
+
+
+
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{microtype}
+\usepackage{graphicx}
+
+
+\usepackage{bm}
+\usepackage{makecell}
+\usepackage{color}
+\usepackage{wrapfig}
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{caption}
+\usepackage{subcaption}
+
+\hypersetup{
+	colorlinks=true,%
+	citecolor={blue!50!black},
+	linkcolor={red!50!black},
+	urlcolor={green!50!black}
+}
+
+\definecolor{lightred}{HTML}{B85450}
+\definecolor{lightblue}{HTML}{6C8EBF}
+\definecolor{lightgreen}{HTML}{82B366}
+\definecolor{MyPurple}{RGB}{111,0,255}
+
+
+% \makeatletter
+% \renewcommand{\ALG@name}{}
+% \makeatother
+
+\captionsetup[algorithm]{
+	labelfont = bf,
+	labelsep = period
+}
+	
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+
+
+\def \fanshu{\futurelet\next\fanshuAux}
+\def \fanshuAux{\ifx\next[
+	\expandafter \fanshuOpt
+	\else
+	\expandafter \fanshuNoOpt
+	\fi
+}
+\def \fanshuOpt[#1]#2{{ \left\Vert #2 \right\Vert}_{#1}}
+\def \fanshuNoOpt#1{ { \left\Vert #1 \\right\Vert} }
+
+\newcommand{\on}[1]{\operatorname{#1}}
+
+\iclrfinalcopy
+
+
+\title{Decentralized Policy Optimization}
+
+
+
+\author{%
+   Kefan Su \\
+   School of Computer Science\\
+   Peking University\\
+   \texttt{sukefan@pku.edu.cn} \\
+   \And
+   Zongqing Lu \\
+   School of Computer Science\\
+   Peking University\\
+   \texttt{zongqing.lu@pku.edu.cn} \\
+}
+
+
+\begin{document}
+
+\maketitle
+\begin{abstract}
+The study of decentralized learning or independent learning in cooperative multi-agent reinforcement learning has a history of decades. Recently empirical studies show that independent PPO (IPPO) can obtain good performance, close to or even better than the methods of centralized training with decentralized execution, in several benchmarks. However, decentralized actor-critic with convergence guarantee is still open. In this paper, we propose \textit{decentralized policy optimization} (DPO), a decentralized actor-critic algorithm with monotonic improvement and convergence guarantee. We derive a novel decentralized surrogate for policy optimization such that the monotonic improvement of joint policy can be guaranteed by each agent \textit{independently} optimizing the surrogate. In practice, this decentralized surrogate can be realized by two adaptive coefficients for policy optimization at each agent. Empirically, we compare DPO with IPPO in a variety of cooperative multi-agent tasks, covering discrete and continuous action spaces, and fully and partially observable environments. The results show DPO outperforms IPPO in most tasks, which can be the evidence for our theoretical results.
+\end{abstract}
+
+\section{Introduction}
+    In cooperative multi-agent reinforcement learning (MARL), centralized training with decentralized execution (CTDE) has been the primary framework \citep{MADDPG,COMA,VDN,QMIX,QPLEX,FOP,MAPPO}. Such a framework can settle the non-stationarity problem with the centralized value function, which takes as input the global information and is beneficial to the training process. Conversely, decentralized learning has been paid much less attention. The main reason may be that there are few theoretical guarantees for decentralized learning and the interpretability is insufficient even if the simplest form of decentralized learning, \textit{i.e.}, independent learning, can obtain good empirical performance in several benchmarks \citep{benchmark}. However, decentralized learning itself still deserves attention as there are still many settings in which the global information cannot be accessed by each agent, and also for better robustness and scalability \citep{MARL-survey}. Moreover, the idea of decentralized learning is direct, comprehensible, and easy to realize in practice.
+    
+    Independent Q-learning (IQL) \citep{IDQN} and independent PPO (IPPO) \citep{IPPO} are the straightforward decentralized learning methods for cooperative MARL, where each agent learns the policy by DQN \citep{DQN} and PPO \citep{PPO} respectively. Empirical studies \citep{IPPO,MAPPO,benchmark} demonstrate that these two methods can obtain good performance, close CTDE methods. Especially, IPPO can outperform several CTDE methods in a few benchmarks, including MPE \citep{MADDPG} and SMAC \citep{SMAC}, which shows great promise for decentralized learning. Unfortunately, to the best of our knowledge, there is still no theoretical guarantee or rigorous explanation for IPPO, though there has been some study \citep{sun2022monotonic}.
+   
+    In this paper, we make a further step and propose \textbf{\textit{decentralized policy optimization}} (\textbf{DPO}), a decentralized actor-critic method with monotonic improvement and convergence guarantee for cooperative multi-agent reinforcement learning. Similar to IPPO, DPO is actually \textit{independent learning}, because in DPO each agent optimizes its own objective individually and independently. However, unlike IPPO, such an independent policy optimization of DPO can guarantee the monotonic improvement of the joint policy.
+    
+    From the essence of fully decentralized learning, we first analyze Q-function in the decentralized setting and further show that the optimization objective of IPPO may not induce the joint policy improvement. Then, starting from the surrogate of TRPO \citep{TRPO} and together considering the characteristics of fully decentralized learning, we introduce a \textit{novel} lower bound of joint policy improvement as the surrogate for decentralized policy optimization. This surrogate can be naturally decomposed for each agent, which means each agent can optimize its individual objective to make sure that the joint policy improves monotonically. In practice, this decentralized surrogate can be realized by two adaptive coefficients for policy optimization at each agent. The idea of DPO is simple yet effective, and suitable for fully decentralized learning.
+    
+    Empirically, we compare DPO and IPPO in a variety of cooperative multi-agent tasks including a cooperative stochastic game, MPE \citep{MADDPG}, multi-agent MuJoCo \citep{mamujoco}, and SMAC \citep{SMAC}, covering discrete and continuous action spaces, and fully and partially observable environments. The empirical results show that DPO performs better than IPPO in most tasks, which can be evidence for our theoretical results.
+    
+
+\section{Related Work}
+
+\textbf{CTDE.} In cooperative MARL, centralized training with decentralized execution (CTDE) is the most popular framework \citep{MADDPG, MAAC, COMA, VDN, QMIX, QPLEX,FOP,mamujoco}. CTDE algorithms can handle the non-stationarity problem in the multi-agent environment by the centralized value function. One line of research in CTDE is value decomposition \citep{VDN,QMIX,QTRAN,Qatten,QPLEX}, where a joint Q-function is learned and factorized into local Q-functions by the relationship between optimal joint action and optimal local actions. Another line of research in CTDE is multi-agent actor-critic \citep{COMA,MAAC,DOP,FOP,DMAC}, where the centralized value function is learned to provide policy gradients for agents to learn stochastic policies. More recently, policy optimization has attracted much attention for cooperative MARL. PPO \citep{PPO} and TRPO \citep{TRPO} have been extended to multi-agent settings by MAPPO \citep{MAPPO}, CoPPO \citep{COPPO}, and HAPPO \citep{HAPPO} respectively via learning a centralized state value function. However, these methods are CTDE and thus not appropriate for decentralized learning.
+
+
+\textbf{Fully decentralized learning.} Independent learning \citep{CO-MARLreview} is the most straightforward approach for fully decentralized learning and has actually been studied in cooperative MARL since decades ago. The representatives are independent Q-learning (IQL) \citep{IQL,IDQN} and independent actor-critic (IAC) as \citet{COMA} empirically studied. These methods make agents directly execute the single-agent Q-learning or actor-critic algorithm individually. The drawback of such independent learning methods is obvious. As other agents are also learning, each agent interacts with a non-stationary environment, which violates the stationary condition of MDP. Thus, these methods are not with any convergence guarantee theoretically, though IQL could obtain good performance in several benchmarks \citep{benchmark}. More recently, decentralized learning has also been specifically studied with communication \citep{zhang2018fully,li2020f2a2} or parameter sharing \citep{terry2020revisiting}. However, in this paper, we consider fully decentralized learning as each agent independently learning its policy while being not allowed to communicate or share parameters as in \citet{IDQN,IPPO}. We will propose an algorithm with convergence guarantees in such a fully decentralized learning setting. 
+
+\textbf{IPPO.} TRPO \citep{TRPO} is an important single-agent actor-critic algorithm that limits the policy update in a trust region and has a monotonic improvement guarantee by optimizing a surrogate objective. PPO \citep{PPO} is a practical but effective algorithm derived from TRPO, which replaces the trust region constraint with a simpler clip trick. IPPO \citep{IPPO} is a recent cooperative MARL algorithm in which each agent just learns with independent PPO. Though IPPO is still with no convergence guarantee, it obtains surprisingly good performance in SMAC \citep{SMAC}. IPPO is further empirically studied by \citet{MAPPO,benchmark}. Their results show IPPO can outperform a few CTDE methods in several benchmark tasks. These studies demonstrate the potential of policy optimization in fully decentralized learning, which we will focus on in this paper. \textit{Although there are some value-based algorithms for fully decentralized learning \citep{IQL,HQL,LQL}, most of them are heuristic and follow the principle different from policy-based algorithms, so we will not focus on these algorithms.} 
+
+
+\section{Method}
+
+From the perspective of policy optimization, in fully decentralized learning, we need to find an objective for each agent such that the joint policy improvement can be guaranteed by each agent independently and individually optimizing its own objective. Thus, we propose a novel lower bound of the joint policy improvement to enable \textit{decentralized policy optimization} (DPO). In the following, we first discuss some preliminaries; then we analyze the critic of agent in fully decentralized learning; next we derive the lower bound and the proof for convergence; finally we introduce the practical algorithm of DPO. 
+
+\subsection{Preliminaries}
+
+\textbf{Dec-POMDP.} Decentralized partially observable Markov decision process is a general model for cooperative MARL. A Dec-POMDP is a tuple $\mathcal{G}=\left\{S,A,P,Y,O,I,N,r,\gamma\right\}$. $S$ is the state space, $N$ is the number of agents, $\gamma \in [0,1)$ is the discount factor, and $I = \{1,2\cdots N\}$ is the set of all agents.  $A = A_1 \times A_2 \times \cdots \times A_N$ represents the joint action space, where $A_i$ is the individual action space for agent $i$. $P(s^{\prime} |s,\bm{a} ): S \times A \times S \to [0,1]$ is the transition function, and $r(s,\bm{a} ): S \times A \to \mathbb{R}$ is the reward function of state $s \in S$ and joint action $\bm{a} \in A$. $Y$ is the observation space, and $O(s,i):S \times I \to Y $ is a mapping from state to observation for each agent $i$. The objective of Dec-POMDP is to maximize $J({\bm{\pi}}) = \mathbb{E}_{\bm{\pi}}\left[ \sum_{t = 0} \gamma^t r(s_t,\bm{a}_t ) \right],$ thus we need to find the optimal joint policy ${\bm{\pi}}^{*} = \arg\max_{{\bm{\pi}}} J({\bm{\pi}})$. To settle the partial observable problem, history $\tau_i \in \mathcal{T}_i = (Y \times A_i)^*$ is often used to replace observation $o_i \in Y$. In fully decentralized learning, each agent $i$ independently learns an individual policy $\pi^i(a_i|\tau_i)$ and their joint policy $\bm{\pi}$ can be represented as the product of each $\pi^i$. Though each agent learns individual policy as $\pi^i(a_i|\tau_i)$ in practice, in our analysis, we will assume that each agent could receive the state $s$, because the analysis in partially observable environments is much more difficult and the problem may be undecidable in Dec-POMDP \citep{undecideDECPOMDP}. Moreover, the V-function and Q-function of the joint policy $\bm{\pi}$ are as follows,
+\begin{align}
+		& V^{{\bm{\pi}}}(s) = \mathbb{E}_{\bm{a} \sim \bm{\pi}}\left[ Q^{{\bm{\pi}}}(s,\bm{a}) \right] \\
+		& Q^{{\bm{\pi}}}(s,\bm{a}) = r(s,\bm{a}) + \gamma \mathbb{E}_{s^\prime \sim P(\cdot | s, \bm{a} )}\left[ V^{\bm{\pi}}(s^\prime) \right]. \label{eq:joint-q}
+	\end{align} 
+
+\vspace{1mm}
+\textbf{Joint TRPO Objective.} In Dec-POMDP, we can still obtain a TRPO objective for the joint policy $\bm{\pi}$ from the theoretical results in single-agent RL \citep{TRPO}, which is referred to as the joint TRPO objective,  
+\begin{align}
+    & J({\bm{\pi}_{\operatorname{new}} } )-J({\bm{\pi}_{\operatorname{old}} } ) \ge \mathcal{L}^{\operatorname{joint}}_{\bm{\pi}_{\operatorname{old}}}(\bm{\pi}_{\operatorname{new}}) - C \cdot D_{\operatorname{KL}}^{\operatorname{max}}(\bm{\pi}_{\operatorname{old}} \| \bm{\pi}_{\operatorname{new}}) \label{eq:trpo-bound}\\
+    & {\text{where}\,\,\,}\mathcal{L}^{\operatorname{joint}}_{\bm{\pi}_{\operatorname{old}}}(\bm{\pi}_{\operatorname{new}}) = \sum_{s} \bm{\rho}_{\operatorname{old}}(s) \sum_{\bm{a}} \bm{\pi}_{\operatorname{new}}(\bm{a} | s) A_{{\on{old}}}(s,\bm{a}), \label{eq:trpo_l}
+\end{align}
+where $D_{\operatorname{KL}}^{\operatorname{max}}(\bm{\pi}_{\operatorname{old}} \| \bm{\pi}_{\operatorname{new}}) = \max_{s} D_{\operatorname{KL}}(\bm{\pi}_{\operatorname{old}}(\cdot|s) \| \bm{\pi}_{\operatorname{new}}(\cdot|s) ) $, $\bm{\rho}_{\operatorname{old}}(s) = \sum_{t = 0} \gamma^t \operatorname{Pr}(s_t = s| {\bm{\pi}_{\operatorname{old}} })$ is the discounted stationary distribution of the state given $\bm{\pi}_{\operatorname{old}}$, $A_{{\on{old}}}$ is the advantage function under $\bm{\pi}_{\on{old}}$, and $C$ is a constant. 
+
+The joint TRPO objective, \textit{i.e.}, RHS of \eqref{eq:trpo-bound}, is a lower bound for the difference between the new joint policy $\bm{\pi}_{\operatorname{new}}$ and the old joint policy $\bm{\pi}_{\operatorname{old}}$ in term of expected return. Therefore, we can use this objective as a surrogate, and maximizing this surrogate can guarantee that the policy is improving monotonically. However, the joint TRPO objective cannot be directly optimized in fully decentralized learning as this objective is involved in the joint policy, which cannot be accessed in fully decentralized learning.
+
+We will propose a new lower bound (surrogate) for $J({\bm{\pi}_{\operatorname{new}} } )-J({\bm{\pi}_{\operatorname{old}} } )$, which can be optimized in fully decentralized learning. Before introducing our new surrogate, we need to first analyze the critic of agent in fully decentralized learning, which is referred to as decentralized critic. 
+
+
+\subsection{Decentralized Critic}
+
+In fully decentralized learning, each agent learns independently from its own interactions with the environment. Therefore, the Q-function of each agent $i$ is actually the following formula: 
+\begin{align}
+     Q^{\pi^i}_{\pi^{-i} }(s,a_i) = r_{\pi^{-i} }(s,a_i) + \gamma \mathbb{E}_{a_{-i} \sim \pi^{-i}, s^\prime \sim P(\cdot|s,a_i,a_{-i}), a_i^\prime \sim \pi^i}[Q^{\pi^i}_{\pi^{-i}}(s^\prime,a_i^\prime)],
+\end{align}
+where $r_{\pi^{-i} }(s,a_i) = \mathbb{E}_{\pi^{-i}}[r(s,a_i,a_{-i})]$, and $\pi^{-i}$ and $a_{-i}$ respectively denote the joint policy and joint action of all agents expect agent $i$.
+If we take the expectation $\mathbb{E}_{a_{-i}^\prime \sim \pi^{-i}(\cdot|s^\prime),a_{-i} \sim \pi^{-i}(\cdot|s)}$ over both sides of the Q-function of joint policy (\ref{eq:joint-q}), then we have 
+\begin{align*}
+    \mathbb{E}_{\pi^{-i}}[Q^{{\bm{\pi}}}(s,a_i,a_{-i})] = r_{\pi^{-i} }(s,a_i) + \gamma \mathbb{E}_{a_{-i} \sim \pi^{-i}, s^\prime \sim P(\cdot|s,a_i,a_{-i}),a_i^\prime \sim \pi^i}\left[ \mathbb{E}_{\pi^{-i}}[Q^{{\bm{\pi}}}(s^\prime,a_i^\prime,a_{-i}^\prime)] \right].
+\end{align*}
+We can see that $Q^{\pi^i}_{\pi^{-i} }(s,a_i)$ and $\mathbb{E}_{\pi^{-i}}[Q^{{\bm{\pi}}}(s,a_i,a_{-i})]$ satisfy the same iteration. Moreover, we will show in the following that $Q^{\pi^i}_{\pi^{-i} }(s,a_i)$ and $\mathbb{E}_{\pi^{-i}}[Q^{{\bm{\pi}}}(s,a_i,a_{-i})]$ are just the same. 
+
+We first define an operator $\Gamma^{\pi^i}_{\pi^{-i}}$ as follows,
+\begin{align*}
+    \Gamma^{\pi^i}_{\pi^{-i}}Q(s,a_i) =  r_{\pi^{-i} }(s,a_i) + \gamma \mathbb{E}_{a_{-i} \sim \pi^{-i}, s^\prime \sim P(\cdot|s,a_i,a_{-i}),a_i^\prime \sim \pi^i}[Q(s^\prime,a_i^\prime)].
+\end{align*}
+Then we will prove that the operator $\Gamma^{\pi^i}_{\pi^{-i}}$ is a contraction.
+
+Considering any two individual Q-functions $Q_1$ and $Q_2$, we have:
+\begin{align*}
+    \Vert \Gamma^{\pi^i}_{\pi^{-i}}Q_1 - \Gamma^{\pi^i}_{\pi^{-i}}Q_2 \Vert_{\infty} & = \max_{s,a_i} \gamma|\mathbb{E}_{a_{-i} \sim \pi^{-i}, s^\prime \sim P(\cdot|s,a_i,a_{-i}),a_i^\prime \sim \pi^i}[Q_1(s^\prime,a_i^\prime) - Q_2(s^\prime,a_i^\prime)]  | \\
+    & \le \gamma \mathbb{E}_{a_{-i} \sim \pi^{-i}, s^\prime \sim P(\cdot|s,a_i,a_{-i}),a_i^\prime \sim \pi^i}[\max_{s^\prime, a_i^\prime}|Q_1(s^\prime,a_i^\prime) - Q_2(s^\prime,a_i^\prime)| ] \\
+    & = \gamma \max_{s^\prime, a_i^\prime}|Q_1(s^\prime,a_i^\prime) - Q_2(s^\prime,a_i^\prime)| \\
+    & = \gamma \Vert Q_1 - Q_2 \Vert_{\infty}.
+\end{align*}
+So the operator $\Gamma^{\pi_i}_{\pi_{-i}}$ has one and only one fixed point, which means 
+\begin{align*}
+    &Q^{\pi^i}_{\pi^{-i} }(s,a_i)=\mathbb{E}_{\pi^{-i}}[Q^{{\bm{\pi}}}(s,a_i,a_{-i})],\\
+    &V^{\pi^i}_{\pi^{-i} }(s)=\mathbb{E}_{\pi^{-i}}[V^{{\bm{\pi}}}(s)]=V^{{\bm{\pi}}}(s).
+\end{align*}
+
+
+With this well-defined decentralized critic, we can further analyze the objective of IPPO \citep{IPPO}. In IPPO, the policy objective of each agent $i$ can be essentially formulated as follows:
+\begin{align}
+    &\mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}}) = \sum_{s} \bm{\rho}_{\operatorname{old}}(s) \sum_{a_i} \pi^i_{\operatorname{new}}(a_i|s) A^i_{\operatorname{old}}(s,a_i),
+    \label{eq:init-obj}\\
+    &{\text{where}\,\,\,}A^i_{\operatorname{old}}(s,a_i) = Q^{\pi_{\operatorname{old}}^i }_{\pi_{\operatorname{old}}^{-i} }(s,a_i) - \mathbb{E}_{\pi_{\operatorname{old}}^i}[Q^{\pi_{\operatorname{old}}^i }_{\pi_{\operatorname{old}}^{-i} }(s,a_i)] = \mathbb{E}_{\pi^{-i}_{\operatorname{old}}}[A_{\operatorname{old}}(s,a_i,a_{-i})]. \notag
+\end{align}
+
+However, \eqref{eq:init-obj} is different from \eqref{eq:trpo_l} in the joint TRPO objective. Thus, directly optimizing \eqref{eq:init-obj} may not improve the joint policy, and thus cannot provide any guarantee for convergence, to the best of our knowledge. Nevertheless, it seems that $A^i_{\operatorname{old}}(s,a_i)$ is the only advantage formulation that can be accessed by each agent in fully decentralized learning. So, the policy objective of DPO will be derived on \eqref{eq:init-obj} but with modifications to guarantee convergence, and we will introduce the detail in the next section. In the following, we discuss how to compute this advantage in practice in fully decentralized learning. 
+
+As we need to calculate $A^i_{\operatorname{old}}(s,a_i) =  \mathbb{E}_{\pi^{-i}_{\operatorname{old}}}[r(s,a_i,a_{-i}) + \gamma V^{\bm{\pi}_{
+\operatorname{old}}}(s^\prime) - V^{\bm{\pi}_{
+\operatorname{old}}}(s)] $ for the policy update, we can approximate $A^i_{\operatorname{old}}(s,a_i)$ with $\hat{A}^i(s,a_i) = r + \gamma V^{\pi^i}_{\pi^{-i}}(s^\prime) - V^{\pi^i}_{\pi^{-i}}(s)$, which is an unbiased estimate of $A^i_{\operatorname{old}}(s,a_i)$, though it may be with a large variance. In practice, we can follow the traditional idea in fully decentralized learning, and let each agent $i$ independently learn an individual value function $V^i(s)$. Then, we further have $\hat{A}^i(s,a_i) \approx r + \gamma V^i(s^\prime) - V^i(s)$. The loss for the decentralized critic is as follows:
+\begin{equation}
+    \mathcal{L}^i_{\operatorname{critic}} = \mathbb{E}\left[ (V^i(s) - y_i)^2 \right], \quad \text{where} \,\,  y_i = r + \gamma V^i(s^\prime) \text{\, or Monte Carlo return}.
+    \label{eq:critic-obj}
+\end{equation}
+There may be some ways to improve the learning of this critic, which however is beyond the scope of our discussion. 
+
+
+
+\subsection{Decentralized Surrogate}
+
+We are ready to introduce the decentralized surrogate. First, we derive our novel lower bound of the joint policy improvement by the following theorem. 
+
+\begin{theorem}
+    \label{theorem-1} 
+    Suppose $\bm{\pi}_{\operatorname{old}}$ and $\bm{\pi}_{\operatorname{new}}$ are two joint policies. Then, the following bound holds:
+    \begin{equation*}
+         J({\bm{\pi}_{\operatorname{new}} } )-J({\bm{\pi}_{\operatorname{old}} } ) \ge \frac{1}{N} \sum_{i = 1}^{N} \mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}}) -  \tilde{M} \cdot \sum_{i = 1}^N \sqrt{D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} )} -  C \cdot \sum_{i = 1}^N  D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i}),  
+    \end{equation*}
+    where $\tilde{M} = \frac{2\max_{s,\bm{a}}|A_{\on{old}}(s,\bm{a})|}{1 - \gamma}$ and $C = \frac{4\gamma\max_{s,\bm{a}}|A_{\on{old}}(s,\bm{a})|}{(1 - \gamma)^2}$ are two constants.
+\end{theorem}
+
+
+
+\begin{proof}
+    We first consider $\mathcal{L}^{\operatorname{joint}}_{\bm{\pi}_{\operatorname{old}}}(\bm{\pi}_{\operatorname{new}}) - \mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}})$. According to \eqref{eq:trpo_l} and \eqref{eq:init-obj}, we have the following equation:
+    \begin{align*}
+        & \mathcal{L}^{\operatorname{joint}}_{\bm{\pi}_{\operatorname{old}}}(\bm{\pi}_{\operatorname{new}}) - \mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}}) \\
+        & = \sum_{s} \bm{\rho}_{\operatorname{old}}(s) \sum_{a_i} \pi^i_{\operatorname{new}}(a_i|s) \bigg( \sum_{a_{-i}} \pi_{\operatorname{new}}^{-i}(a_{-i}|s)A_{\on{old}}(s,a_i,a_{-i}) -  A_{\operatorname{old}}^i(s,a_i) \bigg) \\
+        & = \mathbb{E}_{\bm{\rho}_{\on{old}}}\mathbb{E}_{\pi^i_{\on{new}}}\bigg[ \sum_{a_{-i}}  \left( \pi^{-i}_{\on{new}}(a_{-i}|s) - \pi^{-i}_{\on{old}}(a_{-i}|s) \right) A_{\on{old}}(s,a_i,a_{-i})\bigg].
+    \end{align*}
+    
+    Then, we have the following inequalities:
+    \begin{align}
+		& |\mathcal{L}^{\operatorname{joint}}_{\bm{\pi}_{\operatorname{old}}}(\bm{\pi}_{\operatorname{\on{new}}}) - \mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}})| \notag\\
+		&  \le \mathbb{E}_{\bm{\rho}_{\on{old}}}\mathbb{E}_{\pi^i_{\on{new}}}\bigg[ \sum_{a_{-i}} | \pi^{-i}_{\on{old}}(a_{-i}|s) - \pi^{-i}_{\on{new}}(a_{-i}|s) | \ |A_{\on{old}}(s,a_i,a_{-i})|\bigg] \notag\\
+		& \le \mathbb{E}_{\bm{\rho}_{\on{old}}}\mathbb{E}_{\pi^i_{\on{new}}} \bigg[ M \sum_{a_{-i}} | \pi^{-i}_{\on{old}}(a_{-i}|s) - \pi^{-i}_{\on{new}}(a_{-i}|s) |  \bigg] \quad\quad (M = \max_{s,\bm{a}}|A_{\on{old}}(s,\bm{a})|) \notag\\
+		& = 2M \mathbb{E}_{\bm{\rho}_{\on{old}}} \left[ D_{\operatorname{TV}}(\pi_{\on{old}}^{-i}(\cdot|s)\Vert \pi_{\on{new}}^{-i}(\cdot|s)) \right]  \notag\\
+		& \le  \frac{2M}{1-\gamma}\max_{s}   D_{\operatorname{TV}}(\pi_{\on{old}}^{-i}(\cdot|s)\Vert \pi_{\on{new}}^{-i}(\cdot|s))  \notag\\
+		& = \tilde{M} D_{\operatorname{TV}}^{\max}(\pi_{\on{old}}^{-i} \Vert \pi_{\on{new}}^{-i}) \quad\quad (\tilde{M} = \frac{2M}{1-\gamma}) \notag\\
+		& \le \tilde{M} \sqrt{D_{\operatorname{KL}}^{\max}(\pi_{\on{old}}^{-i} \Vert \pi_{\on{new}}^{-i})} \label{eq:tv-kl} \\
+		& \le \tilde{M} \sqrt{\sum_{j \not = i} D^{\max}_{\operatorname{KL}}(\pi_{\operatorname{old}}^{j} \Vert \pi_{\operatorname{new}}^{j} ) }, \label{eq:kl-sum}
+	\end{align}
+    where \eqref{eq:tv-kl} is from the relationship between the total variance and KL-divergence that $D_{\operatorname{TV}}(p\Vert q)^2 \le D_{\operatorname{KL}}(p\Vert q)$ \citep{TRPO}, and \eqref{eq:kl-sum} is a property of the KL-divergence, which can be obtained as follows,
+    \begin{align}
+        D_{\operatorname{KL}}^{\max}(\bm{\pi}_{\operatorname{old}} || \bm{\pi}_{\operatorname{new}}) & = \max_s D_{\operatorname{KL}}(\bm{\pi}_{\operatorname{old}}(\cdot|s) || \bm{\pi}_{\operatorname{new}}(\cdot|s)) \notag \\
+        & =\max_s  \sum_i D_{\operatorname{KL}}(\pi^i_{\operatorname{old}}(\cdot|s) || \pi^i_{\operatorname{new}}(\cdot|s)) \notag \\
+        & \le \sum_i \max_s D_{\operatorname{KL}}(\pi^i_{\operatorname{old}}(\cdot|s) || \pi^i_{\operatorname{new}}(\cdot|s)) \notag \\
+        & = \sum_i D_{\operatorname{KL}}^{\max}(\pi^i_{\operatorname{old}} || \pi^i_{\operatorname{new}}). \label{eq:kl-property}
+    \end{align}
+    From \eqref{eq:kl-sum}, we can further obtain the following inequality,
+    \begin{equation}
+        \mathcal{L}^{\operatorname{joint}}_{\bm{\pi}_{\operatorname{old}}}(\bm{\pi}_{\operatorname{new}}) - \mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}}) \ge -\tilde{M} \sqrt{\sum_{j \not = i} D^{\max}_{\operatorname{KL}}(\pi_{\on{old}}^{j} \Vert \pi_{\on{new}}^{j} ) }. \label{eq:coro}
+    \end{equation}
+    
+    Next we will prove this theorem, starting from \eqref{eq:trpo-bound}, 
+    \begin{align}
+	& J({\bm{\pi}_{\operatorname{new}} } )-J({\bm{\pi}_{\operatorname{old}} } ) \ge \mathcal{L}^{\operatorname{joint}}_{\bm{\pi}_{\operatorname{old}}}(\bm{\pi}_{\operatorname{new}}) - C \cdot D_{\operatorname{KL}}^{\operatorname{\max}}(\bm{\pi}_{\operatorname{old}} || \bm{\pi}_{\operatorname{new}}) \notag \\
+	& = \frac{1}{N} \sum_{i = 1}^{N} \mathcal{L}^{\operatorname{joint}}_{\bm{\pi}_{\operatorname{old}}}(\bm{\pi}_{\operatorname{new}}) -  C \cdot D_{\operatorname{KL}}^{\operatorname{\max}}(\bm{\pi}_{\operatorname{old}} || \bm{\pi}_{\operatorname{new}}) \notag \\
+	& \label{eq:step1} \ge \frac{1}{N} \sum_{i = 1}^{N} \mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}}) - \frac{\tilde{M}}{N}\sum_{i = 1}^{N}\sqrt{\sum_{j \not = i} D^{\max}_{\on{KL}}(\pi_{\on{old}}^{j} \Vert \pi_{\on{new}}^{j} ) } -  C \cdot D_{\on{KL}}^{\max}(\bm{\pi}_{\on{new}}\Vert\bm{\pi}_{\on{old}}) \\
+	& \label{eq:step2} \ge \frac{1}{N} \sum_{i = 1}^{N} \mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}}) - \tilde{M} \sqrt{\frac{N-1}{N} \sum_{i = 1}^N D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} ) } -  C \cdot D_{\on{KL}}^{\max}(\bm{\pi}_{\on{new}}\Vert\bm{\pi}_{\on{old}})  \\ 
+	& \label{eq:step3} \ge \frac{1}{N} \sum_{i = 1}^{N} \mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}}) - \tilde{M} \sqrt{\frac{N-1}{N} \sum_{i = 1}^N D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} ) } -  C \cdot \sum_{i = 1}^N  D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} )  \\ 
+	& \ge \frac{1}{N} \sum_{i = 1}^{N} \mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}}) - \tilde{M} \sqrt{ \sum_{i = 1}^N D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} ) } -  C \cdot \sum_{i = 1}^N  D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} )  \notag \\ 
+	& \label{eq:step6} \ge \frac{1}{N} \sum_{i = 1}^{N} \mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i_{\operatorname{new}}) -  \tilde{M} \cdot \sum_{i = 1}^N \sqrt{D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} )} -  C \cdot \sum_{i = 1}^N  D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} ). 
+	\end{align}
+	The inequality \eqref{eq:step1} is the direct application of the inequality \eqref{eq:coro}. The inequality \eqref{eq:step2} is from the Cauthy-Schwarz inequality,
+	\begin{align*}
+	    \sum_{i = 1}^{N}\sqrt{\sum_{j \not = i} D^{\max}_{\on{KL}}(\pi_{\on{old}}^{j} \Vert \pi_{\on{new}}^{j} ) } & \le \sqrt{N \sum_{i = 1} \sum_{j \not = i} D^{\max}_{\on{KL}}(\pi_{\on{old}}^{j} \Vert \pi_{\on{new}}^{j}}) \\
+	    & = \sqrt{N(N-1)\sum_{i = 1}D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i}}).
+	\end{align*}
+    The inequality \eqref{eq:step3} is from \eqref{eq:kl-property}, while the inequality \eqref{eq:step6} is from the simple inequality $\sqrt{\sum_i{a_i}} \le \sum_i \sqrt{a_i} \,\, (a_i \ge 0 ,\ \forall i)$.
+\end{proof}
+
+The lower bound in Theorem \ref{theorem-1} is dedicated to decentralized policy optimization, because it can be directly decomposed individually for each agent as a decentralized surrogate. From Theorem \ref{theorem-1}, if we set the policy optimization objective of each agent $i$ as 
+\begin{equation}
+    \pi_{\operatorname{new}}^i = \arg \max_{\pi^i} \Big(\frac{1}{N}\mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i)- \tilde{M} \cdot \sqrt{D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi^i )} - C \cdot D^{\max}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi^i) \Big) ,
+    \label{eq:de-obj}
+\end{equation} 
+then we have $J({\bm{\pi}_{\operatorname{new}} } ) \ge J({\bm{\pi}_{\operatorname{old}} })$ from TRPO \citep{TRPO}. Moreover, as the objective $J(\bm{\pi})$ is bounded, the convergence of $\{J(\bm{\pi}^t)\}$ is guaranteed, where $\bm{\pi}^t$ is the joint policy after $t$ iterations according to \eqref{eq:de-obj}. \textbf{\textit{Therefore, the joint policy of agents improves monotonically and converges to sub-optimum by fully decentralized policy optimization, i.e., independent learning.}} Note that this result is under the assumption that each agent can obtain the state, and in practice each agent will take the individual trajectory $\tau_i$ as the approximation to the state.
+
+
+\subsection{Algorithm}
+\label{sec:algo}
+
+DPO is with a simple idea that each agent optimizes the decentralized surrogate \eqref{eq:de-obj}. However, we face the same trouble as TRPO that the constant $\tilde{M}$ and $C$ are large and if we directly optimize this objective, then the step size of the policy update will be small. 
+
+To settle this problem, we absorb the idea of the adaptive coefficient in PPO \citep{PPO}. We use two adaptive coefficients $\beta_1^i$ and $\beta_2^i$ to replace the constant $\tilde{M}$ and $C$ and additionally replace the maximum KL-divergence with the average KL-divergence. In practice, we will actually optimize the following objective
+\begin{equation}
+    \pi_{\operatorname{new}}^i = \arg \max_{\pi^i} \Big( \frac{1}{N}\mathcal{L}^{i}_{\bm{\pi}_{\operatorname{old}}}(\pi^i)- \beta_1^i  \sqrt{D^{\on{avg}}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi^{i} )} - \beta_2^i D^{\on{avg}}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi^i ) \Big),
+    \label{eq:adaptive-obj}
+\end{equation}
+where $D^{\on{avg}}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi^{i} ) = \mathbb{E}_{s \sim \bm{\pi_{\on{old}}}}\left[ D_{\on{KL}}(\pi_{\on{old}}^{i}(\cdot|s) \Vert \pi^{i}(\cdot|s) ) \right]$.
+
+As for the adaption of $\beta_1^i$ and $\beta_2^i$, we need to define a hyperparameter $d_{target}$, which can be seen as a ruler for the average KL-divergence $D^{\on{avg}}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} )$ for each agent.
+If $D^{\on{avg}}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} )$ is close to $d_{target}$, then we believe current $\beta_1^i$ and $\beta_2^i$ are appropriate. If $D^{\on{avg}}_{\on{KL}}(\pi_{\on{old}}^{i} \Vert \pi_{\on{new}}^{i} )$ exceeds $d_{target}$ too much, we believe $\beta_1^i$ and $\beta_2^i$ are small and need to increase and vice versa. In practice, we will use the following rule to update $\beta_1^i$ and $\beta_2^i$:
+\begin{equation}
+    \begin{aligned}
+     & \text{If} \  D^{\on{avg}}_{\on{KL}}(\pi_{\on{old}}^i \Vert \pi^i_{\on{new}} ) >  d_{target}* \delta , \quad \text{then} \  \beta^i_j \leftarrow \beta^i_j * \omega \quad \forall j \in \{1,2\} \\ 
+    & \text{If} \  D^{\on{avg}}_{\on{KL}}(\pi^i_{\on{old}} \Vert \pi^i_{\on{new}} ) <  d_{target} / \delta , \quad \text{then} \  \beta^i_j \leftarrow \beta^i_j / \omega \quad \forall j \in \{1,2\}. 
+    \end{aligned}
+    \label{eq:adaptive-rule}
+\end{equation}
+We choose the constants $\delta=1.5$ and $\omega = 2$ as the choice in PPO \citep{PPO}. As for the critic, we just follow the standard method in PPO. Then, we can have the fully decentralized learning procedure of DPO for each agent $i$ in Algorithm \ref{alg:1}.
+
+
+\begin{algorithm}[t]
+    \centering
+    \caption{\textbf{DPO}}
+    \label{alg:1}
+    \begin{algorithmic}[1]
+        	\For{episode = $1$ to $M$}
+			\For{$t = 1$ to max\_episode\_length}
+			\State select action $a_i \sim \pi^i(\cdot|s)$ \
+			\State execute action $a_i$ and observe reward $r$ and next state $s^{\prime}$\
+			\State collect $\langle s,a_i,r,s' \rangle$
+			\EndFor
+			\State Update decentralized critic according to \eqref{eq:critic-obj}\
+			\State Update policy according to the surrogate \eqref{eq:adaptive-obj}	\
+			\State Update $\beta^i_1$ and $\beta^i_2$ according to \eqref{eq:adaptive-rule}.
+			\EndFor
+    \end{algorithmic}
+\end{algorithm}
+
+
+The practical algorithm of DPO actually uses some approximations to the decentralized surrogate. Most of these approximations are traditional practice in RL or with no alternative in fully decentralized learning yet. We admit that the practical algorithm may not maintain the theoretical guarantee. However, we need to argue that we go one step further to give a decentralized surrogate in fully decentralized learning with convergence guarantee. We believe and expect that a better practical method can be found based on this objective in future work. 
+
+
+\section{Experiments}
+
+In this section, we compare the practical algorithm of DPO with IPPO \citep{IPPO} in a variety of cooperative multi-agent environments, including a cooperative stochastic game, MPE \citep{MADDPG}, multi-agent MuJoCo \citep{mamujoco}, and SMAC \citep{SMAC}, covering both discrete and continuous action spaces, and fully and partially observable environments. As we consider fully decentralized learning, in the experiments \textbf{\textit{agents do not use parameter-sharing}} as sharing parameters should be considered as centralized learning \citep{terry2020revisiting}. In all experiments, the network architectures and common hyperparameters of DPO and IPPO are the same for a fair comparison. More details about experimental settings and hyperparameters are available in Appendix. Moreover, all the learning curves are from 5 random seeds and the shaded area corresponds to the 95\% confidence interval.
+
+\subsection{A Didactic Example}
+
+\begin{figure}[t]
+\vspace{-2mm}
+    \centering
+    \begin{subfigure}{0.37\linewidth}
+        \centering
+        \includegraphics[width=.95\linewidth]{figures/matrix_game_A.pdf}
+        \vspace{-2mm}
+        \caption{DPO compared with IPPO}
+        \label{fig:matrix_performance}
+    \end{subfigure}
+    \begin{subfigure}{0.37\linewidth}
+        \centering
+        \includegraphics[width=.95\linewidth]{figures/matrix_game_B.pdf}
+        \vspace{-2mm}
+        \caption{the influence of $d_{{target}}$}
+        \label{fig:target}
+    \end{subfigure}
+    \caption{Empirical studies of DPO on the didactic example: (a) learning curve of DPO compared with IPPO and the global optimum; (b) the influence of different values of $d_{{target}}$ on DPO, x-axis is environment steps.}
+    \label{fig:matrix}
+    %\vspace{-2mm}
+\end{figure}
+
+First, we use a cooperative stochastic game as a didactic example. The cooperative stochastic game is with 100 states, 6 agents and each agent has 5 actions. All the agents share a joint reward function. The reward function and the transition probability are both generated randomly. 
+This stochastic game has a certain degree of complexity which is helpful to distinguish the performance of DPO and IPPO. On the other hand, this environment is tabular which means training in this environment is fast and we can do ablation studies efficiently. Moreover, we can find the global optimum by dynamic programming to compare with in this game. 
+
+The learning curves in Figure~\ref{fig:matrix_performance} show that DPO performs better than IPPO and learns a better solution in this environment. The fact that DPO learns a sub-optimal solution agrees with our theoretical result. However, the sub-optimal solution found by DPO is still away from the global optimum. This means that there is still improvement space. 
+
+On the other hand, we study the influence of the hyperparameter $d_{{target}}$ on DPO. We choose $d_{{target}} = 0.001,0.01,0.1,1$. The empirical results are shown in Figure~\ref{fig:target}. We find that when $d_{{target}}$ is small, the coefficient $\beta_1$ and $\beta_2$ are more likely to be increased and the step size of the policy update is limited. So for the case that $d_{{target}} = 0.001,0.01$, the performance of DPO is relatively low. And when $d_{{target}}$ is large, the policy update may be out of the trust region. This can be witnessed by the fluctuating learning curve of the case $d_{{target}} = 1$. So we need to choose an appropriate value for $d_{{target}}$ and in this environment we choose $d_{{target}} = 0.1$, which is also the learning curve of DPO in Figure~\ref{fig:matrix_performance}. We found that the appropriate value for $d_{{target}}$ changes in different environments. In the following, we keep $d_{{target}}$ to be the same for tasks of the same environment. There may be some better choices for $d_{{target}}$, but it is a bit time-consuming and out of the range of our discussion. 
+
+\subsection{MPE}
+
+\begin{figure}[t]
+    \vspace{-2mm}
+    \centering
+    \includegraphics[width=.95\textwidth]{figures/MPE_performance.pdf}
+    \vspace{-2mm}
+    \caption{Learning curve of DPO compared with IPPO in 5-agent simple spread, 5-agent line control, and 5-agent circle control in MPE, where x-axis is environment steps.}
+    \label{fig:mpe}
+    \vspace{-2mm}
+\end{figure}
+
+MPE is a popular environment in cooperative MARL. MPE is a 2D environment and the objects in MPE environment are either agents or landmarks. Landmark is a part of the environment, while agents can move in any direction. With the relation between agents and landmarks, we can design different tasks. We use the discrete action space version of MPE and the agents can accelerate or decelerate in the direction of x-axis or y-axis. We choose MPE for its partial observability. We take $d_{{target}} = 0.01$ for all MPE tasks.
+
+The MPE tasks we used for the experiments are simple spread, line control, and circle control which are originally used in \citet{transfer}. In our experiments, we set the number of agents $N = 5$ in all these three tasks. The empirical results are illustrated in Figure~\ref{fig:mpe}. We can find that although DPO may fall behind IPPO at the beginning of the training in some tasks, DPO learns a better policy in the end for all three tasks.
+%, which can be an evidence for the advantage of the convergence guarantee for DPO.
+
+
+\subsection{Multi-Agent MuJoCo}
+
+\begin{figure}[t]
+    \vspace{-2mm}
+    \centering
+    \includegraphics[width=1\textwidth]{figures/mujoco_performance.pdf}
+    \vspace{-5mm}
+    \caption{Learning curve of DPO compared with IPPO in 3-agent Hopper, 3-agent HalfCheetah, 3-agent Walker2d,  4-agent Ant, and 17-agent Humanoid in multi-agent MuJoCo, where x-axis is environment steps. }
+    \label{fig:mujoco}
+    \vspace{-2mm}
+\end{figure}
+
+Multi-agent MuJoCo is a robotic locomotion control environment for multi-agent settings, which is built upon single-agent MuJoCo \citep{todorov2012mujoco}. In multi-agent MuJoCo, each agent controls one part of a robot to carry out different tasks. We choose this environment for the reason of continuous state and action spaces. We select 5 tasks for our experiments: 3-agent Hopper, 3-agent HalfCheetah, 3-agent Walker2d, 4-agent Ant and 17-agent Humanoid. We take $d_{{target}} = 0.001$ for all multi-agent MuJoCo tasks.
+
+The empirical results are illustrated in Figure~\ref{fig:mujoco}. We can find that in all five tasks, DPO outperforms IPPO, though in 3-agent HalfCheetah DPO learns slower than IPPO at the beginning. The results on multi-agent MuJoCo verify that DPO is also effective in facing continuous state and action spaces. Moreover, the better performance of DPO in the 17-agent Humanoid task could be evidence of the scalability of DPO.
+
+
+\subsection{SMAC}
+
+SMAC is a partially observable and high-dimensional environment that has been used in many cooperative MARL studies. We select five maps in SMAC, 2s3z, 8m, 3s5z, 27m\_vs\_30m, and MMM2 for our experiments. We take $d_{{target}} = 0.02$ for all SMAC tasks.
+
+The empirical results are illustrated in Figure~\ref{fig:smac}. The two super hard SMAC tasks (27m\_vs\_30m and MMM2) are too difficult for both DPO and IPPO to win, so we use episode reward as the metric to show their difference. DPO performs better than IPPO in all five maps. We need to argue that though we have controlled the network architectures of DPO and IPPO to be the same, in our experiments each agent has its individual parameters which increases the difficulty of training. So our results in SMAC may be different from other works. Although IPPO has been shown to perform well in SMAC \citep{IPPO,MAPPO,benchmark}, DPO can still outperform IPPO, which verifies the effectiveness of the practical algorithm of DPO in high-dimensional complex tasks and can also be evidence of our theoretical result. Again, the better performance of DPO in 27m\_vs\_30m shows its good scalability in the task with many agents. 
+
+
+\begin{figure}[t]
+    \centering
+    %\vspace{-2mm}
+    \includegraphics[width=1.0\textwidth]{figures/SC2_performance.pdf}
+    \vspace{-5mm}
+    \caption{Learning curve of DPO compared with IPPO in 2s3z, 8m, 3s5z, 27m\_vs\_30m, and MMM2 in SMAC, where x-axis is environment steps.}
+    \label{fig:smac}
+    \vspace{-2mm}
+\end{figure}
+
+
+
+
+
+\section{Conclusion}
+In this paper, we investigate fully decentralized learning in cooperative multi-agent reinforcement learning. We derive a novel decentralized lower bound for the joint policy improvement and we propose DPO, a fully decentralized actor-critic algorithm with convergence guarantee and monotonic improvement. Empirically, we test DPO compared with IPPO in a variety of environments including a cooperative stochastic game, MPE, multi-agent MuJoCo, and SMAC, covering both discrete and continuous action spaces, and fully and partially observable environments. The empirical results show the advantage of DPO over IPPO, which can be evidence for our theoretical results.
+
+\bibliography{reference}
+\bibliographystyle{preprint}
+
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\appendix
+\input{appendix}
+
+\end{document}

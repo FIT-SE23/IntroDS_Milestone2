@@ -1,0 +1,498 @@
+\documentclass{article}
+
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2022
+
+
+% ready for submission
+% \usepackage{neurips_2022}
+
+% to compile a preprint version, e.g., for submission to arXiv, add add the
+% [preprint] option:
+    % \usepackage[preprint]{neurips_2022}
+
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+%\usepackage[final]{neurips_2022}
+
+
+% to avoid loading the natbib package, add option nonatbib:
+\usepackage[final,nonatbib]{neurips_2022}
+
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{cleveref}
+
+
+
+\newcommand{\Karsten}[1]{\textcolor{red}{[Karsten: #1]}}
+\newcommand{\Zafir}[1]{\textcolor{blue}{[Zafir: #1]}}
+\newcommand{\Zeynep}[1]{\textcolor{green}{[Zeynep: #1]}}
+\DeclareMathOperator*{\argmin}{arg\,min} 
+
+
+\usepackage{pgfplots}
+\DeclareUnicodeCharacter{2212}{−}
+\usepgfplotslibrary{groupplots,dateplot}
+\usetikzlibrary{patterns,shapes.arrows,external}
+\pgfplotsset{compat=newest}
+\usepackage{tikz}
+
+\pgfplotsset{compat=1.11,
+    /pgfplots/ybar legend/.style={
+    /pgfplots/legend image code/.code={%
+       \draw[##1,/tikz/.cd,yshift=-0.25em]
+        (0cm,0cm) rectangle (3pt,0.8em);},
+   },
+}
+
+\title{Momentum-based Weight Interpolation of Strong Zero-Shot Models for Continual Learning}
+
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+
+\author{%
+  Zafir Stojanovski$^{1,}$\thanks{Denotes equal contribution. } ,  Karsten Roth$^{1, \ast}$, Zeynep Akata$^{1,2}$\\
+  $^{1}$University of Tübingen, $^{2}$MPI for Intelligent Systems\\
+  % examples of more authors
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \AND
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+}
+
+
+\begin{document}
+
+
+\maketitle
+
+\begin{abstract}
+Large pre-trained, zero-shot capable models have shown considerable success both for standard transfer and adaptation tasks, with particular robustness towards distribution shifts.
+In addition, subsequent fine-tuning can considerably improve performance on a selected downstream task. 
+However, through naive fine-tuning, these zero-shot models lose their generalizability and robustness towards distribution shifts.
+This is a particular problem for tasks such as Continual Learning (CL), where continuous adaptation has to be performed as new task distributions are introduced sequentially.
+In this work, we showcase that where fine-tuning falls short to adapt such zero-shot capable models, simple momentum-based weight interpolation can provide consistent improvements for CL tasks in both memory-free and memory-based settings.
+In particular, we find improvements of over $+4\%$ on standard CL benchmarks, while reducing the error to the upper limit of jointly training on all tasks at once in parts by more than half, allowing the continual learner to inch closer to the joint training limits.
+\end{abstract}
+
+
+\section{Introduction}
+Continual Learning (CL) tackles the problem of learning from a non-stationary data stream, where training data is presented to the model not at once, but only in a sequence, and with limited capacity for retention and retraining. 
+Not only does this require effective use of previously seen data, but also adaptation to novel context under continuously changing distribution shifts without catastrophic forgetting \cite{kirkpatrick_2017_ewc,rusu_2016_pnn,schwarz_2018_progresscompress,pmlr-v80-schwarz18a}.
+Use cases are widespread, ranging from particularly compute-, time- or memory-limited to privacy-concerned applications \cite{lee2020clinical,buzzega2020dark,lesort2022long,wang_2022_prompt,ostapenko2022foundation}.
+%%%%
+
+Consequentially, previous research has introduced a wide range of methods to address training under continual shifts, such as through the use of efficient data replay \cite{AGEM,buzzega2020dark,bang_2021_rainbow,prabhu_2020_gdumb}, regularization on the training dynamics \cite{kirkpatrick_2017_ewc,pmlr-v80-schwarz18a} or optimization procedures seeking for flat minima \cite{mirzadeh_2020_understanding,shi_2021_overcoming}.
+Generally, these methods start from an untrained model which is then adapted to the data stream at hand.\\
+While this has found practical success, more recently the use of large-scale pre-trained models ("foundation models" \cite{bommasani2021foundation,ostapenko2022foundation}) has become ubiquitous, as they have shown strong zero-shot generalizability to a variety of downstream tasks, with strong robustness to distribution shifts \cite{bommasani2021foundation}.
+
+Their application to the CL problem set, which tackles a continuous distribution shift, stands to reason, with recent works showing notable benefits in the use of foundation models \cite{wang_2022_prompt,mehta2022an,ramasesh2022effect,wu2022pretrained}, particularly highlighting a reduction in catastrophic forgetting. 
+Still, as learners are adapted to continuously shifting training distribution, even foundation models will suffer from forgetting through fine-tuning \cite{wortsman2022zeroshot}.
+
+To maximize the benefits we can extract from the main continual learning process as well as the ability to classify novel samples at test time, it is thus important to minimize the impact on the generalizability of the adapted foundation model in order to account for potential further adaptations.
+
+To allow for improved deployment in the CL setting, in this work we show how momentum-based weight-interpolation can help remedy issues of such models adapted in a continual fashion. 
+In particular, as we want to maximally retain the generalizability of our adapted foundation model, we introduce a bifurcated adaptation mechanism by retaining an additional copy of the initial foundation model (denoted as \textit{slow} model). This slow model is excluded from the direct CL optimization process, and is only updated through linear momentum-interpolation with a task-adapted model copy (denoted as \textit{fast} model).
+
+This is motivated by insights made in \cite{wortsman2022zeroshot}, who show that simple linear interpolation in weight space between the original zero-shot model and a variant fine-tuned to a task at hand allows for adaptation, while retaining better generalizability as compared to sole fine-tuning.
+However, retaining a large collection of fine-tuned task expert models in the CL setting is memory intensive, impractical, and undesired. Instead, we show that we can simulate the empirical benefits highlighted in \cite{wortsman2022zeroshot} through repeated momentum interpolation between our foundation model and a continuously fine-tuned variant. This allows us to avoid the drawbacks of pure fine-tuning, while both specializing on the new stream of tasks, and retaining the generalizability of our foundation model.
+% This allows us to avoid direct fine-tuning and only perform linear weight-space interpolations which will help retain the generalizability of our foundation model weights.
+
+Indeed, experiments on three standard CL benchmarks (Seq-CIFAR-10, Seq-CIFAR-100 and Seq-Tiny-ImageNet) show improvements in class- and task-incremental settings on both memory-based and memory-free methods by up to $+4\%$, and partly more than halving the error to the joint training performance bound. These results indicate that for practical usage of foundation models in a continuously distribution-shifting training scenario, momentum-based weight interpolation can be a reliable tool for consistent improvements that works well alongside any CL method.
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Related Work}
+\textit{\textbf{Regularization-based methods}} augment the training objective to mitigate forgetting by keeping the current parameters close to previous task parameters, such as through moment matching \cite{rev_2} or Elastic Weight Consolidation (EWC) \cite{doi:10.1073/pnas.1611835114}, which performs Laplace approximations on the parameter posterior for each preceding task, using the means and covariances to regularize the current parameters via Mahalanobis distance minimization. Online Elastic Weight Consolidation (oEWC)\cite{pmlr-v80-schwarz18a} computes a momentum average of a single covariance matrix, and keeps the parameters from the last task only. Learning without Forgetting (LwF)\cite{8107520} also keeps the parameters from the last task and adds a cross-entropy term between logits computed with the old and current parameters, using data from the current task. \cite{mirzadeh_2020_dropout} show that dropout forces the model to learn a gating such that for different tasks, different paths of the network are active.\\
+%%%
+
+\textit{\textbf{Rehearsal-based methods}} utilize Experience Replay \cite{pmid2186426} \cite{doi:10.1080/09540099550039318} by storing a small subset of the training data into a buffer, and continually replaying it as the model moves on to learn new tasks. Dark Experience Replay (DER) \cite{NEURIPS2020_b704ea2c} introduces regularization in the rehearsal scheme by matching the logits of the past with the logits computed by the current network parameters. Gradient Episodic Memory (GEM) \cite{NIPS2017_f8752278} and Average Gradient Episodic Memory (A-GEM) \cite{chaudhry2018efficient} enforce optimization constraints in the current task using data from past tasks. GDumb \cite{prabhu2020greedy} greedily stores samples in memory, and only trains the model at test time using buffer data. DualNet \cite{NEURIPS2021_86a1fa88} uses a slow network for learning task-agnostic features through Self-Supervised Learning, and a fast network for learning task-specific features. Contrastive Continual Learning (Co2L) \cite{Cha_2021_ICCV} learns contrastive task-agnostic features, and trains a linear classifier using only buffer data. Our approach also bears conceptual similarities to the lookahead-style of optimization (see e.g. \cite{rev_1}), adapted to the continual learning problem.\\
+
+%%%
+\textit{\textbf{Flatness-seeking methods}} aim to operate in flat minima regions for each task in sequence, thereby retaining antecedent performance. Finding Flat Minima (F2M) \cite{NEURIPS2021_357cfba1} independently adds small random noise to the parameters, thereby obtaining similar but different loss functions which are optimized jointly in order to locate flat minima. \cite{NEURIPS2020_518a38cc} studies how batch size, dropout and learning rate decay affect the model's ability to find flat basins. \cite{mehta2021empirical} uses the Sharpness-Aware Minimization (SAM) \cite{foret2021sharpnessaware} procedure, which explicitly optimizes for parameters lying in flat basins. 
+% Stochastic Weight Averaging (SWA) \cite{izmailov2018averaging} demonstrates that averaging the weights of the model during training will implicitly land the final optimum in a flat region. Nevertheless, SWA is only evaluated when the data stream is considered independent and identically distributed (IID). Therefore, we aim to explore whether this approach also improves performance when data comes in a continual (non-IID) setting.
+% Nonetheless, this is an orthogonal method to all previously mentioned techniques; for example \cite{DBLP:journals/corr/abs-2202-00661} demonstrates the benefits of combining SAM and SWA when training on an IID stream of data.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Method}\label{sec:method}
+% This section formalizes a typical CL problem, and provides an overview of our proposed method.
+% \subsection{Preliminaries}
+In CL, a model $f_\theta$ is trained on a sequence of $T$ tasks, where for each task $t \in \{1, ..., T\}$ the learner only gets access to a subset of samples $D_t = \{(x_i, y_i)\}_{i=1}^{N_t}$, but is eventually evaluated on joint performance, i.e. we optimize
+
+\begin{equation*}
+\theta^{*} = \textstyle\argmin_\theta \textstyle\sum_{t=1}^T \mathbb{E}_{(x, y) \sim D_t} \left[L(f_\theta(x), y)\right].
+\end{equation*}
+
+%%%
+The main challenge is that at task $t$, the model has no access to data from previous tasks $\tilde{t} \in \{1, ..., t-1\}$, therefore violating the typical IID data assumption. In this work, we investigate both the class-incremental setting, where subsets of classes are introduced in sequence, and the much easier task-incremental setting which jointly also provides respective task ids.
+%Memory-based approaches impose a slight relaxation on this property, by allowing the model to store a small buffer of samples.
+
+\subsection{Momentum-based Weight Interpolation for Continual Learning (MCL)}
+To allow for effective and continuous adaptation of foundation models, we introduce momentum-based weight interpolation for CL. 
+As our primary target is the retention of the generalizability and shift robustness of the underlying foundation model, it is important that minimal adaptation and fine-tuning is performed, while still allowing for a certain degree of adaptation to the target tasks at hand.
+For that, we suggest a retention of a \textit{slow} model copy $\theta_\text{slow}$ which is kept disconnected from the entire adaptation process, while a second instantiation $\theta_\text{fast}$ is updated throughout the continual learning process.
+As $\theta_\text{fast}$ adapts to the target distribution at hand, at every iteration we simultaneously perform an iterative updating on our slow weights through weight-space interpolation:
+
+\begin{equation*}
+    \theta_{\text{slow}} = \tau \cdot \theta_{\text{slow}} + (1-\tau) \cdot \theta_\text{fast} 
+\end{equation*}
+
+where $\tau$ is our \textit{momentum} hyperparameter. A simplified version of the procedure is summarized in Algorithm \ref{alg:mcl}. 
+As this mechanism is task- and memory-agnostic with no dependence on task boundaries, it can be applied to any continual learning framework, both memory-based and memory-free.
+And while straightforward and simple, the intuitively better retention of foundation model weights in the continual learning setting is well motivated.
+% Beyond a fundamental connection to the Complimentary Learning Systems (CLS) \cite{pmid7624455,Cha_2021_co2l} theory from neuroscience, which states that humans are capable of learning continually with the help of two complimentary systems - a \textit{fast} learning system for rapidly learning new experiences; and a \textit{slow} learning system which gradually integrates these new experiences in the ensemble of past observations stored in the neocortical memory system.
+
+Beyond a conceptual connection to the Complimentary Learning Systems (CLS) \cite{pmid7624455,Cha_2021_co2l} theory from neuroscience which depicts human continual learning as an interplay of a fast adaptive and a slow retentive system, on a methodological level  \cite{izmailov2018averaging} show that maintaining a running average of weights leads to wider optima and retained generalization during the standard fine-tuning process of a pre-trained model. 
+
+In addition, \cite{wortsman2022zeroshot} showcase that zero-shot and fine-tuned model weights are often connected by a linear path which retains performance. 
+It therefore stands to reason that our linear momentum-based interpolation across task iterations allows us to connect to the performance of our task-adapted fast variant, while maintaining the generalizability our foundation model weights $\theta_\text{slow}$. The consequently sustained implicit optimization for a flatter minimum around $\theta_\text{slow}$, which is only updated through momentum-based interpolation, has strong ties to improved generalization across task sequences in continual learning \cite{NEURIPS2021_357cfba1,NEURIPS2020_518a38cc,foret2021sharpnessaware}, which we see reflected in our benchmark experiments in the next section.
+
+\begin{algorithm}
+\caption{Momentum-based Weight Interpolation for Continual Learning (MCL)}\label{alg:mcl}
+\begin{algorithmic}[1]
+\Require Pre-trained weights $\theta_{pre}$, Momentum $\tau \in [0, 1]$ 
+\State $\theta_\text{fast} \gets \theta_{pre}$
+\State $\theta_{\text{slow}} \gets \theta_{pre}$
+\For{$t \gets 1$ \ldots num\_tasks}
+    \For{$e \gets 1$ \ldots num\_epochs}   
+        \For{$(x, y) \sim D_t$}   
+            \State{$\theta_\text{fast} \gets \theta_\text{fast} - \alpha \nabla \mathcal{L}(f_{\theta_\text{fast}}(x), y)$}
+            \State{$\theta_{\text{slow}} \gets \tau \cdot \theta_{\text{slow}} + (1-\tau) \cdot \theta_\text{fast}$}
+        \EndFor
+    \EndFor
+\EndFor
+\State $\theta_\text{fast} \gets \theta_{slow}$
+\end{algorithmic}
+\end{algorithm}
+
+% * adapt while retaining performance
+% * retain a flat minimum for generalizability
+% * For longer task sequence, a synchronization of $\theta_\text{slow}$ and $\theta_\text{fast}$ may be beneficial.
+
+% However,
+% as similarly observed by previous work where part of the
+% optimization trajectory is shared [25,42,71], we find that the
+% zero-shot and fine-tuned models are connected by a linear
+% path in weight-space along which accuracy remains high
+
+
+
+% In line 
+
+% Stochastic Weighted Averaging (SWA) \cite{izmailov2018averaging} demonstrated that fine-tuning a pre-trained model by retaining a running average of the weights leads to wider optima and better generalization performance. Intuitively, the model will spend a lot of time in flat basins due to small gradient updates; therefore, when averaging the weights of each gradient step we end up with parameters located near the most frequently visited spots in the loss landscape -- the flat minima. This effect has been practically support in \cite{wortsman2022zeroshot} who showcase the generalization benefits of linear weight-space interpolation for the finetune-adaptation of zero-shot models.
+
+% Given that several works \cite{NEURIPS2021_357cfba1,NEURIPS2020_518a38cc,foret2021sharpnessaware} in the CL literature have focused on the benefits of optimizing for flat minima, we aim to explore whether the implicit flat-finding minima procedure of SWA is beneficial for life-long learning. To this end we introduce a reformulation of SWA named \textbf{Momentum-based Continual Learning (MCL)}, with the goal of estimating how well a model performs in a CL setting when keeping an exponential moving average of the current weights $\theta$: 
+
+
+
+
+
+% Note that MCL doesn't resemble a typical CL method, which commonly incorporates a memory buffer, a loss regularization, and/or dependency on task boundaries. In fact, this approach can be used orthogonal to various existing CL methods, as we show in \S \ref{sec:experiments}. 
+
+% * Make the connection to flat minima through weight averaging.
+
+% we suggest a following update mechanism.
+
+% To this end we introduce a reformulation of SWA named \textbf{Momentum-based Continual Learning (MCL)}, with the goal of estimating how well a model performs in a CL setting when keeping an exponential moving average of the current weights $\theta$: 
+
+
+
+% Recently, Stochastic Weighted Averaging (SWA) \cite{izmailov2018averaging} demonstrated that fine-tuning a pre-trained model by retaining a running average of the weights leads to wider optima and better generalization performance. Intuitively, the model will spend a lot of time in flat basins due to small gradient updates; therefore, when averaging the weights of each gradient step we end up with parameters located near the most frequently visited spots in the loss landscape -- the flat minima. This effect has been practically support in \cite{wortsman2022zeroshot} who showcase the generalization benefits of linear weight-space interpolation for the finetune-adaptation of zero-shot models.
+
+% Given that several works \cite{NEURIPS2021_357cfba1,NEURIPS2020_518a38cc,foret2021sharpnessaware} in the CL literature have focused on the benefits of optimizing for flat minima, we aim to explore whether the implicit flat-finding minima procedure of SWA is beneficial for life-long learning. To this end we introduce a reformulation of SWA named \textbf{Momentum-based Continual Learning (MCL)}, with the goal of estimating how well a model performs in a CL setting when keeping an exponential moving average of the current weights $\theta$: 
+% \begin{align*}
+%     \theta_{slow} = \tau \cdot \theta_{slow} + (1-\tau) \cdot \theta 
+% \end{align*}
+% where $\tau$ is a hyperparameter we call \textit{momentum strength}. A simplified version of the procedure is summarized in Algorithm \ref{alg:mcl}. Note that MCL doesn't resemble a typical CL method, which commonly incorporates a memory buffer, a loss regularization, and/or dependency on task boundaries. In fact, this approach can be used orthogonal to various existing CL methods, as we show in \S \ref{sec:experiments}. 
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Experiments}
+\label{sec:experiments}
+
+\textbf{Datasets.} We evaluate our method on three datasets commonly used in the literature: CIFAR-10 \cite{Krizhevsky09learningmultiple}, CIFAR-100 \cite{Krizhevsky09learningmultiple}, and Tiny ImageNet. We split each dataset into several tasks of non-overlapping classes: Seq-CIFAR-10 consisting of 5 tasks (2 classes each) and Seq-CIFAR-100/Seq-Tiny-ImageNet consisting of 10 tasks (10 and 20 classes each, respectively).\\ 
+
+%%%
+\textbf{Training.} For our zero-shot model we use a pre-trained CLIP ViT-B/16 \cite{pmlr-v139-radford21a}. We built our CL experiments on \cite{NEURIPS2020_b704ea2c} which implements several CL benchmarks in PyTorch \cite{NEURIPS2019_9015}. All methods follow a standardized training protocol - trained on Nvidia 2080Ti's using SGD \cite{pmlr-v28-shamir13}, a fixed learning rate and no scheduler, with the same fine-tuning budget of $10$ epochs. We perform grid searches on a random train subset to select the best learning rate $\alpha\in\{10^{-2}, 10^{-3}, 10^{-4}, 10^{-5}, 10^{-6}, 10^{-7}\}$ as well as the best momentum strength $\tau\in\{0.995, 0.997, 0.999, 0.9995, 0.9997, 0.9999 \}$. We refer the reader to the appendix (\S\ref{sec:ablation-study}) for an ablation study of the hyperparameters.\\
+
+%%%
+\textbf{Evaluation.}  For both Task Incremental Learning (Task-IL) and Class Incremental Learning (Class-IL) scenarios, we report the final classification accuracy over all encountered classes, with task identities also provided in the Task-IL setting (making it a noticeably easier problem to solve). 
+
+\begin{table*}[h!]
+  \caption{Baselines}
+  \label{table-baselines}
+  \centering
+\centering  
+  \begin{tabular}{cccc}
+    \toprule
+    \textbf{Baseline} & \textbf{CIFAR-10} & \textbf{CIFAR-100} & \textbf{Tiny-ImageNet} \\ 
+    \midrule 
+    ZERO-SHOT & $88.77$ & $63.11$ & $58.53$ \\ 
+    % DER++ (500) \cite{NEURIPS2020_b704ea2c} & $72.70 \pm 1.36$ & & $19.38 \pm 1.41$ \\
+    % Co2L (500) \cite{Cha_2021_ICCV} & $74.26 \pm 0.77$ &  & $20.12 \pm 0.42$ \\
+    % DER++ (5120) \cite{NEURIPS2020_b704ea2c} & $85.24 \pm 0.49$ & & $39.02 \pm 0.97$ \\
+    JOINT & $97.53 \pm 0.08$ & $87.22 \pm 0.54$ & $78.86 \pm 1.38$ \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\subsection{Experimental Results}  \label{sec:experimental-results}
+In this section, we experiment with the use of momentum-based weight interpolation in three standard CL method categories: fine-tuning (pure SGD \cite{pmlr-v28-shamir13}), regularization-based (oEWC \cite{pmlr-v80-schwarz18a}), and rehearsal-based (DER++ \cite{NEURIPS2020_b704ea2c} with buffer size $500$ and $5000$). 
+
+%%%
+The results presented below are obtained over three seeds, alongside which we provide the zero-shot lower bound (Tab. \ref{table-baselines}).
+Interestingly, the non-adapted zero-shot performance already in parts vastly outperforms comparable adaptation with state-of-the-art methods not relying on foundation models, with e.g. DER++ \cite{NEURIPS2020_b704ea2c} reporting $72.70\pm1.36\%$ with a buffer of 500, and $85.40\pm0.49\%$ with a buffer of 5000 on CIFAR-10, while zero-shot performance of our foundation model already achieves $88.77\%$. This difference is even further exacerbated on Tiny-ImageNet, with $19.38\pm1.41\%$ and $39.02\pm0.97$ for buffer sizes of 500 and 5000 respectively, versus 58.53\% for zero-shot performance, verifying the potential \cite{mehta2022an,ramasesh2022effect} of foundation models in CL.
+
+%%%
+To provide an upper bound, we train on all tasks jointly (Tab. \ref{table-baselines}). 
+Since joint training is evaluated without task boundaries, this upper bound does not hold for Task-IL scenarios.
+Next, in Tab. \ref{table-continual} we present the results on the CL benchmarks. We empirically show that, as motivated in Sec. \ref{sec:method}, keeping a momentum-interpolated version of the foundation model results in consistent improvements.
+% We hypothesize that the improvements on Seq-CIFAR-10 are marginal because this is a fairly easy continual learning benchmark by today's standards (5 tasks, with 2 classes each), and thereby there is not much room for improvement over the baselines. Nevertheless, as we move towards harder datasets with increased class diversity and longer task sequences, such as those in Seq-CIFAR-100 and Seq-Tiny-ImageNet, the gap between between using momentum or not significantly increases. \\\\
+
+In particular, our results show that adaptation to the task distribution at hand is beneficial even with simple fine-tuning. Even when accounting for a change in learning rate (as noted in \S\ref{sec:experiments} and done for every baseline), we find that additional momentum-based weight interpolation offers consistent benefits in both class- and task-incremental settings, with nearly $+4\%$ improvement on both Seq-CIFAR-100 and Seq-Tiny-ImageNet. Furthermore, through momentum-updating, we can push simple fine-tuning close or even over the performance of a state-of-the-art CL framework (DER++).
+Additionally, we observe similar performance improvements even when applied on top of separate CL frameworks, both memory-free (oEWC, e.g. $74.07\pm0.20\rightarrow 77.25\pm0.31$ on Seq-CIFAR-100) and memory-based (DER++ with 500 memory samples, $76.78\pm0.23\rightarrow 82.01\pm0.31$).
+
+Interestingly, a momentum-extended DER++ with a buffer size of 500 also almost closes the gap in performance to the non-momentum based DER++ with a much larger buffer size 5000, which, even with such a large memory, also sees significant improvements on the particularly more complex CL tasks (Seq-Tiny-ImageNet, $76.54\pm0.10\rightarrow78.26\pm0.14$).
+
+This demonstrates that the need for buffer sizes in CL frameworks built around foundation models can decrease significantly (in this case, 10-fold) through momentum-based weight-space interpolation.
+We do note that while not necessary for the benchmarks at hand, longer task sequence may benefit from a re-synchronization of $\theta_\text{slow}$ and $\theta_\text{fast}$.
+
+Finally, we find that momentum-based DER++ with a buffer of 5000 even further closes the gap to the joint optimization upper bound - looking at the error, we find a drop of $0.45\%\rightarrow 0.32\%$ on Seq-CIFAR-10, $4.06\%\rightarrow2.28\%$ on Seq-CIFAR-100, and $2.32\%\rightarrow0.6\%$ on Seq-Tiny-ImageNet, which marks a nearly $75\%$ reduction. 
+Conclusively, these results indicate the significant benefits of retaining a momentum-updated model copy when introducing foundation models into the CL setting, both for consistent relative improvements, but also to minimize the performance drop when moving from the standard joint optimization to a continual learning scenario.
+
+
+\begin{table*}[t!]
+  \caption{Continual Learning setting -- training and evaluating on sequences of tasks.}
+  \label{table-continual}
+  \centering
+\centering\resizebox{1\textwidth}{!}{  
+  \begin{tabular}{cccccccccc}
+    \toprule
+    \multirow{2}{*}{\textbf{Method}} & \multirow{2}{*}{\textbf{Momentum}}  & \multicolumn{2}{c}{\textbf{Seq-CIFAR-10}}  & \multicolumn{2}{c}{\textbf{Seq-CIFAR-100}}  & \multicolumn{2}{c}{\textbf{Seq-Tiny-ImageNet}} \\
+    & & Class-IL & Task-IL & Class-IL & Task-IL & Class-IL & Task-IL \\
+    \midrule 
+    
+    \multirow{2}{*}{SGD} & no & $91.38 \pm 0.04$ & $98.17 \pm 0.01$ & $74.36 \pm 0.03$ & $93.59 \pm 0.04$ & $67.30 \pm 0.08$ & $82.12 \pm 0.07$ \\
+     & yes & $92.46 \pm 0.11$ & $98.43 \pm 0.01$ & $77.52 \pm 0.37$ & $94.98 \pm 0.17$ & $71.09 \pm 0.28$ & $85.22 \pm 0.32$ \\
+    \midrule
+
+    \multirow{2}{*}{oEWC} & no & $90.67 \pm 0.01$ & $98.17 \pm 0.01$ & $74.07 \pm 0.20$ & $93.80 \pm 0.02$ & $66.60 \pm 0.02$ & $81.79 \pm 0.02$ \\
+     & yes & $91.87 \pm 0.57$ & $98.88 \pm 0.12$ & $77.25 \pm 0.31$ & $95.09 \pm 0.01$ & $71.57 \pm 0.05$ & $85.94 \pm 0.07$ \\
+    \midrule
+
+    \multirow{2}{*}{DER++ (500)} & no & $94.65 \pm 0.16$ & $99.38 \pm 0.10$ & $76.68 \pm 0.23$ & $95.05 \pm 0.09$ & $71.05 \pm 0.12$ & $84.42 \pm 0.22$ \\
+     & yes & $95.73 \pm 0.21$ & $99.50 \pm 0.04$ & $82.01 \pm 0.31$ & $96.69 \pm 0.03$ & $75.11 \pm 0.02$ & $87.80 \pm 0.27$ \\
+    \midrule
+
+    \multirow{2}{*}{DER++ (5000)} & no & $97.08 \pm 0.04$ & $99.60 \pm 0.01$ & $83.16 \pm 0.20$ & $97.03 \pm 0.11$ & $76.54 \pm 0.10$ & $88.44 \pm 0.04$ \\
+     & yes & $97.21 \pm 0.11$ & $99.62 \pm 0.01$ & $84.94 \pm 0.07$ & $97.13 \pm 0.05$ & $78.26 \pm 0.14$ & $89.00 \pm 0.11$ \\
+
+    \bottomrule
+  \end{tabular}}
+\end{table*}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Conclusion}
+This work tackles the adaptation of large-scale pre-trained zero-shot models to continual learning (CL). To retain the strong generalizability and robustness of these models even under continuous fine-tuning, we propose the use of a momentum-based interpolation between a slow-moving zero-shot model excluded from the direct CL process and a task-adapted fast variant. Through this simple extension, we find consistent improvements in performance across three standard CL benchmarks (Seq-CIFAR-10, Seq-CIFAR-100, Seq-Tiny-ImageNet) on both memory-based and memory-free approaches, of in parts more than $+4\%$. In addition, we find the distance between continual learning and joint task optimization performance in some cases to even be more than halved. Based on these insights, the generalizability of large-scale pre-trained zero-shot models, and the simplicity of the proposed setup, we believe the adoption of our approach to be of high practical interest.
+
+\section*{Acknowledgements}
+Karsten Roth thanks the International Max Planck Research School as well as the European Laboratory for Learning and Intelligent Systems (ELLIS) PhD program for support. Zeynep Akata acknowledges partial funding by the ERC (853489 - DEXIM) and DFG (2065/1 - Project number 390727645) under Germany's Excellence Strategy.
+
+
+\small
+\bibliographystyle{ieee_fullname}
+\bibliography{main}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \newpage
+% \section*{Checklist}
+% \begin{enumerate}
+
+
+% \item For all authors...
+% \begin{enumerate}
+%   \item Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?
+%     \answerYes{}
+%   \item Did you describe the limitations of your work?
+%     \answerYes{}
+%   \item Did you discuss any potential negative societal impacts of your work?
+%     \answerNo{}
+%   \item Have you read the ethics review guidelines and ensured that your paper conforms to them?
+%     \answerYes{}
+% \end{enumerate}
+
+
+% \item If you are including theoretical results...
+% \begin{enumerate}
+%   \item Did you state the full set of assumptions of all theoretical results?
+%     \answerNA{}
+%         \item Did you include complete proofs of all theoretical results?
+%     \answerNA{}
+% \end{enumerate}
+
+
+% \item If you ran experiments...
+% \begin{enumerate}
+%   \item Did you include the code, data, and instructions needed to reproduce the main experimental results (either in the supplemental material or as a URL)?
+%     \answerNo{Included all necessary experimental details, and built our work on top of a public codebase.}
+%   \item Did you specify all the training details (e.g., data splits, hyperparameters, how they were chosen)?
+%     \answerYes{}
+%         \item Did you report error bars (e.g., with respect to the random seed after running experiments multiple times)?
+%     \answerYes{}
+%         \item Did you include the total amount of compute and the type of resources used (e.g., type of GPUs, internal cluster, or cloud provider)?
+%     \answerYes{}
+% \end{enumerate}
+
+
+% \item If you are using existing assets (e.g., code, data, models) or curating/releasing new assets...
+% \begin{enumerate}
+%   \item If your work uses existing assets, did you cite the creators?
+%     \answerYes{}
+%   \item Did you mention the license of the assets?
+%     \answerYes{}
+%   \item Did you include any new assets either in the supplemental material or as a URL?
+%     \answerNo{}
+%   \item Did you discuss whether and how consent was obtained from people whose data you're using/curating?
+%     \answerNA{}
+%   \item Did you discuss whether the data you are using/curating contains personally identifiable information or offensive content?
+%     \answerNA{}
+% \end{enumerate}
+
+
+% \item If you used crowdsourcing or conducted research with human subjects...
+% \begin{enumerate}
+%   \item Did you include the full text of instructions given to participants and screenshots, if applicable?
+%     \answerNA{}
+%   \item Did you describe any potential participant risks, with links to Institutional Review Board (IRB) approvals, if applicable?
+%     \answerNA{}
+%   \item Did you include the estimated hourly wage paid to participants and the total amount spent on participant compensation?
+%     \answerNA{}
+% \end{enumerate}
+
+
+% \end{enumerate}
+
+
+
+\newpage
+\appendix
+
+
+\section{Appendix}
+
+\begin{figure*}[ht!]
+    \centering
+    \include{figures/tau_class-il-acc}
+    \vspace{-1cm}
+    \caption{The effect of the hyper-parameter $\tau$ on the Class-IL Accuracy}%
+    \label{fig:tau_class-il-acc}%
+\end{figure*}
+
+\subsection{Ablation study}
+\label{sec:ablation-study}
+\textbf{Momentum strength. } In Figure \ref{fig:tau_class-il-acc} we show how the momentum strength $\tau$ affects the model's Class-IL Accuracy. While we find that the optimal value of $\tau$ is dataset-dependent, it is encouraging that the vastly different methods show surprisingly similar behavior for a given dataset.
+
+\textbf{Restart frequency. } Next, we examine whether it is beneficial to restart the fast weights $\theta_\text{fast}$ with the slow weights $\theta_{\text{slow}}$ during training (instead of only at the end as per default, i.e. Line 11 in Algorithm \ref{alg:mcl}). To this end, we introduce a new hyperparameter \textit{restart frequency} which specifies after how many gradient steps we perform a restart. From the results detailed in Figure \ref{fig:restats}, we find that restarting the fast weights is not beneficial to the generalization performance.
+
+\begin{figure*}[ht!]
+    \centering
+    \include{figures/restart_freq-acc}
+    \vspace{-1cm}
+    \caption{The effect of restarting the fast weights with the slow weights at various restart frequencies. }%
+    \label{fig:restats}%
+\end{figure*}
+
+\textbf{Update frequency. } Finally, we examine whether it is beneficial to perform the update of the slow weights (Line 7 in Algorithm \ref{alg:mcl}) at various frequencies. For this purpose, we introduce a new hyperparameter \textit{update frequency} which specifies after how many gradient steps we update the slow weights. From the results summarized in Figure \ref{fig:updates}, we find that updating at frequencies higher than 1 (where 1 is the default behavior of our algorithm) does not provide a boost in performance.
+
+
+% \begin{figure}[htb!]
+% \centering
+% \resizebox{2cm}{!}{\input{figures/tau_class-il-acc.tex}}
+% \caption{my figure drawn in tikz}\label{fig:myfigure}
+% \end{figure}
+
+
+
+
+% \begin{figure*}[ht!]
+%     \centering
+%     \include{figures/tau_task-il-acc}
+%     \vspace{-1cm}
+%     \caption{The effect of the hyper-parameter $\tau$ on the Task-IL Accuracy}%
+%     \label{fig:tau_task-il-acc}%
+% \end{figure*}
+
+
+
+\begin{figure*}[hb!]
+    \centering
+    \include{figures/update_freq-acc.tex}
+    \vspace{-1cm}
+    \caption{The effect of computing the momentum update at various update  frequencies.}%
+    \label{fig:updates}%
+\end{figure*}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\end{document}

@@ -1,0 +1,919 @@
+% \emph{Just to avoid warnings for the time being.}
+
+% \begin{theorem}
+%   \label{th:procedure_partition_tree}
+%   There exists \(p \in \mathbb{N}\) such that for all convergent subterm destructor rewriting system \(\R\), closed plain processes \(P\) and \(Q\) there exists a partition tree \(T \in \PartitionTree(P,Q)\) such that for all node \(n\) in \(T\), for all \(\Sigma \in \mgs(n)\), \(\dagsize{\Sigma} < 2^{(\dagsize{P} + \dagsize{Q} + \dagsize{\R})^p}\).
+% \end{theorem}
+
+We detail in this section our overall decision procedure for equivalence properties, intuitively reducing them to solving some forms of symbolic constraints.
+We express this through a novel notion of \emph{partition tree} that crisply characterises equivalence proofs.
+We formalise in this section the main properties of this tree and describe how to derive an actual decision procedure from it;
+the constraint solving procedure necessary to generate the tree itself in then later detailed in Section~\ref{sec:ptree}.
+
+
+\subsection{The symbolic approach for decidability}
+
+  % \subsubsection{Constraint systems}
+
+    % \paragraph{An abstraction of inputs}
+      Our decision procedures rely on a \emph{symbolic semantics}, by opposition to the usual semantics of the calculus (recall Figure~\ref{fig:semantics}) that we will call the \emph{concrete} semantics from now on.
+      Specifically, rather than fetching concrete input terms from the active attacker, our symbolic semantics abstract these inputs and only record the constraints they should satisfy to execute the protocol. 
+      This thus provides a finite representation of the infinite set of actions potentially available to the attacker.
+      For example let \(c \in \sig_0\), \(\hfun/1 \in \sigc\), \(k \in \Nall\) and consider the process
+      \[\begin{array}{l@{\ }l}
+        P =
+          & \OutP {c} {k}.\,
+          \InP {c} {x}.\,
+          \IfP\ \fst(x) = k\ \ThenP\ \OutP {c} {\hfun(x)}
+      \end{array}\]
+      The trace executing the output \(\hfun(x)\) will gather constraints that intuitively indicate that:
+      \begin{enumerate*}
+        \item \(x\) is a term deducible by the attacker from the frame \(\{\ax_1 \mapsto k\}\); and
+        \item \(x = \pair {k,y}\) for some term \(y\).
+      \end{enumerate*}
+      A constraint solving algorithm, detailed in Section~\ref{sec:mgs-gen}, can then be used to show that these constraints have a \emph{solution}:
+      the recipe \(\xi = \pair {\ax_1,a}\), \(a \in \sig_0\), can be used to compute the input term \(x\) and satisfy the constraints, which justifies that the output of \(\hfun(x)\) is reachable.
+      Similar approaches are common to decide reachability or equivalence properties of bounded processes~\cite{B07,CCD13}; our approach is however more widely applicable due to our absence of syntactic restrictions on processes.
+      % Our approach closely follow them in terms of formalism.
+
+    \paragraph{Formalising symbolic constraints}
+      % This implicitly records in which order outputs have been performed, which simplifies the formalisation of the decision procedure.
+      We first introduce a new type of variables, used in recipes:
+
+      \begin{definition}[second-order terms]
+        We consider a partition of the set of (non-axiom) variables \(\X \smallsetminus \AX = \X[1] \uplus \X[2]\). 
+        The elements of \(\X[1]\) are called \emph{first-order variables} and correspond to those we used so far in terms (in processes, frames, rewrite rules).
+        Those of \(\X[2]\) are called \emph{second-order variables} and are used to represent an undefined recipe.
+        A \emph{first-order term} is an element of \(\termset(\sig \cup \sig_0 \cup \Nall \cup \X[1])\) and a \emph{second-order term} is an element of \(\termset(\sig \cup \sig_0 \cup \AX \cup \X[2])\).
+
+        We now distinguish \(\vars[1](u) = \vars(u) \cap \X[1]\), \(\vars[2](u) = \vars(u) \cap \X[2]\), and \(\axioms(u) = \vars(u) \cap \AX\).
+        Note that we say that a second-order term \(t\) is ground if \(\vars[2](t) = \emptyset\), i.e., \(t\) may contain axioms.
+        By definition, a recipe is therefore a ground second-order term.
+        We also adapt the other notations of the term algebra to reflect the separation:
+        \(\subterms[1]\), \(\subterms[2]\), \ldots
+      \end{definition}
+
+      In practice, when executing an input instruction \(\InP{c}{x}\) in the symbolic semantics, \(x\) will be associated to a fresh second-order variable written \(\quanti{X}{i}\), where \(X \in \X[2]\) will serve as a placeholder for the recipe used to compute \(x\), and \(i \in \N\) indicates that only the first \(i\) axioms of the frame are available to compute the recipe in question.
+      This is formalised by the following, natural extension of the notion of substitution:
+
+      \begin{definition}[second-order substitutions]
+        We suppose a partition \(\X[2] = \biguplus_{n \in \N} \Xsndi[=]{i}\) where each class \(\Xsndi[=]{i}\) is infinite.
+        We also write \(\Xsndi{i} = \bigcup_{j=0}^i \Xsndi[=]{j}\).
+        If \(X\) is a second-order variable we may write \(\quanti{X}{i}\) to emphasise that \(X \in \Xsndi[=]{i}\) and say in this case that \emph{\(X\) is of type \(i\)}.
+        A \emph{second-order substitution} is then a substitution \(\Sigma\) of domain \(\dom(\Sigma) \subseteq \X[2]\) that \emph{respects types}:
+        \begin{align*}
+          \forall \quanti{X}{i} \in \dom(\Sigma),\ X \Sigma \in \recipeset_i & &
+          \text{where } \recipeset_i = \termset(\sig \cup \sig_0 \cup \Xsndi{i} \cup \{\ax_1, \ldots, \ax_i\})
+        \end{align*}
+      \end{definition}
+
+      % Intuitively, if \(X\) is a second-order variable associated to an input variable \(x\), the type of \(X\) carries the information of which axioms were available at the time \(x\) was performed.
+      % The restriction that second-order substitutions respect types thus ensures that \(X\) will be instantiated by a recipe that is consistent with the frame \(x\) is constructed from.
+      Altogether, we can then define the constraints that we use to characterise the possible values that an input term \(x\) may take:
+
+      \begin{definition}[constraint] \label{def:constraint}
+        We consider the following three kinds of atomic formulas:
+        \begin{enumerate}
+          \item \emph{deduction fact} \(\xi \dedfact u\) where \(u\) is a message in normal form and \(\xi\) is a second-order term such that \(\rootf(\xi) \notin \sigc\);
+          \item \emph{second-order equations} \(\xi \eqs \zeta\) where \(\xi\) and \(\zeta\) are two second-order terms;
+          \item \emph{(first-order) equations} \(u \eqs v\) where \(u\) and \(v\) are two messages in normal form.
+        \end{enumerate}
+        A \emph{constraint}  is then a first-order formula over these atoms, that is, either \(\top\), \(\bot\), one of the three atoms above, or of the form \(\varphi \wedge \psi\), \(\varphi \vee \psi\), \(\neg \varphi\), \(\forall x.\varphi\), or \(\forall \quanti{X}{n}.\varphi\) for \(\varphi,\psi\) constraints.
+        Note that \(\vars(\varphi)\) then refers to the \emph{free} variables of the constraint \(\varphi\).
+        The negation \(\neg(\alpha \eqs \beta)\) of an equation is written \(\alpha \neqs \beta\) and called a \emph{disequation}.
+      \end{definition}
+
+      A deduction fact \(\xi \dedfact u\) indicates that term \(u\) is deducible by the recipe \(\xi\) and second-order equations \(\xi \eqs \zeta\) are used to put restrictions on which recipes \(\xi\) may be used to do so.
+      For example \(\quanti{X}{i} \dedfact x\) states that the variable \(x\) is to be replaced by a term deducible by the attacker using at most the \(i\) first outputs of the frame;
+      a constraint solving procedure may then impose that \(\exists \quanti{Y}{i}.\,X \eqs \ffun(Y)\), i.e., that the underlying recipe should have a \(\ffun\) symbol at its root.
+      Equations reflect the syntactic equalities that the first-order terms verify.
+      Typically when executing \(\IfP\ \fst(x) = t\ \ThenP\ P\ \ElseP\ Q\), the positive branch will intuitively lead to the constraint \(\exists y.\, x \eqs \pair {t,y}\) and the negative branch to \(\forall y.\, x \neqs \pair {t,y}\).
+
+    \paragraph{Constraint systems}
+      Finally we define and give some properties of \emph{constraint systems} that are used to collect the first-order constraints induced by a given execution of a process.
+      % They only contain constraints of a certain shape that verify additional invariants that make their use easier.
+
+      \begin{definition}[constraint system]
+        A \emph{constraint system} is a triple \(\C = (\Phi,\Df,\Eqfst)\) whose elements are of the following form:
+        \begin{enumerate}
+          \item \(\Phi = \{\ax_1 \mapsto t_1, \ldots, \ax_n \mapsto t_n\}\) is a frame (not necessarily ground)
+          \item \(\Df\) is a set of constraints of the form \(X \dedfact x\), with \(X \in \Xsndi{n}\), \(x \in \X[1]\).
+          We also require the \emph{origination property}:
+          for all \(i \in \eint {1} {n}\), for all \(x \in \vars(t_i)\), there exists \(X \in \Xsndi{i-1}\) such that \((X \dedfact x) \in \Df\).
+          \item \(\Eqfst\) is a set of constraints of the form \(u \eqs v\) or \(\forall z_1 \ldots \forall z_k. \bigvee_{j=1}^r u_j \neqs v_j\).
+        \end{enumerate}
+      \end{definition}
+
+      The components of \(\C\) are also written \(\Phi(\C)\), \(\Df(\C)\) and \(\Eqfst(\C)\).
+      The set \(\Df\) contains all input binders \(x\) that have been executed, each mapped to a second-order variable \(X\) that will serve as a placeholder for the corresponding recipe.
+      % The constraints \(\forall \quanti{X}{i}.\, X \ndedfact x\) indicate that a channel \(x\) has been used in an internal communication and should therefore not be deducible by the adversary (which, we recall, is a requirement of the concrete semantics we use, the private semantics).
+      Next the origination property expresses that when reference is made to an input \(x\) in an output \(t_i\), this input should be computed only from the previous outputs \(t_1, \ldots, t_{i-1}\).
+      This is a natural invariant preventing cyclic input-output dependencies, always satisfied in practice.
+      Finally \(\Eqfst\) is a set of (dis)equalities imposed on the protocol messages by conditionals, among others.
+      We will formalise in Section \ref{sec:mgs-def} the semantics of these constraints through a notion of \emph{solution}.
+
+      \begin{remark}[notational conventions]
+        We use several convenient notations throughout the paper to lighten the presentation of constraints.
+        First of all we do not make a difference between sets and conjunctions of constraints:
+        for instance we may write \(\Eqfst = \bigwedge_{i=1}^n \varphi_i\) instead of \(\Eqfst = \{\varphi_i\}_{i=1}^n\) and conversely.
+        We also interpret a substitution \(\sigma\) as the set of equations \(\eqnset = \{x \eqs x \sigma \mid x \in \dom(\sigma)\}\).
+      \end{remark}
+
+\subsection{(Most general) unifiers} \label{sec:unification}
+  We now recall some basics on term unification, a key concept in symbolic models that has some specificities in our context, in particular regarding second-order terms.
+  % The most important divergence w.r.t. usual unification is how to handle second-order terms due to the types of second-order variables.
+
+  \paragraph{Unification of first-order terms}
+    Two first-order terms \(u\) and \(v\) are \emph{unifiable} if there exists a substitution \(\sigma\), called a \emph{unifier}, such that \(u \sigma = v \sigma\).
+    For example the terms \(u = \pair{\sdec(x,y),z}\) and \(v = \pair{z_1,z_2}\) are unified by \(\sigma = \{z_1 \mapsto \sdec(x,y), z_2 \mapsto z\}\).
+    The terms \(u\) and \(z'\) are unifiable as well using \(\sigma = \{z' \mapsto u\}\), but the terms \(u\) and \(z\) are not.
+    More generally, a unifier \(\sigma\) of a set of equations \(\eqnset = \{u_i \eqs v_i\}_{i=1}^n\) is a unifier of \(u_i\) and \(v_i\) for all \(i\).
+    A classical characterisation of the set of unifiers of two terms is based on \emph{most general unifiers}:
+
+    \begin{definition}[most general unifier]
+      A unifier \(\sigma\) of \(\eqnset\) is said to be a \emph{most general} one if, for any \(\theta\) unifier of \(\eqnset\), there exists \(\tau\) such that \(\theta = \sigma \tau\).
+      In this case, we write \(\sigma = \mgu(\eqnset)\) (and it is unique up to variable renaming).
+      When \(\eqnset\) is not unifiable, we write \(\mgu(\eqnset) = \bot\).
+    \end{definition}
+
+    A straightforward inductive procedure allows to decide whether \(\eqnset\) is unifiable and, if it is, to compute \(\mgu(\eqnset)\)
+    %
+    We assume w.l.o.g. that this computation does not introduce variables, that is, if \(\sigma = \mgu(\eqnset)\) then \(\dom(\sigma) \cup \vars(\im(\sigma)) \subseteq \vars(\eqnset)\).
+    We also require that \(\dom(\sigma) \cap \vars(\im(\sigma)) = \emptyset\), that is, applying a mgu twice has no more effect than applying it once.
+    Note as well that all unifiers are instances of the mgu but the converse is also true, that is,
+    all instances of a mgu are unifiers.
+    By convenience we also write \(\mgu(\eqnset)\) in the case where \(\eqnset\) contains disequations (typically when writing \(\mgu(\Eqfst(\C))\)):
+    in this case only equations are taken into account and nothing ensures that the mgu satisfies the disequations of \(\eqnset\).
+
+    However mgu's are only syntactic:
+    when taking the rewriting system \(\R\) into account we say that \(\sigma\) is a \emph{unifier modulo theory} of \(\eqnset\) when for all \((u \eqs v) \in \eqnset\), \(u\sigma\norm = v\sigma\norm\).
+    A standard procedure based on narrowing (not detailed here) allows to compute \emph{most general unifiers modulo \(\R\)} when \(\R\) is subterm convergent among others~\cite{CD05}.
+    However unlike the syntactic case they are not unique in general:
+
+    \begin{definition}[most general unifier modulo theory]
+      We let \(\eqnset\) be a set of equations and \(\R\) be a convergent rewriting system.
+      A set of \emph{most general unifiers modulo \(\R\)} is a set of substitutions \(\mguR(\eqnset)\) that verifies the following properties:
+      \begin{enumerate}
+        \item for all \(\sigma \in \mguR(\eqnset)\), \(\sigma\) is a unifier of \(\eqnset\) modulo \(\R\)
+        \item for all \(\theta\) unifier of \(\eqnset\) modulo \(\R\), there exists \(\sigma \in \mguR(\eqnset)\) and a substitution \(\tau\) such that for all \(x \in \vars(\eqnset)\), \(x \theta\norm = x \sigma \tau\norm\)
+      \end{enumerate}
+    \end{definition}
+    
+
+    Again we emphasise that equality modulo \(\R\) only operates on valid messages, that is, if \(\sigma \in \mguR(u \eqs v)\) then \(u \sigma\) and \(v \sigma\) verify the \(\msg\) predicate.
+    A typical use case we consider in the symbolic semantics is \(\mguR(u \eqs u)\), which is the most general substitution \(\sigma\) such that \(\msg(u \sigma)\) holds (if any).
+    For example if \(u = \adec(x,y)\) we have \(\mguR(u \eqs u) = \{\sigma\}\), where:
+    \begin{align*}
+      \sigma & = \{x \mapsto \aenc(x',x_r,\pk(y')), y \mapsto y'\} & & x',x_r,y' \in \X\ \text{fresh}
+    \end{align*}
+    This example also highlights that, unlike the syntactic case, computing mgu's modulo theory may require to introduce new variables.
+    This also makes it possible to enforce that \(\dom(\sigma) \cap \vars(\im(\sigma)) = \emptyset\).
+
+  \paragraph{Unification of second-order terms}
+    Intuitively, the unification of two second-order terms \(\xi\) and \(\zeta\) modulo theory means that they deduce the same first-order term \(u\) w.r.t. a given frame \(\Phi\).
+    This unusual kind of unification is performed as a part of our constraint solving algorithm using a dedicated kind of constraint written \(\xi \eqf \zeta\), detailed in Section~\ref{sec:formulas}.
+    However, even the computation of syntactic mgu's has some subtleties for second-order terms that we discuss below.
+
+    As in the first-order case, a syntactic unifier of \(\xi\) and \(\zeta\) is a second-order substitution \(\Sigma\) such that \(\xi \Sigma = \zeta \Sigma\).
+    However, computing \(\Sigma\) is not as simple as usual due to the variable types.
+    Indeed, we recall that by definition, a second-order substitution has to respect types, that is, a variable \(\quanti{X}{n}\) cannot be mapped to a term containing axioms \(\ax_i\) or variables \(\quanti{Y}{i}\) if \(i > n\).
+    %
+    Say for instance we want to unify the two second-order terms \(\quanti{X}{1}\) and \(\ffun(\quanti{Y}{2})\):
+    a regular computation of the mgu would yield the substitution \(\Sigma = \{X \mapsto \ffun(Y)\}\), which does not respect the type of \(X\).
+    In this case, one solution is to introduce a fresh variable \(\quanti{Z}{1}\) and to choose the following unifier:
+    \[\mgu(X \eqs \ffun(Y)) = \{X \mapsto \ffun(Z), Y \mapsto Z\} = \Sigma\{Y \mapsto Z\}\,.\]
+    % We write it more explicitly \(\exists Z. \Sigma'\) to highlight the fact that the fresh variable \(Z\) has been introduced.
+    %
+    Formally given a second-order term \(\xi\), let us write \(\maxarity{\xi}\) the maximal type appearing in \(\xi\), that is, the integer \(\maxarity{\xi} = \min \{i \in \N \mid \xi \in \recipeset_i\}\).
+    The mgu of a conjunction of equations \(\varphi\) is then computed inductively as follows:
+    \[\begin{array}{l}
+      \mgu(\top) = \top \\[3mm]
+      \mgu\left(\varphi \wedge \ffun(\xi_1, \ldots, \xi_n) \eqs \gfun(\zeta_1, \ldots, \zeta_n)\right) =
+      \left\{\begin{array}{ll}
+        \bot & \mbox{if } \ffun \neq \gfun \\
+        \mgu\left(\varphi \wedge \bigwedge_{i=1}^n \xi_i \eqs \zeta_i\right) & \mbox{if } \ffun = \gfun
+      \end{array}\right. \\[8mm]
+      \mgu\left(\varphi \wedge \quanti{X}{i} \eqs \xi\right) =
+      \left\{\begin{array}{l@{\qquad}l}
+        \bot & \mbox{if \(X \in \vars[2](\xi)\) and \(\xi \neq X\)} \\[2mm]
+        \bot & \mbox{else if \(\exists \ax_j \in \axioms(\xi), j > i\)} \\[2mm]
+        \Sigma_0 \Sigma
+          & \mbox{else if \(\xi \notin \X[2]\), \(\quanti{Y}{j} \in \vars[2](\xi)\), \(j > i\), \(\quanti{Z}{i}\) fresh and}\\
+          & \text{with } \Sigma_0 = \{Y \mapsto Z\} \text{ and } \Sigma = \mgu\left(\varphi\Sigma_0 \wedge \quanti{X}{i} \eqs \xi\Sigma_0\right) \\[2mm]
+        \Sigma_0 \Sigma
+          & \mbox{else if \(\maxarity{\xi} \leqslant i\), with \(\Sigma_0 = \{X \mapsto \xi\}\) and \(\Sigma = \mgu\left(\varphi\Sigma_0\right)\)}
+      \end{array}\right.
+    \end{array}\]
+
+    As before we extend this notation to arbitrary sets \(\eqnset\), that is, we may write \(\mgu(\eqnset)\) even if \(\eqnset\) contains disequations (which are then ignored during the computation).
+    The correctness of this function is proved below.
+
+    \begin{proposition}[correctness of second-order mgu's]
+      For all sets of second-order equations \(\eqnset\), the computation of \(\mgu(\eqnset)\) terminates.
+      Besides we have that \(\mgu(\eqnset) = \bot\) \textit{iff} there exist no unifiers of \(\eqnset\).
+      When \(\mgu(\eqnset) \neq \bot\), we have that:
+      \begin{enumerate}
+        \item \(\mgu(\eqnset)\) is a second-order substitution, i.e., it respects types, and it is a unifier of \(\eqnset\);
+        \item for all unifiers \(\Sigma\) of \(\eqnset\), there exists a second-order substitution \(\Sigma_0\) such that \(\Sigma = \mgu(\eqnset) \Sigma_0\).
+      \end{enumerate}
+    \end{proposition}
+
+    \begin{proof}
+      We only prove the termination since all other properties can be proved separately by straightforward inductions on the definition of \(\mgu\).
+      We let the partial ordering on second order variables \(\preccurlyeq\) given by the types, i.e. \(\quanti{X}{i} \preccurlyeq \quanti{Y}{j}\) \textit{iff}  \(i \leqslant j\).
+      Given a set of second-order equations \(\eqnset\) we then let
+      \[\mu(\eqnset) = (\vars[2](\eqnset),M(\eqnset),F(\eqnset))\]
+      where \(M(\eqnset)\) is the multiset of variables of \(\eqnset\), i.e. multiplicity included, and \(F(\eqnset)\) is the multiset of the sizes of the equations of \(\eqnset\) (where the size of \(\xi \eqs \zeta\) is the number of function symbols in \(\xi\) and \(\zeta\)).
+      The first two components are ordered w.r.t. the multiset extension of \(\preccurlyeq\),
+      and the third one w.r.t. the multiset extension of \(\leqslant\).
+      The overall tuple is ordered w.r.t. the lexicographic composition of the three components.
+
+      If we number from 1 to 7 the axioms defining \emph{mgu}, we can show that \(\mu\) decreases at each recursive call:
+      (1), (2), (4) and (5) make no recursive calls;
+      (3) preserves \(\vars[2]\) and \(M\), and makes \(F\) decrease;
+      (6) replaces all occurrences of \(Y\) with \(Z\) that has a lower type which makes \(\vars[2]\) decrease.
+      Regarding (7) two cases can arise:
+      either \(\xi = X\) or \(X \notin \vars[2](\xi)\).
+      In the first case \(\vars[2]\) is non increasing and \(M\) is decreasing since two occurrences of \(X\) are removed and the rest of the formula \(\eqnset\) is left unchanged.
+      In the second case \(\vars[2]\) is decreasing since all occurrences of \(X\) are removed and no variables are added.
+    \end{proof}
+
+    % Since recipes simply model attack computations and not actual protocol messages, we will not need a notion of second-order mgu modulo theory.
+
+\subsection{(Most general) solutions} \label{sec:mgs-def}
+  \paragraph{Solutions}
+    Let us now formalise the semantics of constraints.
+    Given a constraint \(\varphi\), a frame \(\Phi\) and second- and first-order substitutions \(\Sigma\) and \(\sigma\)
+    we define the predicate \((\Phi,\Sigma,\sigma) \models \varphi\) by:
+    \[\begin{array}{l@{\quad\mathit{iff}\quad}l}
+      (\Phi,\Sigma,\sigma) \models \xi \dedfact u & \xi \Sigma \Phi \sigma\norm = u \sigma\norm \\
+      (\Phi,\Sigma,\sigma) \models \xi \eqs \zeta & \xi\Sigma = \zeta\Sigma \\
+      (\Phi,\Sigma,\sigma) \models u \eqs v & u\sigma = v\sigma \\
+      (\Phi,\Sigma,\sigma) \models \forall x.\,\varphi & \text{for all first-order ground terms } t, (\Phi,\Sigma,\sigma) \models \varphi\{x \mapsto t\} \\
+      (\Phi,\Sigma,\sigma) \models \forall \quanti{X}{n}.\,\varphi & \text{for all } \xi \in \recipeset_n, (\Phi,\Sigma,\sigma) \models \varphi\{X \mapsto \xi\}
+    \end{array}\]
+    The definition is extended with logical connectives \(\neg, \wedge, \vee, \ldots\) in the natural way.
+    By convention, writing \((\Phi,\Sigma,\sigma) \models \varphi\) implicitly assumes that, for all \(x \in \vars[1](\varphi)\) and \(X \in \vars[2](\varphi)\), \(x \sigma\) and \(X \Sigma \Phi \sigma\) are ground.
+    Intuitively the second-order substitution \(\Sigma\) describes which recipes are used to deduce each input term appearing in \(\varphi\), while \(\sigma\) gives the actual values of these inputs.
+    % This notion is then lifted to constraint systems as follows:
+
+    \begin{definition}[solution of a constraint system]
+      We say that \((\Sigma,\sigma)\) is a \emph{solution} of \(\C\) if \(\dom(\Sigma) = \vars[2](\C)\), \(\dom(\sigma) = \vars[1](\C)\) and \((\Phi(\C),\Sigma,\sigma) \models \Df(\C) \wedge \Eqfst(\C)\).
+      We call \(\Sigma\) a \emph{second-order solution} of \(\C\) and \(\sigma\) its \emph{first-order solution}.
+      The set of solutions of \(\C\) is written \(\Sol(\C)\).
+    \end{definition}
+
+    The solutions of a constraint system \(\C\) indicate how the inputs of \(\C\) (i.e., \(\vars[1](\Df(\C))\)) can be computed while satisfying the constraints imposed by \(\Eqfst(\C)\).
+    Due to the origination property, the values the first-order solution \(\sigma\) takes on \(\vars[1](\Df(\C))\) is uniquely determined by which recipes are used to deduce terms, i.e., by the second-order solution \(\Sigma\).
+
+    \begin{example} \label{ex:csys}
+      Consider again the simple example \(P = \OutP {c} {k}.\,
+      \InP {c} {x}.\,\IfP\ \fst(x) = k\ \ThenP\ \OutP {c} {\hfun(x)}\).
+      The traces performing the final output \(\hfun(x)\) are characterised by the constraint system
+      \begin{align*}
+        \Phi(\C) & = \{\ax_1 \mapsto k, \ax_2 \mapsto \hfun(x)\} &
+        \Df(\C) & = \{X \dedfact x\} &
+        \Eqfst(\C) & = \{x \eqs \pair{k,y}\}
+      \end{align*}
+      where \(\quanti{X}{1}\) and \(y\) are fresh second- and first-order variables, respectively.
+      Observe in particular that the informal constraint ``\textit{there exists a term \(y\) such that \(x = \pair {k,y}\)}'' is not formalised using an explicit \(\exists\) quantification but with a free variable \(y\).
+      All second-order solutions of \(\C\) are instances of \(\Sigma_0 = \{X \mapsto \pair {\ax_1, Y}\}\) where \(\quanti{Y}{1}\) is fresh,
+      for example, \(\Sigma = \{X \mapsto \pair {\ax_1, a}\}\) with \(a \in \sig_0\).
+      The corresponding first-order solution is then \(\sigma = \{x \mapsto \pair {k,a}, y \mapsto a\}\).
+    \end{example}
+
+  \paragraph{Most general solutions}
+    Similarly to mgu's, we now introduce a novel characterisation of solutions as instances of so-called most general solutions (\emph{mgs}).
+    The definition is parametrised with a predicate \(\pi\) on second-order substitutions, writing \(\Sol[\pi](\C) = \{(\Sigma,\sigma) \in \Sol(\C) \mid \pi(\C) \text{ holds}\}\).
+    Filtering solutions this way will essentially permit, during the decision procedure, to perform case analyses on the form of the solutions.
+
+    \begin{definition}[most general solution] \label{def:mgs}
+      % Let \(\C\) be a constraint system and \(\pi\) a predicate on second order substitutions.
+      A set of \emph{most general solutions of \(\C\) that satisfy \(\pi\)} is a set \(\mgs[\pi](\C)\) of second-order substitutions such that:
+      \begin{enumerate}
+        \item \label{it:mgs-sol}
+        for all \(\Sigma_0 \in \mgs[\pi](\C)\), \(\dom(\Sigma_0) \subseteq \vars[2](\C)\), for all injections \(\Sigma_1\) to fresh constants and of domain \(\dom(\Sigma_1) = \vars[2](\im(\Sigma_0),\C) \smallsetminus \dom(\Sigma_0)\),
+        \((\Sigma_0\Sigma_1,\sigma) \in \Sol[\pi](\C)\) for some \(\sigma\).
+        \item \label{it:mgs-inst}
+        for all \((\Sigma,\sigma) \in \Sol[\pi](\C)\), there exists \(\Sigma_0 \in \mgs[\pi](\C)\) and \(\Sigma_1\) such that \(\Sigma = \Sigma_0\Sigma_1\).
+      \end{enumerate}
+      % We suppose that all substitutions in \(\mgs[\pi](\C)\) are distinct modulo renaming of variables.
+      % The set \(S\) may not be unique a priori and we therefore refer by \(\mgs[\pi](\C)\) to one arbitrary such set.
+      We omit the predicate \(\pi\) in the case where \(\pi = \top\), i.e., \(\pi(\Sigma)\) holds for any substitution.
+    \end{definition}
+
+    The first condition of the definition states that a mgs \(\Sigma_0\) is ``almost'' a solution of \(\C\):
+    \(\Sigma_0\) is allowed to be given in a minimal form that does not instantiate all variables of \(\vars[2](\C)\), and that may not have a ground image;
+    but we obtain a solution by replacing all pending variables by fresh names using \(\Sigma_1\).
+    The second condition states that all solutions are instances of a mgs.
+
+    \begin{example} \label{ex:mgs}
+      In Example \ref{ex:csys} we have \(\mgs(\C) = \{\Sigma_0\}\) and \(\Sol(\C)\) is the set of all ground instances of \(\Sigma_0\).
+      However in general the situation may be less ideal.
+      For example a constraint system may have several most general solutions;
+      a simple example being, with \(\hfun/1\) and \(k \in \Nall\):
+      \begin{align*}
+        \Phi(\C) & = \{\ax_1 \mapsto \hfun(k), \ax_2 \mapsto k\} &
+        \Df(\C) & = \{\quanti{X}{2} \dedfact x\} &
+        \Eqfst(\C) & = \{x \eqs \hfun(k)\}
+      \end{align*}
+      The constraint system \(\C\) expresses that an input \(x\) should be instantiated by \(\hfun(k)\), potentially by using the two previous outputs \(\hfun(k)\) and \(k\).
+      There are therefore two ways of computing \(x\):
+      either using \(\ax_1\) or \(\hfun(\ax_2)\), which is reflected as the fact that \(\mgs(\C) = \{\Sigma_1,\Sigma_2\}\) with
+      \begin{align*}
+        \Sigma_1 & = \{X \mapsto \hfun(\ax_2)\} &
+        \Sigma_2 & = \{X \mapsto \ax_1\}
+      \end{align*}
+      Still, it is possible to obtain unique mgs' by performing a case analysis and restricting the solutions accordingly;
+      typically here we have \(\mgs[\pi_i](\C) = \{\Sigma_i\}\) with
+      % and \(\mgs[\pi_2](\C) = \{\Sigma_2\}\) where \(\pi_1\) and \(\pi_2\) are the predicates defined by
+      \begin{align*}
+        \pi_1(\Sigma) & \eqdef \exists X'.\, X \eqs \hfun(X') &
+        \pi_2(\Sigma) & \eqdef \forall X'.\, X \neqs \hfun(X')
+      \end{align*}
+      Another notable point is that some ground instances of a mgs may not be solutions themselves.
+      Taking \(a \in \sig_0\) a simple example is given by \(\C = (\emptyset, X \dedfact x, x \neqs a)\)
+      and \(\mgs(\C) = \{\id\}\):  the substitution \(\{X \mapsto a\}\) is a ground instance of the identity but not a solution (which does not contradict Item \ref{it:mgs-sol} of Definition \ref{def:mgs} since although \(a\) is a constant, it is not fresh).
+      %
+      % Despite these points mgs' will prove to be a convenient tool when deciding equivalence properties.
+    \end{example}
+
+    We describe in Section~\ref{sec:mgs-gen} how to generate a finite set of most general solutions, at least in the context of our decision procedure.
+
+\subsection{Symbolic semantics} \label{sec:symbolic-semantics}
+
+\paragraph{Symbolic execution}
+We now describe formally our symbolic semantics.
+It shares some common ground with the concrete semantics of the calculus,
+except that a constraint system collects the execution's constraints.
+The semantics operates on so-called \emph{symbolic processes} \((\P,\C)\) where \(\P\) is a multiset of (non-necessarily ground) plain processes and \(\C\) is a constraint system.
+    All free variables of \(\P\) are bound by deductions facts, that is, for all \(x \in \vars(\P)\) there exists \((X \dedfact x) \in \Df(\C)\).
+    The semantics then takes the form of a labelled transition system \(\sstep{\alpha}\) between symbolic processes, defined in Figure~\ref{fig:semantics-symbolic}, where \(\alpha\) ranges over the following alphabet of \emph{symbolic actions}:
+    \begin{enumerate}
+      \item \emph{symbolic input actions} \(\InP {X} {Y}\) where \(X\) and \(Y\) are second-order variables, modelling public inputs as in the concrete semantics except that the attacker recipes are replaced by the two placeholders \(X,Y\);
+      \item \emph{symbolic output actions} \(\OutP {X} {\ax_i}\) that follow the same logic;
+      \item the \emph{unobservable action} \(\tau\) which has the exact same role as in the concrete semantics.
+    \end{enumerate}
+
+    Before we define the semantics let us explain how we handle conditionals.
+    First of all we recall our convention to interpret substitutions as sets of equalities, that is, the positive branch of ``\(\IfP\ u = v\ \ThenP\ P\ \ElseP\ Q\)'' will add one mgu of \(u\) and \(v\) modulo theory to \(\Eqfst\).
+    Regarding the negative branch, we want to add a constraint that is satisfied \textit{iff} \(u\) and \(v\) are not equal modulo theory.
+    We write it \(\neg\mguR(u \eqs v)\) and define it as follows:
+    \begin{align*}
+      \neg\mguR(u \eqs v) & = \bigwedge_{\sigma \in \mguR(u \eqs v)} \forall \tilde{z_\sigma} \bigvee_{x \in \vars(u,v)} x \neqs x \sigma
+    \end{align*}
+    where \(\tilde{z_\sigma} = \vars(u\sigma,v\sigma)\smallsetminus \vars(u,v)\).
+
+    \begin{figure*}[ht]
+      \centering
+      \begin{align}
+        \nonumber
+        & \text{If \(\C = (\Phi, \Df, \Eqfst)\), \(\mu = \mgu(\Eqfst) \neq \bot\) and \(n = |\dom(\Phi)|\):} \\[2mm]
+        %
+        \tag{\mbox{\textsc{s-Then}}} \label{rule:s-then}
+        & (\multi {\IfP\ u = v\ \ThenP\ P\ \ElseP\ Q} \cup \P, \C)
+          \sstep {\tau} (\multi {P} \cup \P, (\Phi,\Df,\Eqfst \wedge \sigma)) \\
+        \tag*{\text{\small if \(\sigma \in \mguR(u\mu \eqs v\mu)\)}} \\
+        %
+        \tag{\mbox{\textsc{s-Else}}} \label{rule:s-else}
+        & (\multi {\IfP\ u = v\ \ThenP\ P\ \ElseP\ Q} \cup \P, \C)
+          \sstep {\tau} (\multi {Q} \cup \P, (\Phi,\Df,\Eqfst \wedge \neg\mguR(u\mu \eqs v \mu))) \\
+        % \tag*{\text{\small with \(\varphi = \neg\mguR(u\mu \eqs v \mu)\)}} \\
+        %
+        \tag{\mbox{\textsc{s-In}}} \label{rule:s-in}
+        & (\multi {\InP {u} {x}.P} \cup \P, \C)
+          \sstep {\InP {Y} {X}} (\multi {P} \cup \P, (\Phi,\Df \wedge X \dedfact x \wedge Y \dedfact y,\Eqfst \wedge \sigma)) \\
+        \tag*{\text{\small if \(\quanti{Y}{n}\), \(\quanti{X}{n}\) and \(y\) are fresh and \(\sigma \in \mguR(y \eqs u \mu)\)}} \\
+        %
+        \tag{\mbox{\textsc{s-Out}}} \label{rule:s-out}
+        & (\multi {\OutP {u} {v}.P} \cup \P, \C)
+          \sstep {\OutP {Y} {\ax_{n+1}}} (\multi {P} \cup \P, (\Phi \cup \{\ax_{n+1} \mapsto v \mu \sigma \norm\},\Df \wedge Y \dedfact y,\Eqfst \wedge \sigma)) \\
+        \tag*{\text{\small if \(\quanti{Y}{n}\) and \(y\) are fresh and \(\sigma \in \mguR(y \eqs u \mu \wedge v\mu \eqs v\mu)\)}} \\
+        %
+        \tag{\mbox{\textsc{s-Comm}}} \label{rule:s-comm}
+        & (\multi {\OutP {u} {v}.P, \InP {w} {x}.Q} \cup \P, \C)
+          \sstep {\tau} (\multi {P, Q\{x \mapsto v \mu \sigma\}} \cup \P, (\Phi,\Df,\Eqfst \wedge \sigma)) \\
+        \tag*{\text{\small if \(\sigma \in \mguR(u \mu \eqs w \mu \wedge v\mu \eqs v\mu)\)}} \\
+        % \tag*{\text{\small and \(\Sol(\C') = \emptyset\) where \(\C' = (\Phi,\Df \wedge Y \dedfact y, \Eqfst \wedge y \eqs u \mu)\) for some fresh \(\quanti{Y}{n},y\)}} \\
+        % 
+        \tag{\mbox{\textsc{s-Par}}} \label{rule:s-par}
+        & (\multi {P \mid Q} \cup \P, \C)
+          \sstep {\tau} (\multi {P, Q} \cup \P, \C)
+      \end{align}
+      \caption{A symbolic semantics for the applied pi-calculus}
+      \label{fig:semantics-symbolic}
+    \end{figure*}
+
+    % The rules \eqref{rule:s-new}, \eqref{rule:s-par} and \eqref{rule:s-repl} are analogue to their concrete counterparts.
+    % As explained above conditionals are handled by the rules \eqref{rule:s-then} and \eqref{rule:s-else} that add a constraint corresponding to the cases where the test succeeds or not, respectively.
+    The rule \eqref{rule:s-in} adds two deduction facts \(X \dedfact x\) and \(Y \dedfact y\) to \(\Df\), modelling that the input term and communication channel should be deducible by the adversary;
+    in particular the constraint \(\sigma \in \mguR(y \eqs u \mu)\) indicates that the term deduced by \(Y\) is effectively the channel \(u\).
+    The rule \eqref{rule:s-out} essentially follows the same logic, adding a fresh deduction fact and a constraint indicating that the channel is deducible.
+    We assume an implicit alpha renaming of bound variables so that each appear only once in the process:
+    this prevents reference conflicts in \(\Df\) when applying the rule \eqref{rule:s-in}.
+    Let us also point out that several rules introduce constraints of the form \(\mguR(u,u)\):
+    we recall that this substitution is not always \(\top\), but is the most general substitution \(\sigma\) ensuring that \(u\sigma\) is a message.
+    %
+    % Finally let us comment on the rule \eqref{rule:s-comm}.
+    % The constraint \(\varphi\) added to \(\Df\) indicates that the channel \(u\) (bound to \(y\) using the equation \(y \eqs u \mu\)) used to perform the communication should not be deducible by the adversary.
+    % Removing the constraint leads to a symbolic semantics for the classical semantics which, we recall, is the semantics where internal communications can be performed on any channel.
+    % Then the constraint \(\sigma\) added to \(\Eqfst\) simply indicates that the two communication channels \(u\) and \(w\) should be identical.
+    % 
+    As in the concrete semantics, a \emph{symbolic trace} is then a finite sequence of transitions 
+    \[(\P_0,\C_0) \sstep{\alpha_1} \cdots \sstep{\alpha_n} (\P_n,\C_n)\] 
+    which may be referred to as \((\P_0,\C_0) \Sstep {\tr} (\P_n,\C_n)\) if \(\tr\) is obtained by removing the \(\tau\)'s from the word \(\alpha_1 \cdots \alpha_n\).
+    For simplicity the plain process \(P\) may be interpreted as the symbolic process \((\multi{P},(\emptyset,\top,\top))\).
+
+    \begin{example}
+      We consider again the example of the private authentication protocol.
+      We recall the process of the agent \(B\) receiving the communication, writing \(\pks_X,\sks_X\) instead of \(\pk(\sk(X)),\sk(X)\), and \(t = \adec(x,s)\):
+      \[\begin{array}{l@{\ }l@{\qquad}l@{\ }l}
+        B(s, p, n, r) = & \InP c x.\\
+        & \IfP\, \snd(t) = p\, \ThenP\\
+        & \phantom{\ElseP}\, \OutP c {\aenc(\pair {\fst(t), n, \pk(s)},r,p)}\\
+        & \ElseP\, \OutP c {\aenc(n,r,\pk(s))}
+      \end{array}\]
+      and use a frame \(\Phi_0 = \{\ax_1 \mapsto \pks_A, \ax_2 \mapsto \pks_B, \ax_3 \mapsto  \aenc(\pair{N_A,\pks_A}, r_A, \pks_B)\}\), containing public keys and the connection request sent by \(A\).
+      % The process is presented slightly differently compared to Chapter \ref{chap:bench}, Example \ref{ex:process}, by using a \(\LetP\ \ldots\ \LetInP\) constructs;
+      % although we did not detail the corresponding symbolic rule \textsc{s-Let}, it suffices to use the same transitions as the encoding with standard conditionals.
+      We give in Figure \ref{fig:semantics-symbolic-ex} a tree of all symbolic executions of \(B\) (we only write the constraints added at each step).
+      % We execute \(\LetP\)'s using a rule (\textsc{s-Let}), not formalised, executing symbolically their encodings into standard conditionals.
+
+      \begin{figure}[ht]
+        \centering
+        \includegraphics[width=0.85\textwidth]{files/symbolic-tree.pdf}
+        % \Description{Tree of all constraint systems reachable by executing \(B\) symbolically}
+        \caption{Tree of all constraint systems reachable by executing \(B\) symbolically}
+        \label{fig:semantics-symbolic-ex}
+      \end{figure}
+
+      Intuitively, the branch of the constraint system \(\C_1\) abstracts the set of concrete traces where \(B\) accepts the connection, and the branch of \(\C_2\) those where \(B\) refuses it.
+      Typically in the traces of the branch \(\C_1\) the attacker forwards the message of \(A\) or forges one pretending to be \(A\);
+      this is formally expressed by the fact that \(\mgs(\C_1) = \{\Sigma_0 \cup \Sigma_{\mathsf{fwd}},\ \Sigma_0 \cup \Sigma_{\mathsf{att}}\}\) where:
+      \[\Sigma_0 = \{Y \mapsto d, Z \mapsto d\} \qquad
+        \Sigma_{\mathsf{fwd}} = \{X \mapsto \ax_3\} \qquad
+        \Sigma_{\mathsf{att}} = \{X \mapsto \aenc(\pair{x_1,\ax_1}, x_3, \ax_2)\}
+        \qedhere\]
+    \end{example}
+
+  \paragraph{Soundness and completeness}
+    Similar symbolic semantics have been developed in the context of protocol analysis~\cite{B07,CCD13}.
+    The general approach is to abstract the (infinite) set of concrete traces by the finite set of symbolic traces and to study the solutions of the resulting constraint systems.
+    A typical example is that the following statements are equivalent:
+    % using for example the results of~\cite{B07}:
+    \begin{enumerate}
+      \item \emph{Weak secrecy of the term \(u\) in \(P\)}: for all traces \(P \Cstep {\tr} (\P,\Phi)\), \(u\) is not deducible from \(\Phi\)
+      \item for all symbolic traces \(P \Sstep{\tr} (\P,\C)\), the system \((\Phi(\C),\Df(\C) \wedge X \dedfact x, \Eqfst(\C) \wedge x \eqs u)\) has no solution, where \(\quanti{X}{n}\) and \(x\) are fresh, \(n = |\dom(\Phi)|\)
+    \end{enumerate}
+    This reduces weak secrecy (for a bounded number of sessions) to the decidability of whether a constraint system has a solution.
+    Similar approaches have been developed in~\cite{B07,CCD13} to decide equivalence properties for some classes of processes.
+    They rely on a connection between the symbolic and concrete semantics, under the form of two properties:
+    \begin{enumerate*}
+      \item \emph{soundness}:
+      applying to a symbolic trace a solution of its final constraint system leads to a concrete trace; and
+      \item \emph{completeness}:
+      all concrete traces are obtained by applying a solution to a symbolic one.
+    \end{enumerate*}
+    They are formalised below, the proof following from a straightforward induction on the length of the traces.
+
+    \begin{proposition}[soundness and completeness of the symbolic semantics] \label{prop:symbolic-sound-complete}
+      Let \((\P, \C)\) be a symbolic process.
+      Then we have:
+      \begin{enumerate}
+        \item \emph{Soundness:}
+        for all symbolic traces \((\P,\C) \Sstep{\tr_s} (\Q,\C')\) and \((\Sigma,\sigma) \in \Sol(\C')\), there exists a concrete trace of the form \((\P\sigma, \Phi(\C)\sigma\norm) \Cstep{\tr_s\Sigma} (\Q\sigma, \Phi(\C')\sigma\norm)\)
+        \item \emph{Completeness:}
+        for all symbolic processes \((\P,\C)\), \((\Sigma,\sigma) \in \Sol(\C)\), and for all concrete traces \((\P\sigma, \Phi(\C)\sigma \norm) \Cstep{\tr} (\Q, \Phi)\), there exists a symbolic trace
+        \((\P,\C) \Sstep{\tr'} (\Q',\C')\) and \((\Sigma',\sigma') \in \Sol(\C')\)
+        such that \(\Sigma \subseteq \Sigma'\), \(\Q = \Q'\sigma'\), \(\tr = \tr'\Sigma'\) and \(\Phi = \Phi(\C')\sigma'\norm\).
+      \end{enumerate}
+      %
+      % \medskip\noindent
+      % Note that for a ground process \(P\) the completeness simplifies to the more readable statement:
+      %
+      % \begin{enumerate}
+      %   \item if \(P \Cstep{\tr} (\Q,\Phi)\) then there exists a symbolic trace \(P \Sstep{\tr_s} (\Q',\C')\) and \((\Sigma',\sigma') \in \Sol(\C')\) such that \(\Q = \Q'\sigma'\), \(\tr = \tr_s\Sigma'\) and \(\Phi = \Phi(\C')\sigma'\norm\).
+      % \end{enumerate}
+    \end{proposition}
+
+    % The proof can be obtained by a straightforward induction on the length of the traces.
+
+\subsection{The key tool: the partition tree} 
+% \label{sec:ptree}
+
+  % \subsubsection{Definition of the partition tree}
+    To decide trace equivalence and labelled bisimilarity, we introduce the novel notion of \emph{partition tree} of two bounded processes \(P\) and \(Q\).
+    The point is to build a (finite) tree of all symbolic executions of \(P\) and \(Q\), grouping into the same nodes intermediary processes as follows:
+
+    \begin{enumerate}
+      \item All processes of a same node should have a \emph{common, unique mgs}.
+      Since one symbolic process alone may already have several most general solutions, the node is parametrised by a restricting predicate \(\pi\) on second-order solutions (recall Example \ref{ex:mgs}).
+      \item When applying the mgs of a node to all of the processes it contains (and instantiating the potential remaining variables by fresh distinct constants), the resulting frames are \emph{statically equivalent}.
+      Conversely, all reachable symbolic processes that would verify this property should be in the node as well.
+    \end{enumerate}
+
+    A branch of this tree therefore represents the set of all equivalent traces of \(P\) and \(Q\) taking a given sequence of visible actions.
+    Taking profit of this observation we will show that whenever \(P\) and \(Q\) are not trace equivalent or labelled bisimilar, a witness of non-equivalence can be exhibited using the tree.
+    %
+    Formally its nodes are modelled by \emph{configurations} that consist of sets \(\Gamma\) of symbolic processes sharing a unique mgs and statically equivalent solutions.
+
+    \begin{definition}[configuration] \label{def:configuration}
+      A \emph{configuration} is a pair \((\Gamma,\pi)\) where \(\Gamma\) is a set of symbolic processes and \(\pi\) a predicate on second-order substitutions.
+      We also require that:
+      \begin{enumerate}
+        \item \label{it:configuration-pred-dom}
+        the predicate \(\pi\) is defined on \(\vars[2](\Gamma)\), that is, for all \(\Sigma\), \(\pi(\Sigma)\) \textit{iff} \(\pi(\Sigma_{|\vars[2](\Gamma)})\);
+        \item \label{it:configuration-unique-mgs}
+        for all \((\P,\C) \in \Gamma\), \(|\mgs[\pi](\C)| = 1\);
+        \item \label{it:configuration-same-solutions}
+        for all \((\P_1,\C_1),(\P_2,\C_2) \in \Gamma\), if \((\Sigma,\sigma_1) \in \Sol[\pi](\C_1)\) then there exists \(\sigma_2\)
+        such that \((\Sigma,\sigma_2) \in \Sol[\pi](\C_2)\) and \(\Phi(\C_1) \sigma_1 \StatEq \Phi(\C_2) \sigma_2\).
+      \end{enumerate}
+    \end{definition}
+
+    The predicate \(\pi\) can typically be described using second-order (dis)equations.
+    We then consider trees with nodes labelled by configurations and edges by visible symbolic actions (i.e., not \(\tau\)).
+    Given a node \(n\) of such a tree, we write \(\Gamma(n)\) and \(\pi(n)\) the components of the corresponding configuration, and \(n \xrightarrow{\alpha} n'\) to express that \(n'\) is a child node of \(n\) through an edge labelled by the symbolic action \(\alpha\).
+    By definition of a mgs, the points \ref{it:configuration-unique-mgs} and \ref{it:configuration-same-solutions} of Definition \ref{def:configuration} above ensure that all symbolic processes in \(\Gamma(n)\) have the same set of second-order variables,
+    written \(\vars[2](n)\), and a common and unique mgs, written \(\mgs(n)\).
+
+    \begin{definition}[partition tree] \label{def:partition-tree}
+      A \emph{partition tree} of two bounded processes \(P\) and \(Q\) is a tree \(T\) whose nodes are labelled by configurations and edges by visible symbolic actions, and that verifies the following properties.
+      First of all \(P,Q \in \Gamma(\rootf(T))\) and \(\pi(\rootf(T)) = \top\), where \(\rootf(T)\) denotes the root node of the tree.
+      Then for all nodes \(n\) of \(T\), \((\P,\C) \in \Gamma(n)\) and visible symbolic actions \(\alpha\):
+
+      % \smallskip
+      \begin{enumerate}
+        \item \label{it:PT-silent}
+        \textit{Closure by \(\tau\)-transition}:
+        %
+        if \((\P,\C) \Sstep{\tau} (\P',\C')\) and \(\Sol[\pi(n)](\C') \neq \emptyset\) then \((\P',\C') \in \Gamma(n)\).
+
+        \item \label{it:PT-child-concrete-derivation}
+        \textit{All symbolic transitions are reflected in the tree:}
+        %
+        if \((\P,\C) \Sstep{\alpha} (\P',\C')\) and \((\Sigma,\sigma) \in \Sol[\pi(n)](\C')\)
+        then there exists an edge \(n \xrightarrow{\alpha} n'\) in \(T\) such that \((\P',\C') \in \Gamma(n')\) and \((\Sigma',\sigma) \in \Sol[\pi(n')](\C')\) for some \(\Sigma'\) that coincides with \(\Sigma\) on \(\vars[2](n)\).
+      \end{enumerate}
+
+      % \smallskip
+      \noindent Moreover for all edges \(n \xrightarrow{\alpha} n_c\) of \(T\) and \((\P_c, \C_c) \in \Gamma(n_c)\):
+
+      \begin{enumerate}[resume]
+        \item \label{it:PT-monotonic}
+        \textit{Predicates are refined along branches:} for all \(\Sigma\), if \(\Sigma\) verifies \(\pi(n_c)\) then it verifies \(\pi(n)\).
+
+        \item \label{it:PT-parent-concrete-derivation}
+        \textit{Nodes are maximal:}
+        %
+        if \((\Sigma,\sigma) \in \Sol [\pi(n)](\C)\), \((\Sigma_c,\sigma_c) \in \Sol [\pi(n_c)](\C_c)\) and \(\Sigma \subseteq \Sigma_c\),
+        then \(\Gamma(n_c)\) contains all symbolic processes \((\P',\C')\) such that \((\P,\C) \Sstep {\alpha} (\P',\C')\) and, for some substitution \(\sigma'\), \((\Sigma_c,\sigma') \in \Sol(\C')\) and \(\Phi(\C_c) \sigma_c \StatEq \Phi(\C') \sigma'\).
+      \end{enumerate}
+
+      % \smallskip
+      \noindent
+      The set of partition trees of \(P\) and \(Q\) is written \(\ptree(P,Q)\).
+    \end{definition}
+
+    The set \(\ptree(P,Q)\) is infinite (at least because arbitrarily many processes can be put in the root configuration) but our decision procedures only require to construct one, arbitrary partition tree.
+    The children \(n'\) of a node \(n\) represent the sets of processes, grouped w.r.t. static equivalence, reachable by one transition from a process of \(n\).
+    Item \ref{it:PT-child-concrete-derivation} ensures that all cases are covered, that is, for all symbolic transitions from \(n\) and all solutions \(\Sigma\), at least one child \(n'\) should contain the resulting symbolic process.
+    Note that we do not impose that \(\Sigma\) verifies \(\pi(n')\), but that there exists another solution \(\Sigma'\) computing the same first-order terms that does.
+    This more permissive approach will allow us, when generating partition-tree nodes in Section~\ref{sec:ptree}, to use families of predicates \(\pi\) that only consider solutions of a certain form (which therefore requires to prove that any deducible term can be computed by a recipe of this form).
+    Item \ref{it:PT-parent-concrete-derivation} then formalises that the nodes are saturated under static equivalence:
+    if \(n'\) is a child of \(n\) and a symbolic transition \(A \Sstep {\alpha} B\) from a process \(A \in \Gamma(n)\) may result into a process statically equivalent to a process \(C \in \Gamma(n')\) then \(B\) should be in \(\Gamma(n')\) as well.
+    %
+    % Typically if a leaf \(n\) of the partition tree contains a process originated from \(P\) but not process originated from \(Q\), applying \(\mgs(n)\) to the corresponding branch will intuitively exhibit a trace of \(P\) that has not equivalent trace in \(Q\), therefore violating trace equivalence.
+    % Before explaining more precisely how to decide trace equivalence and labelled bisimilarity using a partition tree in the next sections, let us give an example to illustrate the definition in practice.
+
+    \begin{example}
+      Let us draw a partition tree corresponding to an anonymity analysis in the private authentication protocol, simplified for readability.
+      We consider the following light version of the role of the process \(B\) accepting a connection from an agent \(X\), removing the identification nonces \(N_A,N_B\) from the protocol and replacing the decoy message by a fresh name \(r\):
+      \[\begin{array}{l@{\ }l}
+        B_X = & \InP {c} {x}. \IfP\ \radec(x,\sks_B) = \pks_X\ \ThenP\ \OutP {c} {\aenc(\okfun,r,\pks_X)}\ \ElseP\ \OutP {c} {r}
+      \end{array}\]
+      We consider a 3-agent scenario (\(A,B,C\)) where \(A\) has already emitted \(\aenc(\pks_A,r_A,\pks_B)\) to initiate a communication with \(B\). The security property we study is whether the identity of \(B\)'s accepted recipient remains anonymous.
+      That is we want to prove \(P \approx Q\) where
+      \begin{align*}
+        P & = C[B_A] & Q & = C[B_C] & C[R] & = \OutP {c} {\pks_A}.\ \OutP {c} {\pks_B}.\ \OutP {c} {\pks_C}.\ \OutP {c} {\aenc(\pks_A, r_A,\pks_B)}.\ R
+      \end{align*}
+      % We give a partition tree \(T \in \ptree(P,Q)\) in Figure \ref{fig:partition-tree} and detail the notations below.
+
+      \begin{figure}[ht]
+        \centering
+        \includegraphics[width=0.92\textwidth]{files/partition-tree.pdf}
+        % \Description{A simplified partition tree of \(P\) and \(Q\)}
+        \caption{A simplified partition tree of \(P\) and \(Q\)}
+        \label{fig:partition-tree}
+      \end{figure}
+
+      The partition tree in Figure \ref{fig:partition-tree} has been lightened for readability: 
+      if a node contains two symbolic processes \(A_s,B_s\) such that \(A_s \sstep{\tau} B_s\), then \(A_s\) is omitted from the node (as it contains less constraints than \(B_s\) anyway).
+      The configuration at the root of the tree only contains \(P\) and \(Q\).
+      After the four initial outputs of the context \(C\), we reach the constraint system \(\C_0\) defined by:
+      \begin{align*}
+        \Phi(\C_0) & = \{\ax_1 \mapsto \pks_A, \ax_2 \mapsto \pks_B, \ax_3 \mapsto \pks_C, \ax_4 \mapsto \aenc(\pks_A, r_A,\pks_B)\} \\
+        \Df(\C_0) & = X_1 \dedfact x_1 \wedge X_2 \dedfact x_2 \wedge X_3 \dedfact x_3 \wedge X_4 \dedfact x_4 \\
+        \Eqfst(\C_0) & = x_1 \eqs c \wedge x_2 \eqs c \wedge x_3 \eqs c \wedge x_4 \eqs c
+      \end{align*}
+      The next step is the first one inducing a non-trivial case analysis.
+      This node has four children, each corresponding to a way for the adversary to compute the input \(\InP {d}{x}\):
+      \begin{enumerate*}[label=\(\pi_{\arabic*}\)]
+        \item forwards the message of \(A\),
+        \item forges a message pretending it is from \(A\),
+        \item forges a message pretending it is from \(C\),
+        \item any other case.
+      \end{enumerate*}
+      Depending on the case this will trigger the positive or the negative branch of the conditional in the processes \(B_A\) and \(B_C\).
+      More precisely we write \(\Phi(\C_{1,X}^{\poslab}) = \Phi(\C_{1,X}^{\neglab}) = \Phi(\C_0)\), \(\Df(\C_{1,X}^{\poslab}) = \Df(\C_{1,X}^{\neglab}) = \Df(\C_0) \wedge Y \dedfact y\) and
+      \begin{align*}
+        \Eqfst(\C_{1,X}^{\poslab}) & = \Eqfst(\C_0) \wedge y \eqs c \wedge x \eqs \aenc(\pks_X,x',\pks_B) \\
+        \Eqfst(\C_{1,X}^{\poslab}) & = \Eqfst(\C_0) \wedge y \eqs c \wedge \forall x'.\, x \neqs \aenc(\pks_X,x',\pks_B)
+      \end{align*}
+      Then the final transitions simply execute the resulting outputs, i.e. \(\C_{2,X}^s\), \(s \in \{\poslab,\neglab\}\), is obtained by adding \(Z \dedfact z\) and \(z \eqs d\) to \(\C_{1,X}^s\).
+      Since a ciphertext is indistinguishable from a nonce, the two outputs always end up in the same nodes;
+      that is, all leaves contain at least one process originated from \(P\) and at least one from \(Q\), which is how we prove trace equivalence.
+      %
+      The situation would be different with a rewrite rule such as \(\testaenc(\aenc(x,y,\pk(z))) \to \okfun\);
+      a partition tree of \(P\) and \(Q\) with this extended rewriting system can be found in Figure \ref{fig:partition-tree-attack}.
+
+      \begin{figure}[ht]
+        \centering
+        \includegraphics[width=0.95\textwidth]{files/partition-tree-attack.pdf}
+        \caption{Partition tree with the rewriting system extended with \(\testaenc(\aenc(x,y,\pk(z))) \to \okfun\)}
+        \label{fig:partition-tree-attack}
+      \end{figure}
+
+      We highlighted the part differing from the previous tree.
+      Essentially some leaf nodes have been split in two due to the enhanced capabilities of the adversary to disprove static equivalence, inducing a violation of trace equivalence.
+      For example the leftmost leaf's mgs is
+      \[\{X \mapsto \ax_4, X_1 \mapsto c, \ldots, X_4 \mapsto c, Y \mapsto d, Z \mapsto c\}\]
+      which corresponds to an attack trace where the attacker forwards the message of \(A\) and observes whether the response of \(B\) is a ciphertext, which reveals whether \(B\) accepts connections from \(A\) or not.
+    \end{example}
+
+    In the remaining of the section we formalise how to decide trace equivalence and labelled bisimilarity of two processes, given a partition tree the mgs' of each of its nodes.
+    For that we will rely on the following notion of reduction, characterising symbolic traces viewed as branches of a partition tree:
+
+    \begin{definition}[partition-tree trace]
+      Given  a partition tree  \(T\)
+      we write \((\P,\C), n \tstep{\alpha} (\P',\C'), n'\) when:
+      \begin{enumerate}
+        \item \(n\) and \(n'\) are nodes of \(T\) such that \((\P,\C) \in \Gamma(n)\) and \((\P',\C') \in \Gamma(n')\); and
+        \item if \(\alpha = \tau\) then \(n = n'\), otherwise \(n \xrightarrow{\alpha} n'\) and \((\P,\C) \sstep{\alpha} (\P',\C')\).
+      \end{enumerate}
+      For convenience this notion is to be understood up to alpha renaming of the variables of the symbolic action \(\alpha\).
+      We write \(A^s_0,n_0 \Tstep{\tr} A^s_p,n_p\) instead of \(A^s_0,n_0 \tstep{\alpha_1} \cdots \tstep{\alpha_p} A^s_p,n_p\) if \(\tr\) is the word obtained after removing \(\tau\) symbols from \(\alpha_1 \cdots \alpha_p\).
+      If \(P\) is a plain process we may also write \(P \Tstep {\tr} A_s,n\) instead of \((\multi{P}, (\emptyset,\top,\top)), \rootf(T) \Tstep{\tr} A_s,n\).
+    \end{definition}
+
+\subsection{Decision procedures for equivalence} \label{sec:ptree-eq}
+  In this section, we assume that we managed to compute a partition tree \(T \in \ptree(P_1,P_2)\) (in particular, that there exists one).
+  We then describe how to derive a decision procedure for trace equivalence and labelled bisimilarity from \(T\).
+
+  \paragraph{Trace equivalence}
+  As hinted in our various examples, deciding trace equivalence can be reduced to an analogue notion of equivalence using the (finite) transition relation \(\tstep{\alpha}\) instead of the concrete semantics \(\cstep{\alpha}\).
+  This is formalised by the following theorem:
+
+  \begin{theorem}[restate=thmTraceEquivPtree,name={partition-tree-based characterisation of trace equivalence}] \label{thm:trace-equiv-ptree}
+      If \(T \in \ptree(P_1,P_2)\),
+      the following points are equivalent:
+      \begin{enumerate}
+        \item \label{it:trace-equiv-ptree-incl}
+        \(P_1 \TraceIncl P_2\)
+        \item \label{it:trace-equiv-ptree-trace}
+        for all partition-tree traces \(P_1 \Tstep{\tr} (\P_1,\C_1),n\), we have \(P_2 \Tstep{\tr} (\P_2,\C_2),n\)
+      \end{enumerate}
+  \end{theorem}
+
+  The proof of this result mostly follows from a combination of the soundness and completeness of the symbolic semantics, with two technical lemmas generalising the properties of the partition tree from edges to branches.
+  The detailed statements and proofs can be found in Appendix~\ref{app:decision-proc-trace-from-ptree}.
+
+  \paragraph{Simulations}
+  In the case of trace equivalence, a witness that \(A \not \TraceEq B\) was simply a trace of \(A\) or \(B\) that has no equivalent trace in the other process.
+  The case of labelled bisimilarity is however more involved.
+  Using vocabulary borrowed from game theory, the definition of bisimilarity can be seen as a \emph{prover-disprover game}:
+  at each state of the game the disprover chooses a transition from one of the two processes and the prover answers by choosing a transition of the same type from the other process (plus some potential \(\tau\)-transitions).
+  The disprover wins the game if they manage to reach a state with non-statically-equivalent processes or if the prover cannot answer to one of the moves.
+  A witness of non-equivalence is thus a winning strategy for the disprover.
+  We formalise this below,
+  recalling that if \(\alpha\) is an action, we write \(\bar{\alpha} = \alpha\) if \(\alpha \neq \tau\) and \(\bar{\alpha} = \epsilon\) if \(\alpha = \tau\).
+
+  \begin{definition}[witnesses] %\label{def:witness_bis}
+    A \emph{witness of non-bisimilarity} \(\witness\) is a set of pairs \((A_0,A_1)\) verifying the following two conditions:
+    \begin{enumerate}
+      \item \(A_0\) and \(A_1\) are ground extended processes such that \(A_0 \StatEq A_1\)
+      \item there exists \(b \in \{0,1\}\) and a transition \(A_b \cstep{\alpha} A_b'\) such that for all traces \(A_{1-b} \Cstep{\bar{\alpha}} A_{1-b}'\), either
+      \(A_0' \not\StatEq A_1'\) or \((A_0',A_1') \in \witness\).
+    \end{enumerate}
+    We say that in addition that \(\witness\) is a \emph{witness of non-simulation} is the above two conditions can always be satisfied with \(b = 0\).
+    We say that \(\witness\) is a witness for \((A_0,A_1)\) if \((A_0,A_1) \in \witness\).
+  \end{definition}
+
+  % The size of a witness \(\witness\) is written \(|\witness|\) (which is not the cardinality of \(\witness\) but the sum of the sizes of its elements).
+  % Witnesses can be used to characterise labelled bisimilarity as follows:
+  % The witness-based characterisation of labelled bisimilarity is expressed by the following result:
+
+  \begin{proposition}[witness-based characterisation of labelled bisimilarity] \label{prop:concrete-witness}
+    If \(A_0 \StatEq A_1\) then:
+    \begin{enumerate}
+      \item \(A_0 \not\LabBis A_1\) \textit{iff} there exists a witness of non-bisimilarity \(\witness\) for \((A_0,A_1)\)
+      \item \(A_0 \not\Simu A_1\) \textit{iff} there exists a witness of non-simulation \(\witness\) for \((A_0,A_1)\)
+    \end{enumerate}
+  \end{proposition}
+  \begin{proof}
+    We only give the proof in the case of \(\LabBis\), as the proof for \(\Simu\) is analogue.
+    First, we observe that \(A_0 \not \LabBis A_1\) \textit{iff} there exists a binary relation \(\disim\) on ground extended processes such that \(A_0 \disim A_1\) and, for all \((B_0, B_1) \in \disim\), either
+    \begin{enumerate*}
+      \item \(B_0 \not \StatEq B_1\), or
+      \item there exists \(b \in \{0,1\}\) and a transition \(B_b \cstep{\alpha} B_b'\) such that for all traces \(B_{1-b} \Cstep{\bar{\alpha}} B_{1-b}'\),
+      \(B_0' \disim B_1'\).
+    \end{enumerate*}
+    Let us call such a relation \(\disim\) a \emph{labelled attack on \((A_0,A_1)\)}.
+    Since processes are bounded there exist no infinite sequences of transitions and \(A \not \LabBis B\) therefore straightforwardly rephrases to the existence of a labelled attack \(\disim\) such that \(A \disim B\).
+    It then suffices to observe that
+    \begin{enumerate}
+      \item If \(\disim\) is a labelled attack on \((A_0,A_1)\) then \(\disim\ \smallsetminus \not\StatEq\) is a witness for \((A_0,A_1)\).
+      \item If \(\witness\) is a witness for \((A_0,A_1)\) then \(\witness\ \cup \not\StatEq\) is a labelled attack on \((A_0,A_1)\). \qedhere
+    \end{enumerate}
+  \end{proof}
+
+  We now define a symbolic variant of the notion of witness that can be constructed within a partition tree \(T\).
+  In essence, a symbolic witness may be seen as a winning strategy for the disprover in a bisimulation game limited to the finite transition relation \(\tstep{}\).
+
+  \begin{definition}[symbolic witnesses]
+    A \emph{symbolic witness of non bisimilarity} \(\witness_s\) w.r.t. a partition tree \(T\) is a finite tree whose nodes \(N\) are labelled by tuples \((A_0,n)\) or \((A_0,A_1,n)\) with \(n\) a node of \(T\) and \(A_0,A_1 \in \Gamma(n)\).
+    We also require that if \(N\) is labelled \((A_0,A_1,n)\), there exist \(b \in \{0,1\}\) and a transition \(A_b,n \tstep{\alpha} A'_b, n'\) (possibly \(\alpha = \tau\)) such that:
+    \begin{enumerate}
+      \item If \(A_{1-b}\) is not reducible by \(\Tstep{\bar{\alpha}}\) then \(N\) has a unique child labelled \((A_b',n')\);
+      \item otherwise the children of \(N\) are the nodes labelled \((A'_0,A'_1,n')\), \(A_{1-b}, n \Tstep{\bar{\alpha}} A'_{1-b}, n'\).
+    \end{enumerate}
+    %
+    We say that \(\witness_s\) is a \emph{witness of non-simulation} if the above two conditions can always be satisfied with \(b = 0\).
+    We say that \(\witness_s\) is a symbolic witness for \((A_0,A_1,n)\) when \(\rootf(\witness_s)\) is labelled by \((A_0,A_1,n)\).
+  \end{definition}
+
+  However purely symbolic witnesses do not exhibit consistent proofs of non-equivalence in general.
+  % Symbolic witnesses come with a notion of solution that maps each state of the strategy to a concrete instance in a consistent way.
+  Indeed, while a concrete execution fixes the effective value of an input \(x\) at the moment it is performed, a symbolic execution records constraints on \(x\) all along the execution.
+  Rephrasing, the symbolic semantics puts the prover at a disadvantage in the game, since they have to answer to the disprover's input actions without knowing the values of the input terms.
+  %
+  Symbolic witnesses inducing invalid winning strategies for the disprover will be discarded by their absence of \emph{solutions} in the following sense:
+
+    % a second-order solution of its symbolic processes to yield a consistent concrete witness, that is, this should ensure that solutions of child nodes effectively extend the solution of their parents.
+
+  \begin{definition}[solution of a symbolic witness] \label{def:solution-witness}
+    Let \(\witness_s\) be a symbolic witness.
+    A \emph{solution} of \(\witness_s\) is a function \(\fsol\) that maps nodes of \(\witness_s\) to ground second-order substitutions such that for all nodes \(N\) labelled \((A_0,n)\) or \((A_0,A_1,n)\),
+    \begin{enumerate}
+      \item for all \(A_b = (\P,\C)\), \((\fsol(N),\sigma) \in \Sol[\pi(n)](\C)\) for some \(\sigma\);
+      \item for all children nodes \(N_1,N_2\) of \(N\), \(\fsol(N) \subseteq \fsol(N_1) = \fsol(N_2)\).
+    \end{enumerate}
+    We denote \(\Sol(\witness_s)\) the set of solutions of \(\witness_s\).
+  \end{definition}
+
+  % Using the notion of symbolic witness, we can finally formalise the decision criterion for labelled bisimilarity based on partition trees.
+
+  \begin{theorem}[restate=thmLabBisPtree,name={partition-tree-based characterisation of labelled bisimilarity}] \label{thm:ptree-lab-bis}
+    If \(T \in \ptree(P_1,P_2)\):
+    \begin{enumerate}
+      \item \(P_0 \LabBis P_1\) \textit{iff} for all symbolic witnesses of non-bisimilarity \(\witness_s\) for \((P_1,P_2,\rootf(T))\), we have \(\Sol(\witness_s) = \emptyset\)
+      \item \(P_0 \Simu P_1\) \textit{iff} for all symbolic witnesses of non-simulation \(\witness_s\) for \((P_1,P_2,\rootf(T))\), we have \(\Sol(\witness_s) = \emptyset\)
+    \end{enumerate}
+  \end{theorem}
+
+  The proof, although technical, simply connects the symbolic witnesses to concrete ones using the soundness and completeness of the symbolic semantics as well as the properties of the partition tree, following similar ideas as the analogue proof for trace equivalence.
+  The detailed proof can be found in Appendix~\ref{app:decision-proc-bisim-from-ptree}.
+
+  Assuming one has computed a partition tree \(T \in \ptree(P_1,P_2)\) and the mgs of each of its nodes, since there are finitely-many possible symbolic witnesses, Theorem \ref{thm:ptree-lab-bis} yields a decision procedure for the labelled bisimilarity of \(P_1\) and \(P_2\) provided one can decide whether a given symbolic witness has a solution.
+  For that we rely on a simple, bottom-up unification of the mgs' appearing in the witness;
+  details can be found in Section~\ref{sec:witness-complexity} where we study more precisely the complexity of partition-tree-based decision procedures.
+
+\subsection{Generating partition trees (with  a constraint-solving oracle)} \label{sec:overview-ptree}
+
+  % \subsubsection{Overview of the top-down tree generation} 
+
+    In this section we detail the skeleton of the procedure for computing a partition tree of two plain processes \(P_1\) and \(P_2\).
+    The description is modular in that most of the technical details, in particular the modelling of the node predicates and how we obtain the expected properties of the tree, are abstracted by a \emph{constraint-solving oracle} that we detail in the next sections.
+    This section should therefore be seen as the overview of the whole algorithm for deciding equivalence properties, which gives enough insight to discuss our implementation.
+
+    The algorithm generates the nodes of the tree top-down, that is, from the root to the leaves.
+    We outline the procedure in Figure \ref{fig:overview-ptree}.
+
+    \begin{figure}[ht]
+      \centering
+      \includegraphics[width=0.99\textwidth]{files/overview-generation.pdf}
+      % \Description{Computing the subtree of a partition tree rooted in a node \(n\)}
+      \caption{Computing the subtree of a partition tree rooted in a node \(n\)}
+      \label{fig:overview-ptree}
+    \end{figure}
+
+    Let us now describe the algorithm to compute \(T \in \ptree(P_1,P_2)\) in more details, up to the technical developments detailed in the next sections.
+    \begin{enumerate}
+      \item First, we initiate a root containing \(P_1\) and \(P_2\) and saturate the configuration by \(\tau\) transitions.
+      That is, we consider the set of symbolic processes
+      \[\Gamma(\rootf(T)) = \left\{(\P,\C) \mid P_i \Sstep{\epsilon} (\P,\C), i \in \{1,2\}, \Sol(\C) \neq \emptyset\right\}\]
+      Note that the constraint systems \(\C\) involved in this definition do not contain deduction facts, which makes the decision of the emptiness of \(\Sol(\C)\) relatively straightforward.
+      Using the terminology of the later Section~\ref{sec:ptree}, using \emph{simplification rules} permits to put the constraints into a simple form where the existence of a solution is trivial to decide.
+      \item Then let us assume we already constructed a node \(n\) of the tree using this algorithm, in particular the corresponding configuration \((\Gamma(n),\pi(n))\).
+      To compute the children of \(n\) we first enumerate all symbolic transitions from processes of \(\Gamma(n)\), separating input and output actions.
+      That is, we compute the two sets
+      \begin{align*}
+        \Gamma^\inp & = \left\{B \mid A \in \Gamma(n), A \Sstep{\InP{Y}{X}} B\right\} &
+        \Gamma^\outp & = \left\{B \mid A \in \Gamma(n), A \Sstep{\OutP{Y}{\ax_p}} B\right\}
+      \end{align*}
+      \item \(\Gamma^\inp\) and \(\Gamma^\outp\) are two intermediary sets that do not satisfy yet the father-child properties of the partition tree.
+      For that we use a constraint-solving algorithm detailed in Chapter \ref{sec:ptree} (\emph{simplification rules} again, but also \emph{case distinction rules}) that will partition \(\Gamma^\inp\) and \(\Gamma^\outp\) to gather symbolic processes with statically-equivalent solutions and remove those with no solutions.
+      This constraint solving results into a sequence of configurations
+      \begin{align*}
+        (\Gamma_1^\inp,\pi_1^\inp), \ldots, (\Gamma_p^\inp,\pi_p^\inp) & &
+        (\Gamma_1^\outp,\pi_1^\outp), \ldots, (\Gamma_q^\outp,\pi_q^\outp)
+      \end{align*}
+      that will label the children of \(n\).
+      The procedure is then carried out recursively from these child nodes until no more symbolic transitions are available.
+    \end{enumerate}
+
+    In Section~\ref{sec:ptree} we detail the missing parts of this procedure that take the form of constraint-solving rules, in the context of constructor-destructor subterm convergent theories.
+    Note that the approach is modular in that the proofs we have carried so far are independent of the assumptions on the rewriting system:
+    generalising the results of Section~\ref{sec:ptree} will automatically result in the decidability of trace equivalence and labelled bisimilarity of bounded processes for the extended class of theories.
+
+\subsection{Implementation and performances} \label{sec:implem}
+
+  \paragraph{The \deepsec prover}
+    Building on the procedure's structure described above and the internal solver developed in the next sections, we have implemented a prototype in OCaml, called \deepsec (DEciding Equivalence Properties in SECurity protocols).
+    The user specifies a rewriting system (that is checked to be constructor-destructor and subterm convergent by the tool), two bounded processes, and the tool verifies whether they are trace equivalent.
+    If not, a concrete attack trace is returned in a dedicated graphical interface;
+    we refer to the \deepsec's website for development credits, tutorials and details on practical usage~\cite{website}:
+    \begin{center}
+      \url{https://deepsec-prover.github.io/}
+    \end{center}
+
+    The tool's specification language implements the grammar presented in Section~\ref{sec:model}, including some syntax extensions for non-deterministic choice, private function symbols, a restricted form of patterned \(\LetP\) bindings, as well as bounded replication \(\BangP[n] P\) defined as \(n\) parallel copies of \(P\).
+    These additional primitives should mostly be seen as syntactic sugar, although the native integration allowed specific optimisations compared to encodings within the initial calculus.
+    The syntax and structure of \deepsec's input files are similar to the widely used \proverif tool~\cite{manual-proverif} to make it easier for new users to discover and use it.
+
+  \paragraph{Partial order reductions}
+    The tool also implements \emph{partial order reductions} (POR), an optimisation technique for protocol analysis developed by Baelde et al.~\cite{BDH15}.
+    The basic idea is to discard part of the state space that is redundant but this optimisation is only sound when processes are \emph{action-determinate}, as defined in~\cite{BDH15}.
+    Although we omit here the definition of determinacy for simplicity, let us mention that not using private channels and assigning a different channel name to each parallel process is a simple, syntactic way to ensure this property.
+    This is however not always possible---typically when looking at some anonymity or unlinkability properties.
+    Typically, the private authentication protocol used as a running example can be modelled as a determinate process, but not the Helios and BAC protocols (due to private channels or because this introduces artificial violations of the equivalence property).
+
+    In practice, \deepsec automatically detects action-determinate processes and activates the POR, which drastically reduces the number of symbolic executions that need to be considered.
+    We also go further and allow to verify a refined equivalence, \emph{equivalence by session}, that allows to use similar POR techniques without the restriction to determinate processes.
+    This contribution is however out of the scope of this paper;
+    details can be found in~\cite{CKR19} and our experimental results presented below only include the base POR of~\cite{BDH15}.
+
+  \paragraph{Distributing the computation}
+    The main task of \deepsec is to generate a partition tree and, as we explained, this is done using a top-down approach.
+    This task can be distributed as computing a given node of the tree can be done independently of its sibling nodes.
+    However, some engineering is needed to avoid heavy communication overhead due to task scheduling.
+    Indeed, the partition tree is not a balanced tree and we do not know in advance which branches will be larger than others.
+    %
+    Because of this, we do not directly compute and return the children of each node in the most straightforward manner, but proceed in two steps:
+    \begin{enumerate}
+      \item \label{it:parall-step-1} We start with a breadth-first generation of the partition tree.
+      The number of pending nodes will gradually grow until eventually exceeding a threshold parameter \(n\).
+      \item \label{it:parall-step-2} Each available core focuses on one of these nodes, computes the whole subtree rooted in this node in a depth-first manner and, when this the task is completed, is assigned to a new node until none remain.
+    \end{enumerate}
+    If some cores become idle for too long in Step \ref{it:parall-step-2} (because the number of non-completed nodes exceeds the number of cores), we perform a \emph{new round}, that is, we interrupt the working nodes and restart this two-step procedure on incomplete nodes.
+    Although doing so wastes some proof work, this improves performances for particularly unbalanced trees.
+    %
+    Note that parallelisation is also supported by other automated analysers such as \akiss~\cite{CCC16}, but \deepsec goes one step further as it is able to distribute the computation not only on multiple cores of a given machine but also clusters of computers.
+
+  \paragraph{Benchmarks}
+    We performed extensive benchmarks to compare \deepsec against other tools that verify equivalence properties for a bounded number of sessions:
+    \akiss~\cite{CCC16}, \apte~\cite{C14}, \satequiv~\cite{CDD17} and \spec~\cite{TNH16}.
+    Experiments are carried out on Intel Xeon 3.10GHz cores, with 40Go of memory.
+    We distributed the computation on 20 cores for \akiss and \deepsec as they support parallelisation---unlike the others which therefore use a single core.
+    % We study the efficiency gain due to parallelisation later in the section.
+    The results are summarised in Figures \ref{fig:bench}
+    with the following symbol conventions:
+
+    \begin{center}
+      \begin{tabular}{cl}
+        \verified & analysis terminates and equivalence holds \\
+        \attacksimple & analysis terminates and an attack is found \\
+        \outofmemory & analysis aborted due to memory overflow \\
+        \outoftime & analysis aborted due to timeout (12 hours) \\
+        \unable & the tool is not expressive enough to analyse the protocol
+      \end{tabular}
+    \end{center}
+
+    % We study a few examples of protocols and privacy-type properties with a fixed scenario, to measure the scalability of the compared tools on simple examples when increasing the number of sessions (Figure \ref{fig:bench}).
+    We first analysed strong secrecy and anonymity for several classical authentication protocols.
+    The \deepsec tool clearly outperforms \akiss, \apte, and \spec.
+    The \satequiv tool becomes more efficient, when the number of sessions significantly increases.
+    % However, the Otway-Rees protocol cannot be analysed by \satequiv as it does not satisfy their type compliance condition.
+    % A recent extension of \satequiv~\cite{CDD18} adds support to asymmetric primitives, thus covering the Needham-Schroeder-Lowe protocol.
+
+    To put more emphasis on the broad scope we also include analyses of unlinkability and anonymity properties for a number of other protocols.
+    This includes the Private authentication protocol used as a running example, BAC~\cite{P04} and the Helios voting protocol~\cite{A08}.
+    In addition we study a simplified version of the AKA protocol deployed in 3G telephony networks without XOR~\cite{AMR12}, the Passive Authentication protocol implemented in the European passport~\cite{P04}, as well as the Prêt-à-Voter protocol (PaV)~\cite{RS06}.
+    %
+    Note that, while PaV is a priori in the scope of \akiss, it failed to produce a proof: \akiss only approximates trace equivalence of non-determinate processes and finds a false attack here.
+    %
+    Finally we note that BAC, PaV and Helios protocols are not action-determinate and therefore do not benefit from the POR optimisation, which explains the much higher verification times when increasing the sessions.
+    Nevertheless, as exemplified by some examples, attacks may be found very efficiently, as it generally does not require to explore the entire state space.
+
+    \input{fig_bench.tex}
+      

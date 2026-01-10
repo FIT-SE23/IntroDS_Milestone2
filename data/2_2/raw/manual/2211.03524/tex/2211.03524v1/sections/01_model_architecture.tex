@@ -1,0 +1,93 @@
+\section{Model Architecture}
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/fig_model.pdf}
+    \caption{Diagram of our Multimodal Review Helpfulness Prediction model.}
+    \label{fig:model}
+\end{figure*}
+
+In this section we delineate the overall architecture of our MRHP model. Particular modules of our system are depicted in Figure \ref{fig:model}.
+\subsection{Problem Definition}
+Given a product item $p$, which consists of a description $T^p$ and images $I^p$, and a set of reviews $R = \{r_1,…, r_N\}$, where each review is composed of user-generated text $T^r_i$ and images $I^r_i$, RHP model’s task is to generate the scores
+\begin{equation}
+    s_i = f(p, r_i), \quad 1 \leq i \leq N
+\end{equation}
+where $N$ is the number of reviews for product $p$ and $f$ is the scoring function of the RHP model. Empirically, each score estimated by $f$ indicates the helpfulness level of each review, and the ground-truth is the descending sort order of helpfulness scores.
+\subsection{Encoding Modules}
+Our model accepts product description $T^p$, product images $I^p$, review text $T^r_i$, and review images $I^r_i$ as input. The encoding process of those elements is described as follows.
+
+\noindent\textbf{Text Encoding} Product description and review text are sequences of words. Each sequence is indexed into the word embedding layer and then passed into the respective LSTM layer for product or review.
+\begin{gather}
+    K^p = \text{LSTM}^p (\mathbf{W}_{\textbf{emb}} (T^p)) \\
+    K^r = \text{LSTM}^r (\mathbf{W}_{\textbf{emb}} (T^r)) 
+\end{gather}
+where $K^p \in \mathbb{R}^{l_p \times d}$, $K^r \in \mathbb{R}^{l_r \times d}$, $l_p$ and $l_r$ are the sequence lengths of product and review text respectively, and $d$ is the hidden size.
+
+\noindent\textbf{Image Encoding} We follow \citet{anderson2018bottom} to take detected objects as embeddings of the image. In particular, a pre-trained Faster R-CNN is applied to extract ROI features for $m$ objects $\{\mathbf{a}_1, \mathbf{a}_2, …, \mathbf{a}_m\}$ from the product and review images. Subsequently, we encode extracted features using the self-attention module (SelfAttn) \cite{vaswani2017attention}
+\begin{equation}
+    A = \text{SelfAttn}(\{\mathbf{a}_1, \mathbf{a}_2, ..., \mathbf{a}_m\})
+\end{equation}
+where $A \in \mathbb{R}^{m \times d}$ and $d$ is the hidden size. Here we use $A^p$ and $A^r$ to indicate product and review image features, respectively.
+
+\subsection{Multimodal Interaction Module}
+We consider two components $\gamma$, $\eta$ with their inputs $X_\gamma$, $X_\eta$, where $\eta$ is the concatenation of input elements apart from the one in $\gamma$. For instance, if $\gamma = {K^p}$, then $\eta = [K^r, A^p, A^r]$, where $[., .]$ indicates the concatenation operation. We define each cross-modal attention block to have three components $Q$, $K$, and $V$:
+\begin{gather}
+    Q_\gamma = X_\gamma \cdot W_{Q_\gamma} \\
+    K_\eta = X_\eta \cdot W_{K_\eta} \\
+    V_\eta = X_\eta \cdot W_{V_\eta}
+\end{gather}
+where $W_{Q_\gamma} \in \mathbb{R}^{d_\gamma \times d_k}$, $W_{K_\eta} \in \mathbb{R}^{d_\eta \times d_k}$, and $W_{V_\eta} \in \mathbb{R}^{d_\eta \times d_v}$ are weight matrices. The interaction between $\gamma$ and $\eta$ is computed in the cross-attention manner
+\begin{equation}
+    \begin{split}
+        Z_\gamma = \text{CM}_{\gamma} (X_\gamma, X_\eta)
+        = \text{softmax} \left(\frac{Q_\gamma \cdot K^T_{\eta}}{\sqrt{d_k}}\right) \cdot V_\eta
+    \end{split}
+\end{equation}
+Our full module comprises $D$ layers of the above-mentioned attention block, as indicated in the right part of Figure \ref{fig:model}. Theoretically, the computation is carried out as follows
+\begin{gather}
+    Q_{\gamma}[0] = X_\gamma\\
+    T[i] = \text{CM}_{\gamma}[i] (\text{LN}(Q_{\gamma}[i-1]), \text{LN}(X_\eta)) \\
+    U_{\gamma}[i] = T[i] + Q_{\gamma}[i-1] \\
+    Q_{\gamma}[i] = \text{GeLU}(\text{Linear}(U_{\gamma}[i])) 
+\end{gather}
+where $\textit{LN}$ denotes layer normalization operator. We iteratively estimate cross-modal features for product text, product images, review text, and review images with a view to obtaining $H^p$, $V^p$, $H^r$, and $V^r$.
+\begin{gather}
+    H^p = Q^p_k[D], \quad V^p = Q^p_a[D] \\
+    H^r = Q^r_k[D], \quad V^r = Q^r_a[D] 
+\end{gather}
+
+After our cross-modal interaction module, we proceed to pass features to undertake relation fusion in three paths: intra-modal, inter-modal, and intra-review.
+
+\noindent\textbf{Intra-modal Fusion} The intra-modal alignment is calculated for two relation kinds: (1) product text - review text and (2) product image - review image. Firstly, we learn alignment among intra-modal features via self-attention modules
+\begin{gather}
+    H^\text{intraM} = \text{SelfAttn}([H^p, H^r]) \\
+    V^\text{intraM} = \text{SelfAttn}([V^p, V^r])
+\end{gather}
+Then intra-modal hidden representations are fed to a CNN, and continuously a max-pooling layer to attain salient entries
+\begin{equation}
+    \mathbf{z}^\text{intraM} = \text{MaxPool} (\text{CNN}([H^{\text{intraM}}, V^{\text{intraM}}]))
+\end{equation}
+\noindent\textbf{Inter-modal Fusion} Similar to intra-modal alignment, inter-modal one is calculated for two types of relations as well: (1) product text - review image and (2) product image - review text. The first step is also to relate feature components using self-attention modules
+\begin{gather}
+    H^{\text{prd\_txt - rvw\_img}} = \text{SelfAttn}([H^p, V^r]) \\
+    H^{\text{prd\_img - rvw\_txt}} = \text{SelfAttn}([V^p, H^r])
+\end{gather}
+We adopt a mean-pool layer to aggregate inter-modal features and then concatenate the pooled vectors to construct the final inter-modal representation
+\begin{gather}
+    I^{\text{prd\_txt - rev\_img}} = \text{MeanPool}(H^{\text{prd\_txt - rvw\_img}})\\
+    I^{\text{prd\_img - rev\_txt}} = \text{MeanPool}(H^{\text{prd\_img - rvw\_txt}})\\
+    \mathbf{z}^{\text{interM}} = [I^{\text{prd\_txt - rvw\_img}}, I^{\text{prd\_img - rvw\_txt}}]
+\end{gather}
+\noindent\textbf{Intra-review Fusion} The estimation of intra-review module completely mimics the inter-modal manner. The only discrimination is that the estimation is taken upon two different relations: (1) product text - product image and (2) review text - review image.
+\begin{gather}
+    H^{\text{prd\_txt - prd\_img}} = \text{SelfAttn}([H^p, V^p]) \\
+    H^{\text{rvw\_txt - rev\_img}} = \text{SelfAttn}([H^r, V^r]) \\
+    G^{\text{prd\_txt - prd\_img}} = \text{MeanPool}(H^{\text{prd\_txt - prd\_img}}) \\
+    G^{\text{rvw\_txt - rvw\_img}} = \text{MeanPool}(H^{\text{rvw\_txt - rvw\_img}}) \\
+    \mathbf{z}^{\text{intraR}} = [G^{\text{prd\_txt - prd\_img}}, G^{\text{rvw\_txt - rvw\_img}}]
+\end{gather}
+Finally, we concatenate intra-modal, inter-modal, and intra-review output, and then feed the concatenated vector to the linear layer to obtain the ranking score:
+\begin{gather}
+\mathbf{z}^{\text{final}} = [\mathbf{z}^{\text{intraM}}, \mathbf{z}^{\text{interM}}, \mathbf{z}^{\text{intraR}}] \\
+f(p,r_i) = \text{Linear}(\mathbf{z}^{\text{final}})
+\end{gather}

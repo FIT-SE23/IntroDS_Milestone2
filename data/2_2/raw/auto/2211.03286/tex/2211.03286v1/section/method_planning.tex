@@ -1,0 +1,125 @@
+\section{Task Allocation with Learned Requirements and Agent Capabilities}\label{sec:task_allocation_model}
+
+Many task allocation frameworks represent the task constraints using a capability-based model \cite{fu2020heterogeneous, fu2021robust, ravichandar2020strata, prorok2017impact}.
+In this section, we leverage an optimization model from \cite{fu2021robust} (a simplified version) to show how the learned constraints in Sec. \ref{sec:learning_model} can be embedded in a task allocation framework.
+
+Consider the set of tasks, \(M = \{1, \cdots, {\numM{}}\}\), distributed at different locations, each requiring a team with the correct capabilities to complete the tasks. A set of agent types \(K = \{1,\cdots,{\numK{}}\}\) are located at the depot.
+The goal is to complete the tasks using a team of available agents while minimizing the weighted sum of the time and energy spent to travel to and complete the tasks.
+
+
+
+\begin{figure}[t!]
+	\centering
+	\includegraphics[width=0.53\linewidth]{figure/graphical_model.pdf}
+	\caption{A graphical model example with \(\numM{} = 2\). I.e., there are two task nodes, a start \(s\), and a terminal \(u\).}
+	\label{fig:graphical_model}
+\end{figure}
+
+\subsection{Graphical Model}
+
+
+We construct a graph \(G(N,E)\) with the node set \(N = \{1, \cdots, {\numM{}}, s, u\}\) and edge set \(E = \{(i,j) | \forall i,j \in N\}\) (Fig. \ref{fig:graphical_model}). There are edges between every node pair. The node set contains the tasks \(1\) to \(\numM{}\), start \(s = \numM{} + 1\), and terminal nodes \(u = \numM{} + 2\). Note that the integer set \(M\) is a subset of \(N\).
+A practical example of this graphical model is shown in the right-most block of Fig. \ref{fig:main_diagram}.
+In this graph, the agents depart from the start node, visit all of the tasks assigned to them, and stop at the terminal node.
+
+\subsection{A Mixed-integer Program for Task Allocation}
+
+In this section, we formulate a mixed-integer program for the task allocation problem based on the graphical model in Fig. \ref{fig:graphical_model}. Common notations are explained in Table \ref{tab:variable_definition}. Note that some of the notations have already been defined in Sec. \ref{sec:learning_model}, but are still gathered here for clarity.
+
+
+\begin{table}[h]
+% \normalsize
+% \hspace{-0.7cm}
+  \caption{Definition of the notations.}
+  \label{tab:variable_definition}%
+    \begin{tabular}{p{0.06\linewidth}|p{0.8\linewidth}} 
+    \toprule
+     & Meaning
+    \\
+    \midrule
+% \begin{tabular}{lll} 
+    \(x_{k i j}\)& The number of agent \(k \in K\) traveling on edge \((i,j) \in E\).
+    \\
+    \(y_{k i}\) & The number of agent \(k \in K\) assigned to task \(i \in M\).
+    \\
+    \(\mathbf{y}_{i}\)& = \([y_{1 i}, \cdots, y_{\numK{} i}]^\transpose \in \mathbb{R}^{\numK{}}\).
+    \\
+    \(r_{k i j}\)& = 1 if \(x_{k i j} \geq 1\), otherwise 0.
+    \\
+    \(t_i\)& The time task \(i \in M\) starts or the mission completes (i = u).
+    \\
+    \(T_{k i j}\)& The time cost for agent \(k\) to travel edge \((i,j)\).
+    \\
+    \(T_{k i}\)& The time cost for agent \(k\) to complete its part at task \(i \in M\).
+    \\
+    \(T_{\text{large}}\)& A large time constant.
+    \\
+    \(d_{k i j}\)& The energy cost for agent \(k\) to travel edge \((i,j)\).
+    \\
+    \(D_{k}\)& The energy limit for agent \(k\).
+    \\
+    \(A\) & The learned agent capability matrix.
+    \\
+    \(\mathbf{b}_i\) & The learned task requirement threshold for task \(i \in M\).
+    \\
+    \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsubsection{Objective Function}
+In the objective function, we minimize the energy cost and the time to complete all the tasks, where \(C_d\) and \(C_t\) are the weights. The decision variables are \(x\), \(y\), \(r\), and \(t\).
+\begin{align}
+    \min_{x_{k i j}, y_{k i}, r_{k i j}, t_{i}} C_d \underset{k \in K}{\sum} \ \underset{i,j \in \node}{\sum} d_{k i j} \cdot x_{k i j} + C_t \ t_u
+\end{align}
+
+\subsubsection{Task Requirement Constraints} The task requirement constraints are learned according to Sec. \ref{sec:learning_model}.
+\begin{align}
+    A \mathbf{y}_i \geq \mathbf{b}_i, \quad \forall i \in M. 
+    \tag{\ref{eqn:task_constraints}}
+\end{align}
+
+\subsubsection{Time Constraints}
+The time constraints ensure: first, enough time for the agent to travel the edges; second, all agents arrive before the task starts.
+\begin{align}
+    t_{i} - t_{j} + T_{k i j} + T_{k i} &\leq T_{\text{large}} (1 - r_{k i j}),
+    \forall i , j \in \node, \forall k \in K. \label{eqn:time_constraint1}
+\end{align}
+
+\subsubsection{Energy Constraints} The sum energy cost of an agent should be smaller than its limit.
+\begin{align}
+    \underset{i,j \in \node}{\sum} d_{k i j} \cdot x_{k i j} \leq D_{k}, \quad \forall k \in K.
+\end{align}
+
+\subsubsection{Network Flow Constraints}
+\eqref{eqn:flow_constraint1} ensures that the agents entering a task also leave after the task is completed.
+\eqref{eqn:flow_constraint2} sets an upper bound on the number of agents from each type. \(\numV{}\) is the number of available agents from type \(k\).
+\eqref{eqn:node_vehicle_constraint} relates the \(x\) and \(y\) variables: the agent team at a task is comprised of the agents that arrive at the task from all of the edges.
+\begin{align}
+    \underset{i \in N} {\sum} x_{k i m} &= \underset{j \in N} {\sum} x_{k m j}, \quad \forall m \in M, \ \forall k \in K. \label{eqn:flow_constraint1} \\
+    \underset{i \in M} {\sum} x_{k s i} &\leq \numV{}, \quad \quad \quad \forall k \in K. \label{eqn:flow_constraint2} \\
+    % y_{k j} &\leq \underset{i \in M} {\sum} x_{k s i}, \quad \forall j \in M, \ \forall k \in K. \label{eqn:flow_constraint3} \\
+    y_{k j} &= \underset{i \in N} {\sum} x_{k i j}, \quad \forall j \in M, \ \forall k \in K. \label{eqn:node_vehicle_constraint}
+\end{align}
+
+\subsubsection{Helper-variable Constraints}
+The following constraint relates the \(x\) and \(r\) variables: \(r_{kij} = 1\) if \(x_{kij} \geq 1\) and \(r_{kij} = 0\) if \(x_{kij} = 0\). \(r_{kij}\) indicates whether there are agents from type \(k\) traveling edge \((i,j)\).
+\begin{align}
+    \begin{split}
+    &x_{kij} \geq r_{kij}, \quad x_{kij} \leq \numV{} \cdot r_{kij}, \quad \forall i,j \in \node, \forall k \in K. \\
+    \end{split}\label{eqn:x_r_constraint}
+\end{align}    
+
+\subsubsection{Variable Bounds} \(x\), \(y\), and \(t\) are continuous variables, while \(r\) variables are binary.
+\begin{align}
+    \begin{split}
+    &x_{kij} \geq 0, \ y_{ki} \geq 0, \ r_{kij}\in \{0,1\}, \forall i,j \in \node, \forall k \in K. \\
+    &t_i \geq 0, \quad \forall i \in N, \quad t_s = 0. \\
+    \end{split}\label{eqn:bound_constraint}
+\end{align}
+
+
+Once a solution to the optimization problem is obtained, the variables encode the information about the schedule (\(t\)), routes (\(x\)), and teams (\(y\)) for the tasks.
+As an example, in the right-most block in Fig. \ref{fig:main_diagram}, the colored edges and numbers indicate a solution to the \(x\) variables. According to the solution, two large black robots with manipulators first complete the block picking task, and then one of the black robots drives to the exploration task and completes it together with one small white robot.
+
+
+

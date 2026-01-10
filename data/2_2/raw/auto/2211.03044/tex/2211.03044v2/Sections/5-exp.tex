@@ -1,0 +1,86 @@
+\section{Evaluation}
+\input{Tables/ablation}
+
+\subsection{Main Results}
+We present the results of \method and baselines in Table~\ref{tab:main_res}.
+\method achieves overall better performance across the GLUE tasks, on average $5+$ points higher than the previous best few-shot method without augmentation, and $3+$ points better than GPT3Mix\footnote{The original GPT3Mix paper uses accuracy as the metric instead of Matthews correlation for CoLA; our reimplemented GPT3Mix achieves ${79.4}_{0.6}$ on CoLA if measured by accuracy.}~\citep{Yoo2021GPT3MixLL} which uses a $100$ times larger generator model ($175$B) than \method.
+% The promising results confirm the effectiveness of our proposed \method method in generating quality training data and leveraging them in combination with the few-shot training set for fine-tuning the classification model.
+% The improved model performance is in accordance with our intuition that training the classification model with more data benefits generalization. 
+\paragraph{Comparison with Back Translation.} Using back translation to paraphrase the few-shot samples does not improve the results---this is probably because it does not produce samples that are sufficiently different from the few-shot training set.
+The success of UDA~\citep{Xie2020UnsupervisedDA} is grounded in the augmentations from abundant unlabeled data that improve the classifier generalization.
+However, under the strict few-shot learning setup, there is no access to additional task-specific unlabeled data~\citep{gao2021making}, making it challenging for paraphrase-based methods to create sufficiently diverse training samples only based on the small few-shot set. The new training samples produced by our \method method are not limited to the paraphrases of the few-shot samples, as the generator is trained via prefix-tuning to preserve the PLM's pretraining knowledge, based on which novel training samples can be synthesized.
+\paragraph{Comparison with GPT3Mix.} The gigantic size of GPT3 makes it challenging for tuning on few-shot samples.
+Therefore, GPT3Mix~\citep{Yoo2021GPT3MixLL} uses few-shot samples as demonstrations for creating the augmentations. Such an approach suffers from two limitations: (1) Without any parameter update to the PLM, its learning ability is not fully leveraged to adapt to the few-shot training set. (2) The PLM can only use a small subset of the few-shot samples at a time for creating each augmentation, as the number of demonstrations received by the model is bounded by its maximum input sequence length. This makes the quality of the created augmentations more sensitive to the  randomly drawn training samples. Our \method method, on the other hand, can use the entire few-shot set for tuning the PLM and achieves overall even better classification results with a much smaller PLM ($<1\%$ the size of the GPT3 model) which can be deployed much more easily in practice.
+
+\subsection{Ablation Studies}
+
+The overall performance gain brought by \method over a no-augmentation counterpart can be seen by comparing \method with LM-BFF (Man.) which uses the same classifier and fine-tuning method on $\mathcal{D}_{\text{train}}$ only.
+We further analyze the effectiveness of each important component in \method via the following ablations:
+(1) Using the standard $\mathcal{L}_{\text{gen}}$ in Eq.~\eqref{eq:gen} instead of our proposed  $\mathcal{L}_{\text{w-gen}}$ in Eq.~\eqref{eq:weigh_gen} for generator tuning (w. $\mathcal{L}_{\text{gen}}$);
+(2) using the directly combined $\mathcal{L}_{\text{gen}}$ and $\mathcal{L}_{\text{disc}}$ for generator tuning (w. $\mathcal{L}_{\text{gen}}+\mathcal{L}_{\text{disc}}$);
+(3) without applying label smoothing in Eq.~\eqref{eq:finetune} ($-$ label smooth);
+(4) without applying temporal ensembling in Eq.~\eqref{eq:finetune} ($-$ temporal ensemble);
+(5) directly fine-tuning the classification model on the combination of $\mathcal{D}_{\text{gen}}$ and $\mathcal{D}_{\text{train}}$ (w. fine-tune on $\mathcal{D}_{\text{train}} \cup \mathcal{D}_{\text{gen}}$)\footnote{For this ablation, we upsample $\mathcal{D}_{\text{train}}$ by $\times 100$ so that its size is comparable with $\mathcal{D}_{\text{gen}}$; otherwise, the result is much worse.}.
+% and (4) using RoBERTa$_{\text{Large}}$~\citep{liu2019roberta} instead of COCO-LM$_{\text{Large}}$ as the classification model (w. RoBERTa).
+As shown in Table~\ref{tab:ablation}, 
+(1) \& (2) using the standard maximum likelihood loss or the combination of generative and discriminative losses to tune the generator both yield lower-quality training data and lead to degraded classification performance; 
+% regularization techniques 
+(3) \& (4) not applying regularization techniques  for fine-tuning the classifier is more prone to label noise in the generated samples;
+(5) fine-tuning the classifier on the combination of $\mathcal{D}_{\text{gen}}$ and $\mathcal{D}_{\text{train}}$ significantly underperforms our two-step fine-tuning method.
+% (4) not leveraging the in-domain data $\mathcal{D}_{\text{train}}$ for training the classifier results in worse model initialization for training on $\mathcal{D}_{\text{gen}}$, and the eventual classifier will not perform very well.
+% (4) the model performance is not very sensitive to the choice of classifier PLMs. 
+% \input{Figs/num_data}
+% To study the impact of the amount of generated training samples on the model performance, we plot the MNLI-m accuracy (mean and standard deviation) with different sizes of $\mathcal{D}_{\text{gen}}$ in Fig.~\ref{fig:num_data}. 
+% Both the average model performance and stability improve with more generated samples.
+
+\input{Figs/plots}
+
+
+\input{Tables/gen_eval}
+\input{Tables/case_study}
+
+\subsection{Analyses of Loss Functions for Generator Tuning}
+As shown in Table~\ref{tab:ablation}, the choice of generator loss has a significant impact on the synthesized data quality and thus the final model performance.
+We conduct further analyses to compare the training processes of the generator under the following three loss functions and the resulting generated samples:
+(1) $\mathcal{L}_{\text{gen}}$ which is the standard language modeling loss;
+(2) $\mathcal{L}_{\text{gen}}+\mathcal{L}_{\text{disc}}$ which directly adds the discriminative loss to generator training;
+and (3) $\mathcal{L}_{\text{w-gen}}$ which is our meta-weighted objective.
+Fig.~\ref{fig:loss_funcs} shows the discriminative loss $\mathcal{L}_{\text{disc}}$ and the standard language modeling loss on the held-out development set throughout training.
+Although using $\mathcal{L}_{\text{gen}}+\mathcal{L}_{\text{disc}}$ helps reduce the discriminative loss, it comes at the cost of hindering language modeling---the generator loss on the development set is high.
+Using our meta-weighted objective $\mathcal{L}_{\text{w-gen}}$ not only encourages discriminativeness but also mitigates overfitting, yielding the lowest validation set loss.
+This is likely because the model receives contrastive information from other labels which facilitates more accurate modeling of the texts with the target label.
+% We also showcase concrete generation results for the three labels of MNLI by models trained with the three different loss functions in Table~\ref{tab:case_studies}.
+% The model trained with $\mathcal{L}_{\text{gen}}$ produces fluent and coherent sentences, but the generated sentences do not accurately pertain to the desired label (\ie, the ``entailment'' and ``contradiction'' generation results are in fact neutral with respect to the given sentence), lacking label discriminativeness.
+% When $\mathcal{L}_{\text{gen}}+\mathcal{L}_{\text{disc}}$ is used, the generated samples of different labels are more distinctive, but also become less natural and coherent due to the model's language modeling ability being hampered.
+% The generator tuned with $\mathcal{L}_{\text{w-gen}}$ produces both coherent and label-discriminative samples which can serve as quality training data.
+% We present more quantitative analyses of different generator training objectives in Appendix~\ref{app:eval_gen}.
+% We visualize the token weights $\bs{w}$ automatically learned and used in $\mathcal{L}_{\text{w-gen}}$ in Appendix~\ref{app:vis}.
+% \input{Tables/case_study}
+
+\textbf{Quantitative Analyses.}
+Apart from the final classification model performance which indirectly reflects the synthetic data quality, we additionally conduct more direct quantitative analyses of different generator training objectives.
+We use two metrics: (1) The accuracy of generated texts, which is judged by fully-supervised RoBERTa$_{\text{Large}}$ models fine-tuned on the original training sets of each task.
+We choose to adopt such an automatic evaluation instead of human evaluation because it is efficient and reliable---fully-supervised RoBERTa$_{\text{Large}}$ models have comparable or better accuracy than human baselines according to the GLUE benchmark\footnote{\url{https://gluebenchmark.com/leaderboard}}.
+(2) The generator's perplexity on the test sets, which reflects how well the generator models the task distribution.
+As shown in Table~\ref{tab:gen_eval}, using $\mathcal{L}_{\text{w-gen}}$ for generator training consistently outperforms using $\mathcal{L}_{\text{gen}}$ or $\mathcal{L}_{\text{gen}}+\mathcal{L}_{\text{disc}}$, both in generated text accuracy and in language modeling ability. 
+
+Comparing $\mathcal{L}_{\text{w-gen}}$ with $\mathcal{L}_{\text{gen}}$, the meta weights automatically learned emphasize discriminative tokens in generator training and help the generator capture subtle semantic differences across different labels, resulting in better language modeling quality and more distinctive synthetic data.
+
+Comparing $\mathcal{L}_{\text{w-gen}}$ with $\mathcal{L}_{\text{gen}}+\mathcal{L}_{\text{disc}}$, the generator training objective is not directly impacted by the discriminative objective, thus avoiding the gradient interference issue in multi-task learning~\citep{Standley2019WhichTS}---the gradient for optimizing the generative probability $p(\bs{x}|y_l)$ will be interfered by the gradient optimizing the discriminative probability $p(y_l|\bs{x})$ if $\mathcal{L}_{\text{gen}}+\mathcal{L}_{\text{disc}}$ is used. 
+% This is important since the generator is never used as a discriminator (\ie, only $p(\bs{x}|y_l)$ will be used in training data generation but not $p(y_l|\bs{x})$).
+Therefore, using $\mathcal{L}_{\text{w-gen}}$ results in better language modeling quality and more fluent and coherent generation results.
+
+\input{Figs/visualize}
+\textbf{Qualitative Analyses}.
+We showcase concrete generation results for the three labels of MNLI by models trained with the three different loss functions in Table~\ref{tab:case_studies}.
+The model trained with $\mathcal{L}_{\text{gen}}$ produces fluent and coherent sentences, but the generated sentences do not accurately pertain to the desired label (\ie, the ``entailment'' and ``contradiction'' generation results are in fact neutral with respect to the given sentence), lacking label discriminativeness.
+When $\mathcal{L}_{\text{gen}}+\mathcal{L}_{\text{disc}}$ is used, the generated samples of different labels are more distinctive, but also become less natural and coherent due to the model's language modeling ability being hampered.
+The generator tuned with $\mathcal{L}_{\text{w-gen}}$ produces both coherent and label-discriminative samples.
+More concrete generation results for each task can be found in Appendix~\ref{app:gen_result}.
+
+
+\subsection{Visualization of Learned Token Weights}
+\label{app:vis}
+To understand how token weights are automatically learned during generator tuning, we visualize the learned weights in Fig.~\ref{fig:vis}.
+The tokens with higher weights (\eg, ``weak'' in the first example and ``hates'' in the second example) are learned to be important tokens that decide the relation of the second sentence to the first sentence (\ie, the label of the training sample).
+With such tokens emphasized during training, the generator is encouraged to capture label-discriminative information that facilitates the generation of unambiguous training samples.

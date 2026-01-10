@@ -1,0 +1,120 @@
+\section{Learning Task Requirements and Agent Capabilities as Linear Constraints}\label{sec:learning_model}
+
+The system architecture is shown in Fig. \ref{fig:main_diagram}, suppose the task performance is a function of the team configuration (given a task environment) that can be evaluated through simulation or experiment. In real-world applications, this value can be task completion time, product outputs, or a combined quantity.
+We can choose a set of team configurations and evaluate the task performances.
+The learning model tries to learn a set of task constraints from these team configurations and performance pairs that can later be embedded in a task allocation model.
+This section focuses on learning the task constraints from training data, while the next section provides a task allocation model that utilizes the
+learned task constraints.
+
+
+\subsection{Task Performance Function}
+Consider a set of agent types \(K = \{1,\cdots,{\numK{}}\}\), and tasks \(M = \{1, \cdots, {\numM{}}\}\). Suppose \(y_{k i}\) is the number of agents with type \(k \in K\) assigned to a task \(i \in M\). And \(\mathbf{y}_i = [y_{1 i}, \cdots, y_{\numK{} i}]^\transpose \in \mathbb{R}^{\numK{}} \) is the vector for the number of different agents at task \(i \in M\).
+Let the task performance be a function of the team configuration: \(f_i(\mathbf{y}_i): \mathbb{R}^{\numK{}} \rightarrow \mathbb{R}\) for each task \(i \in M\).
+Ideally, we should set a lower bound, \(f_i^*\), on the performance of a given task as follows
+\begin{align}
+    f_i(\mathbf{y}_i) \geq f_i^*, \quad \forall i \in M,  \label{eqn:actual_performance_constraint}
+\end{align}
+and embed it in our task allocation optimization. Depending on the type of performance metric used, the \(\geq\) can be replaced with \(\leq\). However, \(f_i(\mathbf{y}_i)\) is evaluated through an experiment or simulation. It is a non-analytic function and cannot be directly added as a constraint in an optimization. In this section, a set of linear constraints is learned to approximate \eqref{eqn:actual_performance_constraint}.
+
+
+
+\subsection{Task Requirements and Agent Capabilities}
+
+Consider a set of agent capability types \(C = \{1,\cdots,{\numC{}}\}\) that can be used to characterize an agent's ability to perform a task (e.g., perception, manipulation, or transportation). 
+Suppose \(a_{c k}\) represents the value of capability \(c \in C\) that agent type \(k \in K\) possesses. We concatenate these capability values into a capability matrix (see Fig. \ref{fig:matrix_diagram} for example)
+\begin{align}
+    A &=
+    \begin{bmatrix}
+    \mathbf{a}_{1} & \cdots & \mathbf{a}_{\numK{}}
+    \end{bmatrix} \nonumber \\
+   & =
+    \begin{bmatrix}
+    \mathbf{a}^{1} \\ \vdots \\ \mathbf{a}^{\numC{}}
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+    a_{1 1}   & \cdots & a_{1 \numK{}}  \\
+    \vdots    & \ddots & \vdots     \\
+    a_{\numC{} 1} & \cdots & a_{\numC{} \numK{}}
+    \end{bmatrix}
+    \nonumber
+\end{align}
+where \(\mathbf{a}_{k} = [a_{1 k}, \cdots, a_{\numC{} k}]^\transpose\) is a vector indicating the capabilities of agent type \(k \in K\).
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figure/matrix_diagram.pdf}
+    \caption{An example team formation problem using a capability matrix and task requirement vectors. Agents can perform three capabilities: perception, manipulation, and delivery. The example task requires perception to explore and locate an object and manipulation to grasp the object.}
+    \label{fig:matrix_diagram}
+\end{figure}
+
+For simplicity, we assume that capabilities are cumulative: if multiple agents work together, the total capability of the agent team is the sum of their individual capability values.
+Thus, a team's capability set for a given task can be calculated via matrix multiplication \(A \mathbf{y}_i \in \mathbb{R}^{\numC{}}\). Future work will relax this assumption to allow for non-cumulative capabilities.
+
+
+Task requirements for a given task \(i \in M\) are provided as a vector of thresholds \(\mathbf{b}_i = [b_{1 i}, \cdots, b_{\numC{} i}]^\transpose\), where \(b_{c i}\) denotes the threshold on capability type \(c \in C\). The model assumes that the task can be successfully completed if the capability requirements are satisfied by the agent team assigned to the task. Mathematically, this requirement can be represented as 
+\begin{align}
+    A \mathbf{y}_i \geq \mathbf{b}_i, \quad \forall i \in M. \label{eqn:task_constraints}
+\end{align}
+
+Equation \eqref{eqn:task_constraints} can be illustrated graphically as in Fig. \ref{fig:matrix_diagram}.
+
+
+\subsection{Learning the Task Requirements and Agent Capabilities}
+
+With the task requirement model above and the cumulative capability assumption, the actual task constraints in \eqref{eqn:actual_performance_constraint} are approximated using linear constraints in \eqref{eqn:task_constraints}, which can be easily embedded in an optimization program. Ideally, the two constraints should correspond to each other as follows
+\begin{align}
+    A \mathbf{y}_i \geq \mathbf{b}_i \Leftrightarrow f_i(\mathbf{y}_i) \geq f_i^*, \quad \forall i \in M. \label{eqn:one_to_one_map}
+\end{align}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figure/tightest_bound.pdf}
+    \caption{Find the tightest linear boundary for the positive samples.}
+    \label{fig:tightest_bound}
+\end{figure}
+
+See Fig. \ref{fig:tightest_bound}, since linear constraints can only describe convex polytopes, instead of a one-to-one map in \eqref{eqn:one_to_one_map}, we want to fit the tightest linear boundaries for the region \(f_i(\mathbf{y}_i) \geq f_i^*\).
+In practice, \(f_i(\cdot)\) is a non-analytic function evaluated through simulations/experiments, and the region of \(f_i(\mathbf{y}_i) \geq f_i^*\) is not explicitly available. 
+Suppose we have evaluated the performance of some team configurations, among which \(\mathbf{y}_i^l, (l = 1, \cdots, n_L)\) satisfy \(f_i(\mathbf{y}_i^l) \geq f_i^*\). We can fit a linear boundary to these positive samples. The following linear program tries to find the \(A\) and \(\mathbf{b}_i\) associated with the tightest linear boundary.
+\begin{align}
+    \max_{A, \mathbf{b}_i} & \sum_{i \in M} ||\mathbf{b}_i||_1 \label{eqn:basic_learning_model} \\
+    \text{sub to } & A \mathbf{y}_i^l \geq \mathbf{b}_i, \ \ \forall l = 1, \cdots, n_L, \ \ \forall i \in M, \nonumber \\
+    & ||\mathbf{a}^c||_1 = 1, \ \forall c \in C. \nonumber
+\end{align}
+
+In \eqref{eqn:basic_learning_model}, the objective function maximizes the requirement thresholds \(\mathbf{b}_i\) to find the tightest value. Note that \(||\cdot||_1\) stands for the \(L_1\) norm. The first constraint ensures all the positive samples satisfy the constraints defined by \(A\) and \(\mathbf{b}_i\). 
+If we scale the capability matrix \(A\) and requirement vector \(\mathbf{b}_i\) by the same value, the constraints \(A \mathbf{y}_i \geq \mathbf{b}_i\) do not change.
+As the scale of the capabilities is unconstrained, we add the second constraint in \eqref{eqn:basic_learning_model} to normalize each type of capability.
+
+The optimization problem in \eqref{eqn:basic_learning_model} can further be decomposed row-wise into the following form.
+\begin{align}
+    & \max_{\mathbf{a}^{c}, b_{c i}} \ \sum_{c \in C} \sum_{i \in M} \mathrm{abs} (b_{c i})  \label{eqn:vector_form_learning_model} \\
+    & (\mathbf{a}^c)^\transpose \mathbf{y}_i^l \geq b_{c i}, \ \ \forall l = 1, \cdots, n_L, \ \ \forall i \in M, \ \ \forall c \in C, \nonumber \\
+    & ||\mathbf{a}^c||_1 = 1, \ \forall c \in C. \nonumber
+    % & \sum_{k \in K} |a_{c k}| = 1, \ \forall c \in C. \nonumber
+\end{align}
+
+Note that \(\mathrm{abs}(\cdot)\) denotes the absolute value.
+According to \eqref{eqn:vector_form_learning_model}, the optimization of \(\mathbf{a}^{c}\) and \(b_{c i}\) are decoupled for different capabilities \(c \in C\). This is also illustrated in Fig. \ref{fig:matrix_diagram}, as different types of capabilities (rows) are independent of each other. 
+% With the assumption that all capability and task threshold are non-negative (all entries in \(A\) and \(\mathbf{b}_i\) are non-negative),
+Therefore, we can decompose the optimization in \eqref{eqn:vector_form_learning_model} into \(\numC{}\) separate linear programs as follows
+
+\begin{align}
+    & \max_{a_{c k}, b_{c i}} \left(\frac{\alpha_b}{\numM{}} \sum_{i \in M} b_{c i} + \alpha_a \min_{k \in K, (c, k) \in \Acal_1} a_{c k} \right)  \label{eqn:linear_learning_model} \\
+    & \sum_{k \in K} {y_{k i}^l \ a_{c k}} \geq b_{c i}, \ \ \forall l = 1, \cdots, n_L, \ \ \forall i \in M, \label{eqn:task_sample_constraint} \\  
+    & \sum_{k \in K}{a_{c k}} = 1, \label{eqn:normalization_contraint} \\
+    & a_{c k} \geq 0, \quad \forall (c, k) \in \Acal_1, \label{eqn:a1_constraint} \\
+    & a_{c k} = 0,    \quad \forall (c, k) \in \Acal_0, \label{eqn:a0_constraint} \\
+    & b_{c i} \geq 0, \quad \forall (c, i) \in \Bcal_1, \label{eqn:b1_constraint} \\
+    & b_{c i} = 0,    \quad \forall (c, i) \in \Bcal_0. \label{eqn:b0_constraint}
+\end{align}
+
+The two constraints in \eqref{eqn:vector_form_learning_model} are rewritten as in \eqref{eqn:task_sample_constraint}-\eqref{eqn:normalization_contraint}. The objective function in \eqref{eqn:vector_form_learning_model} is retained in \eqref{eqn:linear_learning_model} with an additional penalty.
+Consider the general case (an example is in Fig. \ref{fig:matrix_diagram}), for which we typically assume that we know an agent's capability types and the task's requirement types, but do not contain knowledge about the specific values\footnote{For example, if a robot contains a manipulator, we know it has a manipulation capability. However, it can be more challenging to quantify the value of that capability in terms of functionality}.
+Namely, we know whether an entry in \(A\) and \(\mathbf{b}_i\) is positive or zero (\textbf{the sparsity pattern is known}). Suppose \(\Acal_1 = \{(c, k) | a_{c, k} > 0\}\) and \(\Acal_0 = \{(c, k) | a_{c, k} = 0\}\) are the sets of index pairs for zero and positive agent capabilities, and \(\Bcal_1 = \{(c, i) | b_{c, i} > 0\}\) and \(\Bcal_0 = \{(c, k) | b_{c, i} = 0\}\) are the sets of index pairs for zero and positive task requirements, we express this prior knowledge as constraints \eqref{eqn:a1_constraint}-\eqref{eqn:b0_constraint}.
+The right term in \eqref{eqn:linear_learning_model} is added to ensure that positive capabilities are indeed learned to be positive.
+The choices of the weights are evaluated through a parametric study, and the results show that the solutions are not sensitive to the weight selections. In general, choosing \(\alpha_a = 0.25 \alpha_b\) would work for most cases with less than 32 capability types.
+
+As a summary, given a set of data evaluated team configurations and the corresponding task performances \((\mathbf{y}_i^l, f_i(\mathbf{y}_i^l)), (l = 1, \cdots, n_L)\), with prior knowledge about whether an entry in the agent capability \(A\) or task requirement \(\mathbf{b}_i\) is non-zero, we can solve \(\numC{}\) small linear programs (with \(\numK{} + \numM{}\) variables) to estimate the linear task requirement constraints for task allocation. As linear programming is polynomially solvable, the learning model developed here is scalable to the number of tasks, agents, and training samples.
+

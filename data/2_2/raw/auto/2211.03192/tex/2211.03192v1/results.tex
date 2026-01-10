@@ -1,0 +1,175 @@
+In this section we experimentally evaluate our method -- herein termed NIFM for Neural Integration-free Flow Maps -- for both 2D and 3D time-varying vector fields, comparing against various baselines that accelerate flow map computation in different ways. Specifically, we consider the flow map super resolution technique proposed by Jakob et al.~\cite{jakob2020fluid}, wherein we train a convolutional neural network (CNN) model using the 2D fluid flow dataset provided by the authors. To train the CNN we generate 16x downsampled flow maps along with their corresponding high-resolution ground truth flow maps, varying start times and time span of the integration, to permit model generalization for arbitrary start time/duration. We also compare our method with the deep learning based Lagrangian interpolation technique proposed by Han et al.~\cite{han2021exploratory}. This technique uses an encoder-decoder network and is most similar to ours in terms of the input data the model expects, and the output of the model. We train the model on flow map samples computed by, first, generating seeds sampled uniformly at random in space and time, and secondly, integrating for varying small time spans. This flow map sampling technique is intended to resemble the Lagrangian short generation scheme proposed by the authors. We made a minor modification to the network by removing the ReLU activation function used in the output layer, allowing the model to output negative values. We further compare our method against the recent work by Li et al.~\cite{li2022efficient}, where the authors showed an improvement over prior work in efficiently interpolating Lagrangian representation to obtain new trajectories. Further, we compare our method with a SIREN~\cite{sitzmann2020implicit} that tacks time span on as an additional coordinate, along with particle space-time coordinates (c.f. Fig.~\ref{fig:illustrative_network}(a)). We train the SIREN with the same data used to train the encoder-decoder model. Note that we could use a hybrid grid-MLP model~\cite{muller2022instant,weiss2021fast} in lieu of a standard coordinate-based MLP, but for 3D unsteady flows this would require storage of a 5D grid, which is not feasible. Last, we compare our method with the work of Weinkauf et al.~\cite{weinkauf2010streak}. We compute a streakline-based vector field (SVF), and generate streaklines by integrating this derived field. Table~\ref{tab:datasets} lists all the datasets that are used in the paper. All reported computational timings are based on a system with 12-core CPU AMD Ryzen 9 3900X, 16GB RAM, and GPU NVIDIA GeForce RTX 2080 Ti with 12GB memory.
+
+\begin{table}[]
+\caption{We list all datasets and their respective sizes used in experiments.}
+\label{tab:datasets}
+\centering
+\scalebox{0.8}{
+% \begin{tabular}{|c|c|}
+% \hline
+% Dataset       & Res (t,x,y(,z)) \\ \hline
+% Double Gyre   & 500x400x200     \\ \hline
+% Cylinder      & 1001x400x50     \\ \hline
+% Boussinesq    & 2001x450x150    \\ \hline
+% Tornado       & 50x128x128x128  \\ \hline
+% Scalar Flow   & 151x100x178x100 \\ \hline
+% Half-Cylinder & 151x640x240x80  \\ \hline                 
+% \end{tabular}}
+% \end{table}
+\begin{tabular}{cc}
+\hline
+Dataset       & Res {[}t,x,y(,z){]} \\ \hline
+Double Gyre   & 500x400x200         \\
+Cylinder      & 1001x400x50         \\
+Boussinesq    & 2001x450x150        \\
+Fluid Simulation & 1001x512x512     \\
+Tornado       & 50x128x128x128      \\
+Scalar Flow   & 151x100x178x100     \\
+Half-Cylinder & 151x640x240x80   
+\end{tabular}}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=1\linewidth]{figures/quantitative_v2.pdf}
+\caption{We show the flow map approximation error quantitatively for different datasets across different start times and time spans for different baselines.} 
+\label{fig:quantitative}
+\end{figure}
+
+
+\subsection{Implementation details}
+We first describe the details of our network architecture, followed by details on optimization.
+
+\textbf{Network architecture settings}
+The design of $f_{\nu}$ and $f_{\tau}$ rely on parameter settings related to the multi-level feature grid, as well as the MLP. The feature grids for $f_{\nu}$ and $f_{\tau}$ are of identical design, where we use a 4-level feature grid, and each level is of a different spatial resolution. Specifically, for a given axis of resolution $w$ at level $l$, we set the resolution at the next level to be $w^{s \cdot l}$, with resolution scaling factor $s$ set to 1.65, following the guidance of M{\"u}ller et al.~\cite{muller2022instant}. Each grid stores $8$-dimensional feature vectors at its nodes, and thus the resulting concatenated feature is $32$-dimensional. We employ 2 and 1-layer MLPs for $f_{\nu}$ and $f_{\tau}$, respectively, along with activation $\sigma_{\tau}$ chosen to be a Swish activation~\cite{hayou2018selection}. Experimentally we found Swish to outperform other more standard activations for INRs, e.g. ReLU, sin, consistent with findings in AutoInt~\cite{lindell2021autoint}. We control for the size of the network by a compression ratio, expressed as the ratio of the vector field size to the network size. We adjust the spatial resolution of the feature grids to best match a provided compression ratio, but leave the MLPs unchanged as they comprise a tiny portion of the model. Last, we use a 3-layer MLP with $64$ layer width for the residual network. Unless otherwise specified, we use a compression ratio of $10$ for all 2D datsets, and customize compression ratios for 3D as appropriate.
+ 
+\input{main_timing_table}
+ 
+\textbf{Optimization details}
+For both phases of optimization we use Adam~\cite{kingma2015adam}, where we take a total of $40,000$ optimization steps and decay the learning rate every $8,000$ steps. Specific to optimization phase, in fitting to the vector field we use a learning rate of $0.02$, while for flow map optimization we use a learning rate of $0.01$ -- fitting the flow map derivative to the vector field is quite stable, and benefits from larger learning rates. In optimizing for the flow map, we have the choice of leaving the instantaneous velocity portion of the network frozen, or fine-tuning its weights to compensate for the remainder of the network. Although we find that both give results of comparable accuracy, in some occasions we found that fine-tuning can mitigate small grid-based artifacts in the output when leaving these weights frozen, and hence we fine-tune this portion of the network, using a learning rate of $0.0008$.
+
+Recall that our method supports a maximum time span $\tau_{max}$ on which to sample during optimization. Though in principle we could optimize for the full time span of a given dataset, we find that performance can suffer, especially for datasets exhibiting complex temporal dynamics. Thus, to compromise we set a limit on $\tau_{max}$ during optimization, and at inference time, for any target $\tau > \tau_{max}$ we take multiple steps with our network until reaching the desired span $\tau$. Specifically, for all 2D datasets, expressed in terms of grid units we set $\tau_{max} = 48$ unless otherwise specified. For 3D datasets we customize $\tau_{max}$ based on grid resolution, and complexity of the flows.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.75\linewidth]{figures/fluid_sim_ftle.pdf}
+    \caption{We compare the FTLE of two Fluid Simulation datasets (Re 16 and Re 101.6) for different baselines. The first row shows the FTLE resulting from integrating particles starting at $t_0 = 0$ and $\tau=7$. The second row shows the FTLE resulting from integrating particles starting at $t_0 = 2$ and a $\tau = 7$.} 
+    \label{fig:ftle_fluid}
+\end{figure*}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/dg.pdf}
+    \caption{We compare the FTLE results for different baselines for the double gyre dataset. Particles are integrated from $t_0=0$ for a time-span $\tau=10$.} 
+    \label{fig:ftle_dg}
+\end{figure*}
+
+\subsection{2D unsteady flow}
+
+We first conduct experimental comparisons for various 2D time-varying flow fields. Specifically, we evaluate different techniques by computing the error in flow map approximations over varying seed points (spatial position and starting time) that have been integrated for varying time spans. We express error as the averaged Euclidean distance between the ground-truth flow map output, and the approximation scheme's output, normalized by the domain's bounding-box diagonal length. In Fig.~\ref{fig:quantitative} we present quantitative results comparing our method against different baselines, and in Table~\ref{tab:time} we report inference and preprocessing times. Specifically, for the pathline interpolation approach of Li et al.~\cite{li2022efficient}, preprocessing refers to the time required to fit B-splines, while for Jakob et al.~\cite{jakob2020fluid} this refers to the time required to optimize the CNN for super resolution. For all remaining methods, preprocessing refers to the time required for optimizing to an individual flow field.
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{figures/cylinder_ftle.pdf}
+    \caption{FTLE for the flow over cylinder dataset generated by integrating particles starting at $t_0=18$ for a time-span $\tau=1$.} 
+    \label{fig:ftle_cy}
+\end{figure}
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{figures/boussinesq_ftle.pdf}
+    \caption{FTLE for the Boussinesq dataset generated by integrating particles starting at $t_0=11.3$ for a time-span $\tau=0.5$.} 
+    \label{fig:ftle_bo}
+\end{figure}
+
+In comparing the fluid simulation flows of varying Reynolds numbers, we find that our method sees consistent improvement in accuracy over SIREN and super resolution, while achieving faster inference times. We note that the super resolution approach requires optimizing a CNN over a collection of flow maps just once, and thus can generalize to low-resolution flow maps at inference time, albeit restricted to flows resembling those observed during training. Our method is limited to just a single dataset at a time, but nevertheless, our training times scale well in terms of standard INRs (e.g. SIREN), while exhibiting faster inference and more accurate flow map approximations. Qualititative results for the fluid simulation flows are shown in Fig.~\ref{fig:ftle_fluid} in the form of the FTLE. For high Reynolds number flows, we see that the super resolution method can fail to adapt to the rate at which particles separate, as indicated by the color shift, while also blurring out detailed ridges in the FTLE.  Our method, however, excels in capturing FTLE ridges, while remaining efficient to compute, since the super resolution method still requires computing a low-resolution flow map as input to a (otherwise highly efficient) CNN. Recall that our method employs a compression ratio of $10$ for all 2D experiments, which limits the grid resolution, and thus might limit the details we can reproduce in the flow map. However, from these results, we see that the coarser feature grid resolution does not limit the spatial resolution of the FTLE.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=1\linewidth]{figures/streaklines.pdf}
+\caption{We compare our method's ability to compute streaklines against the streakline vector field technique~\cite{weinkauf2010streak}, which only necessitates integrating a derived vector field. Qualitatively and quantitatively we find that our method produces comparable results, where we show varying step sizes used for evaluating the flow map.}
+\label{fig:streaklines}
+\end{figure*}
+
+In comparing our method to other baselines (c.f. Fig.~\ref{fig:quantitative}) for Double Gyre, Cylinder, and Boussinesq, we find that our method obtains, overall, higher accuracy in relation to other techniques. Prior INR methods such as the encoder-decoder architecture of Han et al.~\cite{han2021exploratory}, or a pure coordinate-based approach~\cite{sitzmann2020implicit} poorly generalize. We find that for small step sizes, the performance of these methods in fact steeply declines, as numerical error accumulates with the more steps taken. We attribute this to the basic limitations of the network architectures employed, failing to address the properties (identity mapping, instantaneous velocity) we target in our network design. The inability to generalize in these methods is further demonstrated qualitatively, in computing their FTLE, for Fig.~\ref{fig:ftle_dg} - \ref{fig:ftle_bo}. The pathline interpolation technique is competitive with our method in terms of accuracy, as demonstrated quantitatively, and in the FTLE figures. Moreover, this scheme has a lower cost in preprocessing than our method. However, this method is substantially more costly at inference time (c.f. Table~\ref{tab:time}), requiring expensive nearest-neighbor queries to evaluate B-splines, a limitation shared with Chandler et al.~\cite{chandler2014interpolation}. The performance of interpolation is also highly dependent on the distribution of particles seeded throughout the domain, where for a given starting time, we generate seeds uniformly-at-random to give this method the benefit of the doubt. For particles integrated under a sufficiently-long time span, seed positions can become nonuniformly-distributed, and thus computing reliable neighborhoods becomes quite challenging, with performance substantially decreasing. As our method encodes the integration of particles as weights within a neural network, effectively serving as a surrogate for the flow map, we do not inherit such issues of interpolation.
+
+We additionally evaluate our technique both quantitatively and qualitatively for the computation of streaklines. In Fig.~\ref{fig:streaklines} we show streaklines for the Cylinder dataset. We compare our method with the streakline vector field method proposed by Weinkauf et al.~\cite{weinkauf2010streak}. We can see that both the techniques are able to capture the vortices of the dataset faithfully, and are visually indistinguishable from the ground truth streaklines. Quantitatively both the techniques consistently incur low streakline error staying within the margin of $10^{-3}$ magnitude (relative to the bounding box diagonal). Interestingly, we find that both methods have comparable inference time as well, as reported in Table~\ref{tab:streaklines}, despite the fact the streakline vector field evaluates its field fewer times than our neural flow map, since we must take multiple steps for sufficiently long time spans. However, an advantage of our method lies in data parallelism; we can evaluate the flow map over varying space/time/duration in a single batch, whereas integrating the streakline vector field is, by necessity, a sequential process. We further note that the computation of the entire streakline vector field is an expensive process both in terms of speed and storage space. In Table~\ref{tab:streaklines} we can see that the computation of the entire 4D streakline vector field requires a massive storage space of 160GB, whereas our method merely requires 77MB. We note that while our technique can be easily scaled to 3D datasets, the computation of an entire streakline vector for 3D unsteady flows is infeasible in practice, necessitating a 5D grid for storage.
+
+
+\begin{table}[!t]
+\caption{We report storage requirements, preprocessing time and inference time for computing streaklines on the Cylinder dataset, comparing our method against the streakline vector field technique~\cite{weinkauf2010streak}.}
+\label{tab:streaklines}
+\centering
+\scalebox{0.9}{
+\begin{tabular}{|c|c|c|c|}
+\hline
+Method  & \begin{tabular}[c]{@{}c@{}}Preprocessing\\ Time\\ (min)\end{tabular} & \begin{tabular}[c]{@{}c@{}}Inference\\ Time\\ (sec)\end{tabular} & \begin{tabular}[c]{@{}c@{}}Storage\\ \end{tabular} \\ \hline
+Ground Truth & NA  & 21.391 & 160.20 MB \\  \hline
+SVF & 130.407 & 1.204 & 160.36 GB \\ \hline
+NIFM (16 grid steps) & \multirow{2}{*}{40.060} & 0.952 & \multirow{2}{*}{77.20 MB}\\ \cline{1-1} \cline{3-3}
+NIFM (24 grid steps) & &0.671 & \\ \hline
+\end{tabular}}
+\end{table}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/3d_results.pdf}
+    \caption{We compare, both qualitatively (volume rendering of FTLE field) and quantitatively (flow map evaluation), our method with standard coordinate-based networks~\cite{sitzmann2020implicit} as well as pathline interpolation techniques~\cite{li2022efficient} for modeling the flow map in 3D unsteady flows. We find our method is quantitatively comparable, if not an improvement over other methods, and qualitatively our method does not suffer from issues of open-boundary flows as present in the Spline comparisons.}
+    \label{fig:ftle_scalar}
+\end{figure*}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/half_cylinder.pdf}
+    \caption{In this figure, we compare our method both quantitatively and qualitatively against SIREN for the Half-Cylinder dataset. We find that our method is able to scale reasonably well to this large dataset, whereas, the SIREN fails to learn meaningful flow maps as can be seen from the FTLE.}
+    \label{fig:ftle_half_cylinder}
+\end{figure*}
+
+\subsection{3D unsteady flow}
+
+We next evaluate our method on a set of 3D unsteady flows, comparing our method with a SIREN-based flow map~\cite{sitzmann2020implicit} as well as the B-spline pathline interpolation technique~\cite{li2022efficient}. We first compare to the Tornado and Scalar Flow datasets, where we set the $\tau_{max}$ to $8$ and $24$, respectively, to match the temporal complexity in the flows. Fig.~\ref{fig:ftle_scalar} shows qualitative results, via volume-rendering of the FTLE, as well as quantitative results. Our method is an improvement, if not comparable, to prior methods, but we obtain significant gains in inference time, as reported in Table~\ref{tab:3d_ftle_times}. We further compare to the Half Cylinder dataset, a large-scale unsteady flow dataset that cannot be readily stored in memory. We found the pathline interpolation method~\cite{li2022efficient} failed to fit to the data, and thus we limit our comparison to SIREN, please see Fig.~\ref{fig:ftle_half_cylinder}. In this experiment we set $\tau_{max} = 8$ and the compression ratio to $40$ to compensate for the larger data size. We find our method captures turbulent features in the wake of the half-cylinder object ($Re=320$), whereas SIREN faces difficulties in accurately modeling the data. Notably, for this dataset we find our training scheme scales well (c.f. Table~\ref{tab:3d_ftle_times}) relative to the 2D unsteady flow datasets, whereas SIREN's increase in model size leads to slower training times.
+
+
+\begin{table}[]
+\caption{We report the processing times as well the FTLE computation times for different method across different 3D unsteady flow datasets.}
+\label{tab:3d_ftle_times}
+\centering
+\scalebox{0.8}{
+\begin{tabular}{|c|c|c|c|c|c|}
+\hline
+Dataset                                        & FTLE res                     & $\tau$                                     & \multicolumn{1}{l|}{\begin{tabular}[c]{@{}l@{}}Inference\\ times (s)\end{tabular}} & \multicolumn{1}{l|}{\begin{tabular}[c]{@{}l@{}}Processing\\ times(m)\end{tabular}} & \multicolumn{1}{l|}{Method} \\ \hline
+\multicolumn{1}{|c|}{\multirow{4}{*}{Tornado}} & \multirow{4}{*}{128x128x128} & \multirow{4}{*}{50}                     & 25.35                                                                              & -                                                                                  & GT                          \\ \cline{4-6} 
+\multicolumn{1}{|c|}{}                         &                              &                                         & \textbf{3.60}                                                                               & 35.55                                                                              & NIFM                        \\ \cline{4-6} 
+\multicolumn{1}{|c|}{}                         &                              &                                         & 14.14                                                                              & 93.21                                                                              & SIREN                       \\ \cline{4-6} 
+\multicolumn{1}{|c|}{}                         &                              &                                         & 304.58                                                                             & 1.53                                                                               & Spline                      \\ \hline
+\multirow{4}{*}{Scalar Flow}                   & \multirow{4}{*}{100x178x100} & \multirow{4}{*}{2.5}                    & 53.34                                                                              & -                                                                                  & GT                          \\ \cline{4-6} 
+                                               &                              &                                         & \textbf{2.55}                                                                               & 41.66                                                                              & NIFM                        \\ \cline{4-6} 
+                                               &                              &                                         & 21.48                                                                              & 95.57                                                                              & SIREN                       \\ \cline{4-6} 
+                                               &                              &                                         & 322.17                                                                             & 1.48                                                                               & Spline                      \\ \hline
+\multirow{3}{*}{Half-Cylinder}                 & \multirow{3}{*}{640x240x80}  & \multicolumn{1}{c|}{\multirow{3}{*}{2}} & 110.60                                                                             & -                                                                                  & GT                          \\ \cline{4-6} 
+                                               &                              & \multicolumn{1}{c|}{}                   & \textbf{3.82}                                                                               & 45.56                                                                              & NIFM                        \\ \cline{4-6} 
+                                               &                              & \multicolumn{1}{c|}{}                   & 53.52                                                                              & 103.13                                                                             & SIREN                       \\ \hline
+\end{tabular}}
+\end{table}
+
+\subsection{Ablation: compression and supervision}
+
+Last, we run model ablations to study the effects of various design choices. Due to space limitations we limit ablation to compression, as well as the role of supervision in learning flow maps. Further experiments regarding the architecture choices (number of levels in the multiresolution grid) and optimization scheme (number of steps to take, c.f. Eq.~\ref{eq:steps}) are detailed in the appendix.
+
+In Fig.~\ref{fig:grid_artifact} we show the results of our model, for the FTLE of the Boussinesq, optimized under varying compression ratios. In this experiment we specifically wish to study how compression might impart visual artifacts in derived quantities of the flow map approximation, as a higher level of compression results in coarser feature grids. Indeed, we find that lower levels of compression lead to fewer grid-like artifacts in the resulting FTLE when taking a smaller steps, e.g. in this setting, a step size of 48 grid units in time amounts to an evaluation of the model just 3 times per position. We further report inference times for the smallest and largest level of compressions, and as expected, a larger number of steps requires longer inference times (e.g. more feedforward passes with the network). Interestingly, we find the inference time is fairly consistent across these compression ratios, indicating that the increased resolution of the grid has a negligible impact on this matter. As detailed in the appendix, we also find that the flow map accuracy takes just a small hit in performance across compression ratios, indicating that flow map accuracy might not be predictive of visual artifacts in derived quantities. Nevertheless, as shown in the figure, training times come at a cost with smaller compression ratios. We thus see natural trade-offs in the (1) flow map quality, (2) inference time (hinging on step size), and (3) training time.
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/grid-artifact.pdf}
+    \caption{We qualitatively compare our model under varying compression ratios, showing the effect of compression on the step size taken by our model to produce the FTLE for the Boussinesq flow.} 
+    \label{fig:grid_artifact}
+\end{figure}
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/self_consistency_plot.pdf}
+    \caption{For the Boussinesq flow we compare our self-consistency criterion with that of directly supervising on flow samples, finding that our method produces comparable, if not improved, flow map approximations, without ever accessing the ground-truth flow map.} 
+    \label{fig:self_consistency_exp}
+\end{figure}
+
+Our choice to learn flow maps via a self-supervisory signal is in contrast with how numerous visualization techniques interpolate~\cite{chandler2014interpolation,li2022efficient}, or build models~\cite{han2021exploratory} given samples of the flow map, e.g. typically as densely-sampled pathlines. Therefore we ask: is our self-consistency criterion an inferior objective to directly supervising on flow map samples? To this end, we have gathered a large collection of flow map samples, and modified our objective (Eq.~\ref{eq:composition-detail}) to accept the ground-truth flow map, and its corresponding derivative at the output position. We optimize for Boussinesq, using 20M and 50M flow map samples, and compare with our proposed objective, please see Fig.~\ref{fig:self_consistency_exp} for the results. We find that our method is able to learn comparable, if not better, flow map approximations, without ever observing flow map samples. In particular, at 50M samples we find that flow map supervision starts to become competitive with our method. Although supervising an on even larger number of samples might be more beneficial, clearly the data requirement starts to become prohibitively expensive, both for integrating the flow field, as well as storage requirements. In contrast, our method avoids these issues by requiring the vector field as the only supervision.

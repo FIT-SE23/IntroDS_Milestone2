@@ -1,0 +1,167 @@
+\section{JingleBack Design}
+\label{sec:speech}
+
+\subsection{Stylistic Generation}
+\label{ssec:sound-style-gen}
+This work focuses on backdoors in audio aiming into an easy-to-deploy attack. Thus, we investigate if such an attack can be implemented through simple digital music effects like chorus or gain.
+We used Spotify's pedalboard\footnote{\url{https://github.com/spotify/pedalboard}} to implement six styles by combining effects like PitchShift, Distortion, Chorus, Reverb, Gain, Ladderfilter, and Phaser. We explain the adopted effects briefly and show their analytical mathematical expressions in~\Cref{tab:equations}.
+
+\textbf{PitchShift} increases the pitch of the original audio by a number of semitones without affecting its duration. The pitch is the lowest frequency $f_0$ of a signal $S$~\cite[p.~xv]{music-in-theory-and-practice}. A semitone $sem$ is the smallest musical interval used in music denoting a different tone.
+\textbf{Distortion} applies a distortion with a $tanh()$ waveshaper. $\beta$ controls the signal's amplitude increase.
+\textbf{Chorus} imitates a group of musicians that play the same sound
+by superimposing many versions of the same sound that are slightly out of time and tune. Pedalboard's chorus uses one unsynchronized version with the provided delay $d$ where $\alpha$ controls the chorus's amplitude.
+\textbf{Reverberation} imitates the reflection of reproduced sound on various surfaces.
+Spotify's pedalboard is based on FreeVerb\footnote{\url{https://ccrma.stanford.edu/~jos/pasp/Freeverb.html}}, which uses eight parallel Schroeder-Moorer filtered-feedback comb-filters that create eight delayed versions of the input signal that are added and fed into four Schroeder all-pass filters in series. In~\Cref{tab:equations}, $AP_{1-4}$ is the combined effect of the four cascaded all-pass filters, and $CF_{i}$ is the $i^{th}$ comb-filter.
+\textbf{Gain}
+changes the signal amplitude by a factor $G$.
+Spotify pedalboard implements a Moog \textbf{Ladder} filter $L(\cdot)$~\cite{moog-ladder-filter}. In our experiments, we use the \textit{high-pass} version as it had a clear effect on our samples.
+\textbf{Phaser} is based on special filters that can change the frequencies they block over time through a low-frequency oscillator $P$. The phaser superimposes the original signal with its altered version.
+This results in a soft-moving sound.
+$\alpha$ controls the effect's intensity.
+
+\begin{table}[t]
+    \centering
+    \caption{Equations of the chosen effects.}
+    \vspace{-3mm}
+    \label{tab:equations}
+    \resizebox{0.25\textwidth}{!}{%
+        \begin{tabular}{c}
+        \toprule
+        \textbf{Effect Equation}\\ \toprule
+        $\mathrm{PitchShift}(S(f_0), sem) = S(f_0\cdot e^{sem/12})$ \\ \hline
+        $\mathrm{Distortion}(S(t), \beta) = \beta \cdot tanh(S(t))$\\ \hline
+        $\mathrm{Chorus}(S(t), d, \alpha) = S(t) + \alpha \cdot S(t - d)$\\ \hline
+        $\mathrm{Reverb}(S(t)) = AP_{1-4}[\sum_{i=1}^{8}CF_{i}(S(t))]$\\ \hline
+        $\mathrm{Gain}(S(t), G) = G\cdot S(t)$\\ \hline
+        $\mathrm{Ladder}(S(t)) = \alpha \cdot L(S(t))$\\ \hline
+        $\mathrm{Phaser}(S(t)) = S(t) + \alpha \cdot P(t, S(t))$\\ \bottomrule
+        \end{tabular}
+    }
+    \vspace{-6mm}
+\end{table}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\subsection{Experimental Settings}
+\label{ssec:sound-setup}
+
+\textbf{Dataset and Features.}
+We used Google's Speech Commands (GSC) dataset~\cite{speech-commands-dataset}, containing 30 classes of audio keywords like ``yes'', ``no'', ``up'', and ``down''.
+We used the Mel-frequency cepstral coefficients (MFCCs) as input features because they are rather accurate in emulating the human vocal system and widely used~\cite{can-you-hear-it}.
+We use common settings described in the literature~\cite{generalized-end-to-end-loss-for-speaker-verification}, i.e., 40-mel bands, a step of 10ms, and a window length of 25ms.
+
+\textbf{Backdoor.}
+We split our data into training, validation, and test sets in a 64/16/20 way. We poisoned up to 1\% of the training data and used two backdoor settings: clean-label and dirty-label attacks.
+We chose the class ``yes'' as the target class without loss of generality since we expect similar behavior regardless of the target class.
+Triggers are generated with the six styles described in~\Cref{tab:styles}.
+Parameters are selected to limit sample distortion and preserve their quality.
+
+\begin{table}[h]
+    \centering
+    \caption{Stylistic triggers deployed in our experiments.}
+    \label{tab:styles}
+    \vspace{-3mm}
+    \resizebox{0.35\textwidth}{!}{%
+        \begin{tabular}{c|c}
+        \toprule
+        \textbf{Style} & \textbf{Effect} \\ \toprule
+        0 & $\mathrm{PitchShift}(S, 10)$ \\ \hline
+        1 & $\mathrm{Distortion}(S, 30dB)$ \\ \hline
+        2 & $\mathrm{Chorus}(S, 10ms, 5)$ \\ \hline
+        3 & $\mathrm{Chorus}(\mathrm{Distortion}(\mathrm{PitchShift}(S, 10), 20dB), 8ms, 5)$ \\ \hline
+        4 & $\mathrm{Reverb(Distortion(Chorus}(S, 15ms, 0.25), 20dB))$ \\ \hline
+        5 & $\mathrm{Phaser(Ladder(Gain}(S, 12dB)))$ \\ \bottomrule
+        \end{tabular}
+    }
+    \vspace{-2mm}
+\end{table}
+
+\par
+\textbf{User study.}
+We conducted a user study (250 samples, 30 participants) to verify that the adversarial samples preserve the original audio.
+Each sample is reviewed by three participants.
+We analyze the perturbation effect in terms of users' accuracy (random guessing at 3\%). 95\% of legitimate samples are correctly classified, implying that the dataset contains audio that is not always comprehensible by target users. Stylistic transformation, instead, slightly degrades samples quality; in order, from style 0 to style 5, we found the following scores: 71\%, 80\%, 89\%, 45\%, 86\%, and 86\%. %The result suggests that backdoor effectiveness does not depend on the audio degradation since effective styles like style2 and style5 do also preserve good audio quality.
+\par
+\textbf{Models.} We used three models, two CNNs (small and large) and one LSTM as described in~\cite{can-you-hear-it}.
+Experiments are repeated four times to limit the randomness in results.
+Each model is trained for a maximum of 300 epochs, with an early stopping (patience of 20 epochs) based on the validation loss.
+In total, by considering stylistic triggers (6), backdoor settings (2), models (3), poisoning rates (3), and repetitions (4), 432 poisoned models are trained. We also trained 12 clean models (4 repetitions for each model) to use as a reference when investigating the backdoor's effect on the original task.
+
+\section{Experimental Results}
+\label{ssec:sound-results}
+
+\subsection{Effect on Clean Accuracy}
+We first verify that the backdoored models have comparable performance to their clean versions.
+Clean models show, on average, high performance (expressed as F1-score): large CNN $93.8\pm0.2$, small CNN $87.2\pm0.3$, and LSTM $90.8\pm1.1$.
+We notice that our attack is stealthy since we observed only a small drop in the performance of the backdoored models.
+On average, models drop $0.24\pm0.9$ pp (points percentage) in the F1-score, while the worst model drops 4.87 pp.
+Among the 432 poisoned models, the performance drop is $>2$ pp in 23 cases and decreases to 10 cases when $>3$ pp.
+
+
+
+
+\subsection{Backdoor}
+We analyze the performance of our proposed stylistic backdoor under clean and dirty-label settings. \Cref{fig:asr} shows the results. The y-axis shows the attack success rate (ASR), which represents the percentage of successfully triggered backdoors over a number of tries, and the x-axis shows the poisoning rate, which is the percentage of the poisoned training samples used for our attack.
+\begin{figure}[!htpb]
+    \centering
+    \setlength{\belowcaptionskip}{-20pt}
+    \includegraphics[width=0.9\linewidth]{Figures/backdoor2.pdf}
+    \caption{Backdoor attack success rate.}
+    \label{fig:asr}
+\end{figure}
+Our results are in line with the literature~\cite{can-you-hear-it, clean-label-backdoor-attacks}.
+For instance, the higher the poisoning rate, the higher the ASR because the poisoned models have more samples to learn the trigger~\cite{can-you-hear-it}.
+Additionally, the dirty-label attack is more effective as it almost always results in higher ASR than the clean-label attack, as shown in~\cite{clean-label-backdoor-attacks}.
+In particular, dirty-label attacks include cases in which even a small poisoning rate ($0.1\%$) is effective (ASR $>50\%$): examples are style 2 in Large-CNN, style 3 in Large-CNN, and style 5 in both Large-CNN and Small-CNN.
+Furthermore, Large-CNN -- the best-performing model on average -- is the most vulnerable, showing that backdoor effectiveness is connected to the model's ability to learn.
+\par
+Generally, we can notice that styles have different effects (e.g., style 3 is always more effective than style 1), leading to the following observations.
+(i) The clean-label attack is effective only with styles 3 and 5.
+(ii) Dirty-label attack shows better performance in all cases.
+(iii) The addition of effects does not always result in a performance boost (e.g., style 0 outperforms style 4 in clean-label settings).
+\par
+In the dirty-label attack, the poisoned samples are generally different from the samples of the target class as they originally belonged to different classes. As a result, the distance between these samples in the feature space is large and easy to learn by our models, even by applying simple effects to them. However, in the clean-label attack, the poisoned samples belong to the target class, and there is a higher probability that their features are not very different from the clean samples. For that reason, the dirty-label attack is more effective than the clean-label attack, which explains (i) and (ii). We believe that adding more effects is not the best way to create distinguishable triggers because what is most important is to change the signal's representation in the feature space. For that reason, a simpler transformation that alters the frequency representation of the original signal, like $PitchShift$ may result in a larger difference in the MFCCs as they use Fourier transform internally. This explains (iii).
+
+
+\subsection{Ablation Study}
+To understand the effect of each style's parameter on ASR, we performed an ablation study for our most effective styles (styles 2 and 5) on GSC. In this study, we varied the chorus's amplitude for style 2 ($[2, 4, 6, 8, 10]$) and the gain level for style 5 ($[4, 8, 12, 16, 20]$). \Cref{fig:distortions-level} shows that larger distortion increases ASR. The effect is more visible when the attack performs poorly, i.e., for the clean-label attack.
+Future investigations should analyze the trade-off between ASR and audio quality (or stealthiness).
+
+
+
+\begin{figure}[!htpb]
+    \centering
+    \setlength{\belowcaptionskip}{-10pt}
+    \includegraphics[width=0.36\textwidth]{Figures/sound/distortion_level.pdf}
+    \caption{ASR for different distortion levels for styles 2 and 5.}
+    \label{fig:distortions-level}
+\end{figure}
+
+\subsection{Evasion}
+Cao et al.~\cite{stylefool} showed that -- in CV -- stylistic transformations can lead to evasion attacks. Following such intuition, we tested our malicious samples on unpoisoned models and analyzed the evasion rate (misclassification). Style 0 and style 3 are the most effective attacks (70\% evasion, on average); however, the user study showed that these styles degrade the samples' quality.
+The other triggers show better evasion performance, e.g., style 5 with an evasion rate equal to 42.8\% (Large-CNN), 70.2\% (Small-CNN), and 50.7\% (LSTM).
+
+
+
+\section{Generalization on Different Datasets}
+We now demonstrate that the attack generalizes in different datasets. We use the large-CNN for styles 2 and 5 (the most effective ones), with a poisoning rate equal to 1\% for the dirty-label scenario. Other settings are the same as in Section~\ref{ssec:sound-setup}.
+\par
+\textbf{TIMIT}~\cite{timit}.
+We use the dataset's core test set, consisting of 240 audio clips from 24 speakers (speaker classification).
+Each sample is clipped to 1 second to maintain consistency with the experimental settings adopted in this paper.
+This task is challenging (F1-score 0.57), but the results show that ASR is, on average, 41.4\% (with 9.4 std) and 77.4\% (with 4.5 std) for styles 2 and 5, respectively.
+\par
+\textbf{Keras Speaker Recognition}\footnote{\url{https://keras.io/examples/audio/speaker_recognition_using_cnn}} is a speaker classification task of 5 users. The task is easier than the previous one (F1-score 0.99). The results show that ASR is, on average, 89.9\% (with 5.3 std) and 99.5\% (with 0.6 std) for style 2 and style 5, respectively.

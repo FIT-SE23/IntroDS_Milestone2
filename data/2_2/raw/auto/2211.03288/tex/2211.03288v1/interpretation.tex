@@ -1,0 +1,218 @@
+
+\section{Interpretation of UF Decoder}
+\label{sec:interpretation}
+
+We next reveal the relationship between a union-find decoder~\cite{delfosse2021almost} and the famous blossom algorithm~\cite{edmonds_1965,kolmogorov2009blossom} that solves MWPM problems.
+
+We will first introduce some necessary concepts in the blossom algorithm in \S\ref{sec:blossom} and then show how it solves the surface code decoding problem in \S\ref{ssec:blossom_sc}.
+In \S\ref{sec:uf_interpretation}, we demonstrate that union-find decoders are close relatives of MWPM decoders.
+Inspired by this, we describe a novel, general weighted union-find decoder in \S\ref{sec:weighted_uf}.
+
+\subsection{Blossom Algorithm}
+\label{sec:blossom}
+
+The blossom algorithm uses linear programming (LP) to solve the MWPM problem~\cite{edmonds_1965,kolmogorov2009blossom} for a graph defined by $G(V, E)$ where $V$ is the set of vertices with even cardinality, and $E$ that of edges.
+A matching $M$ of $G$ is a subset of $E$ in which no edges share a vertex.
+A perfect matching $M_p$ is a matching whose elements cover all vertices of $G$. 
+$\mathcal{O}$ is the set of subsets of $V$ with odd cardinaility, i.e. $\mathcal{O}=\{S| S\subset V; |S| \mathrm{~is~odd.}\}$.
+For $e= ( u,v ) \in E$, if $u\in S$ and $v\notin S$, we say $S$ and $e$ are incident to each other.
+
+In the primal problem of the linear programming formulation, a primal variable $x_e$ corresponds to $e \in E$. 
+For each $S\in \mathcal{O}$, there is a \textit{primal constraint}. If $|S|=1$, exactly one edge incident to $S$ is in the solution. If $|S|>1$, at least one edge incident to $S$ is in the solution.
+While $x_e$ is non-negative real, the primal constraints ensure that in one optimal solution,  $x_e$ is either $1$ or $0$ $\forall e \in E$,  representing a \emph{perfect matching}: $x_e = 1$ if $e$ is in the solution.
+The \textit{primal objective function} $\sum_{e} w_e x_e$ is the total weight of the edges in the solution, to be minimized.
+
+In the dual of the above problem~\cite[p. 81]{matousek2006understanding},
+a \textit{dual variable} $y_S$ is defined for $S\in \mathcal{O}$, corresponding to a primal constraint.
+Each dual constraint corresponds to an edge $e\in E$ (and its primal variable $w_e$): 
+$\sum_{S\in\delta(e)} y_S \leq w_e$ where $\delta(e)$ = $\{S|S\in\mathcal{O}; S \mathrm{~incident~to~} e\}$.
+The dual objective is to maximize $\sum_{S\in\mathcal{O}} y_{S}$.
+
+The blossom algorithm leverages two insights, both based on the complementary slackness relationship between the primal and dual problems~\cite[p. 204]{matousek2006understanding}.
+First, if $x_e>0$, i.e., $e$ is selected in the matching solution, the corresponding dual constraint must be \emph{tight}, i.e., $\sum_{S \in \delta(e)} y_S = w_e$. That is, the solution to the primal problem can only consist of \emph{tight} edges. 
+Second, if $y_S>0$ for $S\in\mathcal{O}$ and $|S|>1$, the corresponding primal constraint must be tight: exactly one edge incident to $S$ is in the solution.
+
+The second insight allows the algorithm to treat $S\in\mathcal{O}$ and $|S|>1$ like a vertex when $y_S>0$. Such $S$ are the eponymous \emph{blossoms}. Therefore, we use ``vertex'' to refer to both ordinary vertex and blossom below.
+
+The first insight allows the algorithm to work on the primal and dual problems in an interleaving manner. 
+When it works on the primal problem, it only considers the tight edges as candidates for the matching solution.
+It identifies blossoms, odd number ($>1$) of ``vertices'' connected by tight edges in a circle, and alternating trees, odd number of ``vertices'' connected by tight edges in a tree where all leaves and nodes with multiple children are connected to the root through an even number of tight edges.
+When it works on the dual problem, it adjusts $y_S$ to grow the dual objective function $\sum y_S$ while maintaining the tightness of edges in a blossom or alternating tree.
+In doing so, it turns a dual constraint tight, that is $\sum_{S \in \delta(e)} y_S = w_e$, resulting in a new tight edge $e$.
+With this new tight edge, the algorithm switches to work on the primal problem.   
+
+\subsection{Blossom for Decoding Surface Code}
+\label{ssec:blossom_sc}
+When applying the blossom algorithm to a graph, 
+we can imagine two vertices are separated by a distance of $w_e$, the weight of the edge incident to them. 
+We can imagine that a \region covers a ``vertex'' $v$; 
+for each edge incident to $v$, the \region covers  it by $y_v$, which is the dual variable.
+% We say the \region $v$ expands/shrinks when $y_v$ increases/decreases.
+The dual constraints dictate that the \regions would never overlap. When two \regions $u$ and $v$ meet on an edge $e=(u,v)$, $e$ becomes tight, i.e., $w_e=y_u+y_v$. 
+We could also imagine a cluster, called \emph{\cluster}, started with a single \region.
+When two \regions each from a different \cluster touch, the two \clusters merge.
+Like \regions, \clusters do not overlap (i.e., share any vertices). A \cluster includes multiple \regions that touch each other in one way or another.
+Because each \region $v$ corresponds to a non-zero dual variable $y_v$, we call the sum of the dual variables of the regions $\sum y_v$ within a \cluster the \csize of the \cluster.
+We say a \cluster is even/odd if it contains an even/odd number of \regions.
+If a \cluster covers virtual vertices from both left and right, we say it is \emph{attached}; 
+otherwise, it is \emph{detached}. 
+For example, in \autoref{fig:blossom-multi-grow-1.4} there are three \clusters, namely $\{A,B,C\}$, $\{D\}$, and $\{E\}$, all detached.
+
+When the model graph is unweighted, this imagination can be conveniently visualized by the \emph{\diagram}~\cite{fowler2014minimum}.
+In this diagram, the Manhattan distance between two vertices is the weight of the corresponding edge, i.e., $w_e$, as illustrated by \autoref{fig:blossom_multi_grow}.
+We note that  the model graph of a surface code is unweighted if the data qubits have i.i.d. (independent and identically distributed) Pauli-X errors.
+
+This imagination allows us to explain how the blossom algorithm works visually. Notably the algorithm actively operates on the internal of \cluster. 
+When it works on the dual problem, it adjusts \regions to increase the \csize of each \cluster. For example, \autoref{fig:blossom-multi-grow-2.6} to \autoref{fig:blossom-multi-grow-2.9}.
+Increasing the dual clusters may create a new tight edge and result in two \clusters merging into a ``larger'' one, in terms of the \csize and the number of vertices covered.
+During the adjustment, the algorithm tries to keep tight edges within blossoms and alternating trees tight.
+
+When the algorithm works on the primal problem, it only considers the tight edges. 
+It will try to find a perfect matching inside each \cluster using only tight edges. When successful, it will mark that \cluster as \emph{solved} and will not work on it (and its \regions) unless the \cluster merges with another.
+The algorithm may identify a blossom within a \cluster: an odd number of tight edges forming a circle, e.g., \autoref{fig:blossom-multi-grow-1.4}.
+The algorithm then switches to work on the dual problem again by treating the blossom as a vertex and adjusting its own dual variable, e.g., $y_{\{A,B,C\}}$ in \autoref{fig:blossom-multi-grow-1.4} to \autoref{fig:blossom-multi-grow-2.9}, along with other dual variables.
+The process repeats until all \clusters are solved.
+
+By definition, a tight edge must be inside a \cluster because a tight edge corresponds to two touching \regions.
+As a result, a matching solution to the primal problem must only include edges \emph{inside} \clusters. 
+
+\subsection{Union-Find Decoder}
+\label{sec:uf_interpretation}
+
+We next show that a union-find (UF) decoder works on the syndrome graph to draw direct comparison with the blossom algorithm, using a similar visualization as used above. It is an adaptation from the original UF decoder~\cite{delfosse2021almost} that is based on the decoding graph. (See \autoref{ap:equiv_uf})
+
+Unlike the blossom algorithm, which maintains the internal structure, i.e., \regions, for each \cluster, UF decoders only care about the number of vertices inside each cluster, i.e., whether a cluster is even or odd, and it only grows odd clusters.
+In each step of growth, a UF decoder grows all odd clusters by the same amount: it makes sure the clusters do not overlap after growth. When two clusters touch, they get merged.
+It stops growing a cluster when the cluster covers a virtual boundary vertex or becomes even. 
+When no growth is possible, a UF decoder finds a subgraph as the solution for each cluster using only fully-grown edges.
+This solution is logically equivalent to a perfect matching for the cluster that may use not-fully-grown edges.
+Taken together, the solutions for all clusters form the solution for the syndrome graph, which is logically equivalent to a perfect matching. 
+\autoref{fig:union_find_multi_grow} illustrates this procedure with the same \diagram from \autoref{fig:blossom_multi_grow}.
+Different UF decoders may find different solutions within a cluster and as a result, may produce different solutions for the syndrome graph.
+
+A UF decoder grows an odd cluster in the same way as the blossom algorithm grows a \cluster with a single ``vertex''.
+It stops updating the even clusters while the blossom algorithm stops updating the solved \clusters for which a perfect matching with tight edges is found internally. 
+Notably only a \cluster with an even number of ``vertices'' can be solved.
+
+\subsection{Relationship between Blossom and UF}
+\label{sec:relation}
+
+At a high level, the blossom algorithm-based MWPM decoder and a UF decoder appear to be similar in that both decomposes the syndrome graph into non-overlapping subgraphs, i.e., clusters; both find the solution to the syndrome graph by aggregating the solutions of the subgraphs. 
+Yet there are two key differences, which are behind the MWPM decoder's superiority in decoding accuracy and poor scalability. First, the MWPM decoder has a more sophisticated way to decompose the syndrome graph, or grow its \clusters. Second, it finds a minimum-weight perfect matching within a subgraph (\cluster) while the UF decoder is satisfied with finding a logical equivalent of a perfect matching. Intuitively, we have:
+
+
+\textbf{Observation (UF/Blossom Similarity)}: given a syndrome graph, a UF decoder approximates the blossom-based MWPM decoder in accuracy, if the following two conditions are true.
+\begin{itemize}
+    \item Condition 1: They decompose the syndrome graph in a similar way. In the extreme case, there is a bijective mapping between their clusters such that the mapped clusters cover the same subset of vertices.
+    
+    \item Condition 2: Whether a perfect matching inside a cluster is minimum-weight does not matter.
+\end{itemize}
+
+We next examine situations when these two conditions may be true or close to be true. 
+\subsubsection{Syndrome graph decomposed}
+We first examine how they decompose the syndrome graph. While there are an enormous number of ways to decompose the graph, a number of factors constrain both the UF decoder and blossom algorithm so that they may end up decomposing the graph in a similar way. 
+
+First of all, they have the same starting point: the same syndrome graph and the same set of clusters, each with a single vertex.
+
+Second, when they terminate, their clusters must satisfy the following requirements: 
+they must not overlap; each of them must have an even number of vertices because only even clusters can be solved; and a vertex is likely (but not always) to be in the same cluster as its nearest neighbor. The last is true because both grow all clusters by the same amount in each step of growth and merge clusters when they meet, forming literally clusters of vertices. 
+
+Third, syndrome graphs that get decomposed into small (and therefore similar) clusters by both the UF decoder and blossom algorithm are more likely. This is due to the assumption that data qubit errors happen randomly and independently. As a result, nontrivial measurement outcomes are more likely to be randomly scattered in the model graph in pairs, resulting in a syndrome graph in which these pairs are much farther from each other than the two vertices within a pair. Such syndrome graphs are likely to get decomposed by both the UF decoder and blossom algorithm into small clusters each covering a pair or two.
+
+Condition 1 also provides insight into why some revisions of UF decoders improve their accuracy~\cite{delfosse2021almost,huang2020fault}: these revisions allow a UF decoder to decompose a syndrome graph in a way closer to that the blossom algorithm would do.
+
+
+\vspace{1ex}\textbf{Cluster vs. subgraph}:~~Given a syndrome graph, clusters (and \clusters) are defined by the vertices they cover while a subgraph is defined by the edges it includes.
+Given a cluster, one can uniquely construct a subgraph, using the edges connecting any pair of vertices covered by the cluster. Likewise, given a subgraph, one can uniquely construct a cluster, using the vertices incidental to edges from the subgraph. Therefore, we use cluster and subgraph in an inter-exchangeable manner below, unless otherwise indicated.
+For example, when we say a perfect matching for a cluster or inside a cluster, we are talking about the perfect matching for its corresponding subgraph. 
+Interesting, if two clusters do not overlap, i.e., not sharing any vertex, their subgraphs do not overlap either, i.e., not sharing any edge. 
+
+
+\subsubsection{Equivalent matchings}
+Assume the syndrome graph has been decomposed into non-overlapping clusters each with an even number of vertices.  Two perfect matchings $P_1$ and  $P_2$ for the syndrome graph are found by finding perfect matchings inside each cluster.
+
+We know that a logical error happens when a chain of error connects left and right virtual vertices~\cite{bravyi1998quantum}, forming a nontrivial logical operator. 
+Since a detached cluster cannot have such a chain in itself by definition, a subgraph of the cluster cannot represent a nontrivial logical operator. Therefore, we have the following Lemma and Theorem. See \autoref{ap:proof} for their proofs.
+
+\noindent \textbf{Lemma (Equivalent Matchings)} if a cluster is detached, its perfect matchings are logically equivalent.
+\newline
+
+\noindent \textbf{Theorem (Equivalent Matchings)} if $P_1$ and $P_2$ are different only inside detached clusters, they are logically equivalent. \newline
+
+When some \clusters are attached, the above cluster-based method will lead to a higher logical error rate than the MWPM decoders.
+On the other hand, because usually most \clusters are detached, the difference in logical error rate can be small. Attached clusters are exponentially less likely with increasing code distance ($d$).
+
+\section{Examples}
+\label{sec:example}
+We next provide two examples in which the two conditions described above are true and as a result, a UF decoder will be as accurate as an MWPM decoder.
+\subsection{No adjacent errors}
+When no errors are present in two adjacent data qubits, both conditions of the Observation are true and a UF decoder will achieve the same accuracy as MWPM decoders.
+This is because when no errors are present in two adjacent data qubits, 
+ vertices in the syndrome graph always appear in pairs that are far from each other or a single vertex adjacent to a virtual boundary vertex.
+As a result, both a UF decoder and the blossom algorithm will decompose the syndrome graph into clusters each covering such a pair.
+
+\subsection{XZZX code}
+The XZZX surface code is a variant of the CSS surface code~\cite{bonilla2021xzzx}.
+It employs a single type of stabilizer that measures $X\otimes Z\otimes Z\otimes X$.
+Thus in the XZZX surface code, a single $X$ (or $Z$) error always generates a pair of nontrivial measurements horizontally (or vertically).
+
+We next show the two conditions presented in \S\ref{sec:interpretation} are true for the XZZX code with infinite noise bias and noiseless stabilizers, known as the code capacity noise model~\cite{landahl2011fault}. We note the two conditions are not true with the circuit-level noise model~\cite{darmawan2021practical}.
+
+Without loss of generality, we assume there are only Z errors on data qubits.
+The model graph now becomes a set of disjoint subgraphs: each is a line (or 1D chain). As a result, the syndrome graph also becomes a set of parallel lines.
+A perfect matching of the syndrome graph must comprise of perfect matchings for all such lines, each found separately.
+
+
+\paragraph{Identical Clusters.}
+An MWPM decoder grows an odd dual cluster at the same pace due to the use of the multiple tree approach~\cite{kolmogorov2009blossom}. When the dual cluster is 1D, it grows left and right at the same pace, exactly like how an odd cluster grows in a UF decoder.
+In general, an MWPM decoder may not find a perfect matching with only tight edges inside an even dual cluster. 
+However, inside a 1D even dual cluster, an edge between two adjacent vertices must be tight because of how these two vertices got merged into one cluster. As a result, an MWPM decoder can always find a perfect matching with tight edges by selecting edges between pairs of adjacent vertices. That is, in a 1D chain, an MWPM decoder always consider an even dual cluster solved, exactly like how a UF decoder treats an even cluster. 
+Thus, the MWPM and UF decoders update clusters in exactly the same way and terminate at the same clusters when the clusters are 1D.
+
+\paragraph{Equivalent Matchings}
+When a cluster is detached, the solutions from the UF decoder and the MWPM decoder never differ by a nontrivial logical operator, according to \hyperref[lemma:equivalent_matchings]{\textit{Lemma (Equivalent Matchings)}}.
+Otherwise, if the cluster is attached,  there are only two complementary perfect matchings of the cluster. Because a cluster grows left and right at the same rate, these two complementary perfect matchings must have the same weight and therefore both are MWPM. Because a UF decoder must select one of them, it will select a MWPM for the cluster and as a result, behave the same as an MWPM decoder for this cluster.    
+
+
+\section{Weighted Union-Find Decoder}
+\label{sec:weighted_uf}
+An astute reader will point out that the original union-find decoder~\cite{delfosse2021almost} works on the decoding graph. 
+Yet the interpretation provided above works on the syndrome graph. This difference is only cosmetic as we purposefully adapt the union-find decoder for the syndrome graph in order to juxtapose it with the blossom algorithm. Implementation-wise, the decoding graph is preferred for lower time complexity. See \autoref{ap:equiv_uf} for more explanation.
+
+Another, more substantial difference is that the original UF decoder works on an \emph{unweighted} decoding graph, assuming identical error probability for all data qubits. 
+As a result, it grows all odd clusters by half a unit each step.
+Yet the interpretation above does not need this assumption. Rather, it must compute the safe amount of growth for the odd clusters at each step.
+This leads to a more general union-find decoder that works with weighted model graphs, described below.
+
+Huang, Newman and Brown~\cite{huang2020fault} already report a UF decoder design that uses weighted model graphs, without explicitly identifying the link between the UF and MWPM decoders presented above. They compute the weight as $\ln((1-p)/p)$ where $p$ is the error probability, which is similar to the integer-weighted UF decoder described below. 
+
+\paragraph{Real-Weighted Union-Find Decoder}
+A real-weighted union-find decoder has a time complexity no worse than $O(N^2)$, $N$ being the number of vertices in the model graph.
+This is due to two factors: first, in each step, it has a time-complexity of at most $O(N)$ to compute the maximum safe growth such that when all odd clusters grow by that much, they will not overlap.
+The maximum safe growth is calculated such that at least one more edge is fully covered by clusters, i.e., becomes fully grown, to use the language of Delfosse and Nickerson~\cite{delfosse2021almost}.
+Second, it takes at most $O(N)$ steps to finish grow all clusters because each step will get at least one edge covered by the clusters while there are $O(N)$ uncovered edges to begin with.
+
+A real-weighted union-find decoder should have  better time complexity, worst-case and average, than the blossom algorithm, for three reasons.
+First, the blossom algorithm works on the syndrome graph, which has $O(N^2)$ edges, while the union-find decoder works on the model graph, which has $O(N)$ edges.
+Second, the \clusters in the blossom algorithm may shrink, while the clusters in the union-find decoder only grow. The possibility of shrinking may lead to more steps before finish growing all clusters.
+Finally, the blossom algorithm maintains the structure inside each cluster. As a result, it merges two clusters with a time complexity proportional to the cluster size, while the real-weighted UF decoder merges two clusters within constant time.
+
+
+\paragraph{Integer-Weighted Union-Find Decoder}
+When the weights of the model graph are small integers, union-find decoders can be much faster in terms of the worst-case time complexity.
+This is because the safe growth computation becomes trivial: 
+all odd clusters grow by half a unit each step, just like in the original union-find decoder.
+Each edge with weight $w_e$ in the model graph is at most visited $O(w_e)$ times.
+Given the maximum weight $w_{\max}$, the overall worst-case time complexity of integer-weighted union-find decoder is $O(N \cdot (\alpha(N) + w_{\max}))$ where $\alpha(N)$ is an almost constant inverse Ackermann’s function~\cite{delfosse2021almost}.
+As a result, the average decoding time complexity must be between $O(N)$ and $O(N \cdot (\alpha(N) + w_{\max}))$, which is almost linear.
+
+On the other hand, we can see the worst time complexity of an integer-weighted UF decoder grows with $w_{\max}$ while that of a real-weighted union-find decoder does not. 
+Therefore, when $w_{\max}$ is large, a real-weighted union-find decoder can be faster than an integer-weighted one when the integer weights are too large.
+
+
+\paragraph{Implementation}
+We have implemented and open-sourced both weighted UF decoders described above~\cite{qec-playground}.
+Our implementation of the real-weighted UF decoder uses the integer data type (64-bit signed integer) to avoid rounding errors in the floating point data type, a strategy borrowed from the blossom V algorithm implementation~\cite{kolmogorov2009blossom}.
+For both weighted UF decoders, we use an integer $w_{\max}$ to represent the largest weight $W = \max_e{w_e}$ and compute the integer weight for an edge of weight $w_e$ as $\lfloor w_e /W * w_{\max}\rfloor$.
+The only difference between our implementations of the real-weighted and integer-weighted UF decoders lies in how they compute the growth when growing the odd clusters: the real-weighted UF decoder computes the maximum safe growth while the integer-weighted one grows them by one each time, as explained in~\S\ref{sec:weighted_uf}.
+As a result, they have the same accuracy given the same scaling $w_{\max}$.

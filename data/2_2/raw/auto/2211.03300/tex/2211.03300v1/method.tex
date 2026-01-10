@@ -1,0 +1,356 @@
+\section{Heterogeneous Federated Learning with Memorable Data Semantics}
+In this section, we first introduce the overall blueprint of our \NAME~system. Then, the concepts and design details of the supporting techniques are described respectively.
+
+\subsection{The Overall System}
+The system overview of \NAME~is illustrated in Figure \ref{fig:framework}. The basic hardware facilities include various types of smart sensors, LPWAN base stations, and an FL server in the cloud. 
+Smart sensors are advanced sensors capable of sensing, storing, processing, and transmitting streaming sensor data from surrounding objects.
+As factory automation advances, more sophisticated sensors are driving industrial manufacturing (e.g. smart cameras, drones, and robots) to work in smarter ways. For example, the integration of FPGA, ASIC (TPU, NPU, VPU, etc.) circuit chips and AI software enables sensors to have sufficient computational resources and storage capacity to run ML algorithms, which makes them intelligent. 
+
+These smart sensors cache historical data semantics and run the SCC module to compensate and calibrate local model training, then the local model parameters are synchronized following the LASP protocol. They also establish wireless communication channels with nearby LPWAN base stations, while LPWAN gateways connect to the cloud FL server over the backbone network.
+LPWAN, typically NarrowBand IoT, LTE-M, etc., realizes high reliability, long-distance coverage (up to more than 50km) of wireless transmission with low power consumption, and has an excellent ability to penetrate obstacles, making it one of the most promising technologies for smart city and manufacturing. Moreover, communication between smart sensors can also be achieved through LPWAN base station relays.
+
+The cloud FL server can be a general application server that runs basic FL functional modules such as device selection, model distribution, aggregation, and updating, as well as the ICG manager and the STP scheduler proposed in this work. The ICG manager decides the grouping strategy of sensors, where the strategy will serve as the basis for STP to schedule the training topology between the devices.
+
+Here we briefly summarize the workflow of \NAME. First, We introduce the LASP synchronization protocol. LASP alternately performs two synchronization phases, that is, full synchronization and calibration. To distinguish these two phases, we define $T$ as the round interval at which full synchronization is performed. In other words, $T-1$ calibration rounds should be performed after every full synchronization round. 
+
+At the beginning of training, the FL server initializes global model parameters and creates the STP scheduler to coordinate training between devices. Then in each full synchronization round, the STP scheduler calls the ICG module to group sensor devices, and some of the groups will be selected to participate in this round and subsequent $T-1$ calibration rounds of training. In addition, according to the LASP protocol, STP runs in \texttt{FULL\_SYNC} mode and the complete model parameters will be synchronized between devices. 
+
+Instead, in a calibration round, ICG is off (keep using previously assigned groups) but SCC is on. SCC uses the compressed semantics of cached historical data to calibrate classifier parameters, in order to avoid it overfitting to recent data but forgetting past knowledge, with a view to solving the learning forgetting problem. Moreover, LASP sets STP to run in \texttt{PART\_SYNC} mode at this time, in which only the parameters of classifiers could be synchronized. 
+
+The overall training process is controlled by the STP scheduler, which decides how and in which order the devices within and between groups deliver their local models. These steps will repeat for $R$ times to obtain a well-trained FL model.
+We summarize the relationship of the four proposed techniques (STP, ICG, SCC, and LASP) in Algorithm \ref{alg:hfedms}, and their design details will be elaborated in subsequent subsections.
+
+\subsection{STP: Sequential-to-Parallel Training} 
+
+\begin{figure*}
+\centering
+\includegraphics[width=0.75\textwidth]{pic/sequential-to-parallel.pdf}
+\caption{A simplified example of STP workflow. The model within each group is trained in sequence, while the models between groups are trained in parallel. At round $r$, the number of groups is increased according to $f(\cdot)$, and clients are shuffled after each regroup.}
+\label{fig:stp}
+\end{figure*}
+
+The problem of data heterogeneity has been a hot topic in FL for a long time, and unfortunately, in industrial manufacturing, heterogeneous data can be found everywhere. This problem arises from clients' preferences for different objects, actions, and properties, its impact is reflected in skewed local data distributions and can impair the convergence of many common parallel algorithms, notably FedAvg\cite{zhao2018federated}. Conversely, some work\cite{duan2019astraea} has shown that training clients sequentially is less affected by data heterogeneity, that is, clients train local models received from their predecessor clients and deliver the trained local models to their successor clients. In some cases, such as the local dataset is properly shuffled and traversed for only one epoch, this sequential training mode is theoretically equivalent to the centralized SGD algorithm, making it inherently robust to data heterogeneity.
+
+Following this idea, Duan et al.\cite{duan2019astraea} proposed an intuitive approach, in which they assign clients to multiple groups and force the overall data distributions between the groups to be homogeneous. Then, faced with clients that still have heterogeneous data in the group, they adopt the sequential training mode to jointly train a model. On the other hand, parallel algorithms (e.g., FedAvg\cite{mcmahan2017communication}) can be used between groups as their data becomes homogeneous. Their approach obtains noticeable gains in model performance on non-i.i.d. data. However, they only considered a static environment where local datasets do not change, making it unsuitable for highly dynamic industrial practices such as streaming data.
+
+In this section, we present a more dynamic \textit{Sequential-to-Parallel (STP)} training mode to accommodate the ever-changing streaming data. An example of STP workflow is shown in Figure \ref{fig:stp}. In each full synchronization round $r(\forall r\le R, r \bmod T=0)$, STP reassigns clients into $M=f(r)$ groups and shuffles their order, where $f(\cdot)$ is a growing function that controls the number of groups. Similarly, the clients within each group are trained in sequence, and the clients between groups are trained in parallel. As rounds progress, clients are split into more groups and each group contains fewer clients. This means that the FL process is gradually transforming from (fully) sequential to (fully) parallel training.
+
+The choice of function $f(\cdot)$ has a non-negligible effect on the performance of STP. Here we recommend three typical growth functions: linear (smooth), logarithmic (first fast and then slow), and exponential (first slow and then fast), as follows:
+\begin{align}
+\nonumber
+&\mathrm{Linear:} & f(r)=&\beta\left\lfloor\alpha (\frac{r}{T}-1)+1\right\rfloor, \\
+\nonumber
+&\mathrm{Logarithmic:} & f(r)=&\beta\left\lfloor\alpha\ln (\frac{r}{T})+1\right\rfloor, \\
+\nonumber
+&\mathrm{Exponential:} & f(r)=&\beta\lfloor(1+\alpha)^{\frac{r}{T}-1}\rfloor,
+\end{align}
+where $T$ is the round interval, $\alpha$ is a real number controlling the growth rate, and $\beta$ is an integer controlling the initial number of groups and the growth span. In the experiments, we will explore the best growth function and recommend the corresponding $\alpha,\beta$ settings.
+
+The detailed implementation is given in Algorithm \ref{alg:stp}. To simplify the description, we only consider the case where \texttt{CALIBRATION\_ENABLED=FALSE} and the sync mode is \texttt{FULL\_SYNC} (i.e., a full synchronization round), while other cases will be explained in subsequent subsections. In each full synchronization round $r (\forall r\le R, r \bmod T=0)$, STP reassigns clients to $M=f(r)$ groups via ICG and selects a small proportion of $\kappa$ groups at random to participate in the next $T$ rounds of training. Then, the selected groups perform the following operations in parallel: The first client of each group pulls the latest global model from the FL server and delivers it to the next client in order after local training, until the last client pushes the sequentially trained model to the FL server. When receiving model parameters from preorder clients, these clients traverse the batch of streaming data just captured for one epoch, and train the model using typical optimizers such as SGD and Adam. Finally, the models of all groups are aggregated at the FL server to update the global model.
+
+\begin{algorithm}[t]
+\normalem
+\caption{Sequential-to-Parallel Scheduler (STP)}
+\label{alg:stp}
+\KwIn{The current round $r$, the group growth function $f(\cdot)$, the group sample ratio $\kappa$, the learning rate $\eta$, the batch size $b$.}
+\KwOut{The updated federated model $\omega^{r}$.}
+\If{{\rm\texttt{GROUPING\_ENABLED}}}{
+Increase the number of groups $M=f(r)$; \\
+$\mathcal{G}\gets\Call{\textbf{Inter-Cluster-Grouping}}{M}$; \\
+Select a subset of groups $\tilde{\mathcal{G}}\subset\mathcal{G}$ with proportion $\kappa$;
+}
+\For{each group $\mathcal{G}_{m}$ {\rm\textbf{in}} $\tilde{\mathcal{G}}$ in parallel}{
+\If{\rm\texttt{FULL\_SYNC}}{
+Let $\omega$ denote the parameters of the full model;
+}
+\ElseIf{\rm\texttt{PART\_SYNC}}{
+Let $\omega$ denote the parameters of the classifier;
+}
+The first client $\mathcal{C}_m^1$ in $\mathcal{G}_{m}$ pulls $\omega_{m}^{1}\gets\omega^{r-1}$; \\
+\For{each client $\mathcal{C}_{m}^{k}$ {\rm\textbf{in}} $\mathcal{G}_m$ in sequence}{
+Capture a batch of streaming data $\mathcal{D}_{m}^{k}$; \\
+\If{\rm\texttt{CALIBRATION\_ENABLED}}{
+Construct the calibration dataset $\tilde{\mathcal{D}}_{m}^{k}\gets$\textsc{\textbf{Semantic-Compression-and-Compensation}}$(\mathcal{D}_{m}^{k})$; \\
+}
+Train $\omega_m^k$ for one epoch using SGD or Adam with learning rate $\eta$ and mini-batch size $b$; \\
+Send $\omega_{m}^{k}$ to next client $\mathcal{C}_m^{k+1}$, $\omega_{m}^{k+1}\gets\omega_{m}^{k}$;
+}
+The last client $\mathcal{C}_m^{|\mathcal{G}_m|}$ uploads $\omega_m^{|\mathcal{G}_m|}$;
+}
+Server aggregates $\omega^{r}\gets\frac{1}{\kappa M}\sum_{\forall\mathcal{G}_m\in\tilde{\mathcal{G}}}{(\omega_m^{|\mathcal{G}_m|})}$; \\
+Server scatters $\omega^{r}$ to clients if in \texttt{FULL\_SYNC} mode; \\
+\Return $\omega^{r}$;
+\end{algorithm}
+
+This design of STP has several advantages:
+\begin{enumerate}
+\item[(a)] STP solves the problem of data heterogeneity because the negative effects of within-group heterogeneity are attenuated by sequential training and between-group heterogeneity is removed by the grouping mechanism.
+\item[(b)] Clients are regrouped every $T$ rounds, which makes STP dynamic and adaptable to local changing streaming data.
+\item[(c)] The growing number of groups improves system parallelism, which can speed up training when FL is close to convergence. Moreover, this design prevents forgetting caused by a long ``chain of clients'' in a group. That is, the model may forget the data of previous clients and overfit the data of subsequent clients.
+\item[(d)] STP shuffles clients after each grouping, preventing models from learning interfering information, such as the order of clients.
+\end{enumerate}
+
+\subsection{ICG: Inter-Cluster Grouping}
+As described in the previous section, STP should regroup clients at each full synchronization round, and these groups are required to have homogeneous data distributions. These strict requirements place higher demands on the quality and runtime of the solution, making it a difficult problem to solve. In this subsection, we first formulate the mathematical model of the client grouping problem, and then introduce our fast ICG algorithm to solve it.
+
+Consider an $\mathcal{F}$-class FL classification task involving $K$ clients that should be assigned to $M$ groups. These clients (sensors) are capturing streaming data all the time, and they batch the enqueued data to train local models in every round. When grouping is to be performed, the client reports a summary of the statistical distribution of the current batch of data to the ICG manager. This summary will serve as the basis for ICG to group clients. 
+
+Our goal is to find a grouping strategy $\mathbf{x}\in\mathbb{I}^{M\times K}$ in the 0-1 space $\mathbb{I}=\{0,1\}$ to minimize the difference in class distributions of all groups, where $\mathbf{x}_m^k=1$ represents the client $k$ is assigned to the group $m$, $\mathcal{V}\in(\mathbb{Z^+})^{\mathcal{F}\times K}$ is the class distribution matrix composed of $\mathcal{F}$-dimensional class distribution vectors of $K$ clients, $\mathcal{V}_m\in(\mathbb{Z}^+)^{\mathcal{F}\times 1}$ represents the overall class distribution of group $m$, and $\left<\cdot,\cdot\right>$ represents the distance between two class distributions. The problem can be formulated as follows:
+\begin{align}
+\underset{\mathbf{x}}{\mathrm{minimize}}\qquad & z=\sum_{m_1=1}^{M-1}\sum_{m_2=m_1+1}^{M}<\mathcal{V}_{m_1},\mathcal{V}_{m_2}>, \label{eq:objective}\\
+\mathrm{s.t.}\qquad & M=f(r), \label{eq:group-number}\\
+& \sum_{k=1}^{K}\mathbf{x}_m^k\le \left\lceil \frac{K}{M} \right\rceil \quad \forall m=1,\cdots,M, \label{eq:group-capacity}\\
+& \sum_{m=1}^{M}{\mathbf{x}_m^k}=1 \qquad\quad \forall k=1,\cdots,K, \label{eq:client-conflict}\\
+& \mathcal{V}_m=\sum_{k=1}^{K}{\mathbf{x}_m^k\mathcal{V}^k}\quad \forall m=1,\cdots,M, \label{eq:overall-dist}\\
+& \mathbf{x}_m^k\in\{0,1\}, ~k\in[1,K], ~m\in[1,M].
+\label{eq:variable-constraint}
+\end{align}
+Constraint \eqref{eq:group-capacity} simplifies the problem and ensures that the groups have similar or equal size $\left\lceil \frac{K}{M} \right\rceil$. Constraint \eqref{eq:client-conflict} ensures that each client can only be assigned to one group at a time. The overall class distribution $\mathcal{V}_m$ of the group $m$ is defined by Eq. \eqref{eq:overall-dist}, where $\mathcal{V}^k\in\mathcal{V}$ is the class distribution vector of client $k$. This problem can reduce to an NP-hard bin packing problem, thus it is almost impossible to find the optimal solution within a polynomial time.
+
+To solve this problem, we simplify the original problem to obtain a constrained clustering problem. Consider a constrained clustering problem with $K$ points and $L$ clusters, where all clusters are of the same size $\lfloor K/L\rfloor$. We make the following assumptions.
+
+\vspace{1mm}
+\begin{assumption}
+\label{icg-assumption}
+(a) $K$ is divisible by $L$;
+(b) Take any point $\mathcal{V}^m_l$ from cluster $l$, the squared $l_2$-norm distance $\|\mathcal{V}^m_l-C_l\|_2^2$ between the point $\mathcal{V}^m_l$ and its cluster centroid $C_l$ is bounded by $\sigma_l^2$.
+(c) Take one point $\mathcal{V}^m_l$ from each of $L$ clusters at random, the sum of deviations of each point from its cluster centroid $\epsilon^m=\sum_{l=1}^{L}(\mathcal{V}^m_l-C_l)$ satisfies $\mathbb{E}[\epsilon^m]=0$.
+\end{assumption}
+
+\vspace{1mm}
+\begin{definition}[Group Centroid]\label{def:group-centroid}
+Given $L$ clusters of equal size, let group $m$ be constructed from one point randomly sampled from each cluster $\{\mathcal{V}^m_1,\cdots,\mathcal{V}^m_L\}$. Then, the centroid of  group $m$ is defined as $C^m=\frac{1}{L}\sum_{l=1}^{L}\mathcal{V}^m_l$.
+\end{definition}
+
+\vspace{1mm}
+\begin{proposition}\label{prop:centroid}
+Let Assumption \ref{icg-assumption} hold, suppose the centroid of cluster $l$ is $C_l=\frac{L}{K}\sum_{i=1}^{K/L}{\mathcal{V}_l^i}$ and the global centroid is $C_\mathrm{global}=\frac{1}{L}\sum_{l=1}^{L}{C_l}$. We have:
+\begin{enumerate}
+\item The group and global centroids are expected to coincide, $\mathbb{E}[C^m]=C_\mathrm{global}$.
+\item The error $\|C^m-C_\mathrm{global}\|_2^2$ between the group and global centroids is bounded by $\frac{1}{L^2}\sum_{l=1}^{L}{\sigma_l^2}$.
+\end{enumerate}
+\end{proposition}
+\vspace{1mm}
+
+\begin{algorithm}[t]
+\normalem
+\caption{Inter-Cluster-Grouping (ICG)}\label{alg:icg}
+\KwIn{The set of clients $\mathcal{C}$, the number of clients $K$, the reported data distribution $\mathcal{V}^k$ for each client $k$, the number of groups $M$.}
+\KwOut{The grouping strategy $\mathcal{G}$.}
+Sample $L\cdot\lfloor\frac{K}{L}\rfloor$ clients from $\mathcal{C}$ at random to satisfy Assumption \ref{icg-assumption}, where $L=\lfloor\frac{K}{M}\rfloor$; \\
+\Repeat{$C_l$ converges}{
+\textsc{Cluster Assignment:} Fix the cluster centroid $C_l$ and optimize $\mathbf{y}$ in Eq. \eqref{eq:ccp-objective} to Eq. \eqref{eq:ccp-value}; \\
+\textsc{Cluster Update:} Fix $\mathbf{y}$ and update the cluster centroid $C_l$ as follows, $$C_l\gets\frac{\sum_{k=1}^{K}{\mathbf{y}_l^k\mathcal{V}^k}}{\sum_{k=1}^{K}{\mathbf{y}_l^k}} \quad \forall l=1,\cdots,L;$$}
+\For{$m=1,\cdots,M$}{
+\textsc{Group Assignment:} Sample one client from each cluster at random without replacement to construct group $\mathcal{G}_m$; \\
+Shuffle the order of clients in group $\mathcal{G}_m$;
+}
+\Return $\mathcal{G}=\{\mathcal{G}_1,\cdots,\mathcal{G}_{M}\}$;
+\end{algorithm}
+
+Please refer to Appendix \ref{proof:prop1} for the proof. Proposition \ref{prop:centroid} indicates that there exists a grouping strategy $\tilde{\mathbf{x}}$ and $\mathcal{V}_{m_1}=\sum_{k=1}^{K}\tilde{\mathbf{x}}_{m_1}^k\mathcal{V}^k=LC^{m_1}$, $\mathcal{V}_{m_2}=\sum_{k=1}^{K}\tilde{\mathbf{x}}_{m_2}^k\mathcal{V}^k=LC^{m_2}$ ($\forall m_1\ne m_2$), so that the objective in Eq. \eqref{eq:objective} turns to $z=\sum_{m_1\ne m_2}L<C^{m_1},C^{m_2}>$  and the expectation value reaches 0. This motivates us to use the constrained clustering model to solve $\tilde{\mathbf{x}}$. Therefore, we consider the constrained clustering problem defined as follows,
+\begin{align}
+\underset{\mathbf{y}}{\mathrm{minimize}}\qquad & \sum_{k=1}^{K}\sum_{l=1}^{L}\mathbf{y}^k_l\cdot\left(\frac{1}{2}\|\mathcal{V}^k-C_l\|_2^2\right), \label{eq:ccp-objective}\\
+\mathrm{s.t.}\qquad & \sum_{k=1}^{K}\mathbf{y}_l^k=\frac{K}{L} \qquad \forall l=1,\cdots,L, \label{eq:ccp-least}\\
+& \sum_{l=1}^{L}\mathbf{y}_l^k=1 \qquad\quad \forall k=1,\cdots,K, \label{eq:ccp-client}\\
+& \mathbf{y}_l^k\in\{0,1\}, ~k\in[1,K], ~l\in[1,L], \label{eq:ccp-value}
+\end{align}
+where $\mathbf{y}\in\mathbb{I}^{L\times K}$ is a selector variable, $\mathbf{y}_l^k=1$ means that client $k$ is assigned to cluster $l$ while 0 means not, $C_l$ represents the centroid of cluster $l$. Eq. \eqref{eq:ccp-objective} is the standard clustering objective, which aims to assign $K$ clients to $L$ clusters so that the sum of the squared $l_2$-norm distance between the class distribution vector $\mathcal{V}^k$ and its nearest cluster centroid $C_l$ is minimized. Constraint \eqref{eq:ccp-least} ensures that each cluster has the same size $\frac{K}{L}$. Constraint \eqref{eq:ccp-client} ensures that each client can only be assigned to one cluster at a time. In this simplified problem, Constraint \eqref{eq:client-conflict} is relaxed to $\sum_{m=1}^{M}{\mathbf{x}_m^k}\le 1$ to satisfy the assumption that $K/L$ is divisible.
+
+The problem Eq. \eqref{eq:ccp-objective}-\eqref{eq:ccp-value} can be further modeled as a minimum cost flow (MCF) problem and solved by network simplex algorithms \cite{bradley2000constrained}. Then we can alternately perform cluster assignment and cluster update to optimize $\mathbf{y}_l^k$ and $C_l (\forall k,l)$, respectively. Finally, we construct $M$ groups and shuffle their clients. Each group consists of one client randomly sampled from each cluster without replacement, so that their group centroids are expected to coincide with the global centroid. The pseudo-code is given in Algorithm \ref{alg:icg}. The complexity of ICG is $\mathcal{O}(\frac{K^6\mathcal{F}\tau}{M^2}\log{Kd})$, where $d=\max\{\sigma_l^2 | \forall l\in[1,L]\}$, and $\tau$ is the number of  iterations. In preliminary experiments, ICG runs fast and can complete group assignment within 100 milliseconds, with $K=368,M=52,\mathcal{F}=62$ and $\tau=10$.
+
+\subsection{SCC: Semantic Compression \& Compensation}
+Traditional ML has a fixed dataset that can be traversed over many epochs, but this is not true in industrial applications because sensors are constantly collecting data and there is not enough memory to store this long-term streaming data. As a result, training samples should be discarded after being used once, and the ML model will gradually forget the information of historical samples, which is called learning forgetting (or catastrophic forgetting)\cite{french1999catastrophic}.
+
+In this subsection, we propose a semantic-based compression and compensation approach, named SCC, to make long-term historical data recordable and calibrate classifier parameters to alleviate forgetting. As illustrated in Figure \ref{fig:scc}, SCC stores the semantic features extracted by the feature representation layer and adaptively compensates for outdated semantics. The semantic features are low-dimensional feature embeddings of the raw input data (e.g., vectors of dimension 100), and their number of bytes stored is much less than the raw data (e.g., HD video streams), making the long-term data streams lightweight and recordable. Then these cached data semantics can be used to extend the current data semantics and calibrate the training of classifier parameters.
+
+\begin{figure*}
+\centering
+\includegraphics[width=.7\textwidth]{pic/scc.pdf}
+\caption{Illustration of SCC workflow. In a calibration round, the client backs up the outdated extractor to estimate the semantic drift and uses it to compensate for historical semantics. Then, the latest semantics and historical semantics are fused to train the classifier.}
+\label{fig:scc}
+\end{figure*}
+
+Let us formally describe the workflow of SCC. Let $\theta$ be the parameters of the classifier, $\phi$ be the parameters of the feature extractor, $\omega=\{\phi,\theta\}$ be the parameters of the full model, and $g,h,f$ be the forward functions, respectively. The classification task can be represented by $$f(x, \omega)=g(z, \theta), z=h(x, \phi),$$ where $z$ is the semantic feature in a low-dimensional latent space of data point $x$.
+
+Suppose that at the $r$-th round ($r\bmod T=0$, i.e., a full synchronization round), the group $\mathcal{G}_m$ is selected and the global parameters of the extractor after running STP is $\phi^r$. Then, in the subsequent $l$-th calibration round ($l<T$), for any client $\mathcal{C}_m^k$ in the group $\mathcal{G}_m$, let $\mathcal{D}_m^k(r+l)$ denote the batch of streaming data available in current round, and $x_i\in\mathcal{D}_m^k(r+l)$ denote the $i$-th training sample in $\mathcal{D}_m^k(r+l)$. Furthermore, we define $\tilde{r}$ ($\tilde{r}<r$, also a full synchronization round) as the previous round in which the client $\mathcal{C}_m^k$ was also selected, and $\phi^{\tilde{r}}$ as the corresponding global parameters at that round.
+
+As shown in Figure \ref{fig:scc}, a semantic database runs on the client to help store semantic features and is represented by $\mathcal{Z}_m^k$. Then, a naive idea emerged, that is to directly fuse the current data semantics $\mathcal{S}_m^k(r+l)=h(\mathcal{D}_m^k(r+l),\phi_m^{k, r+l-1})$ with the historical semantics $\mathcal{Z}_m^k$, and use the fused one to train the classifier $\theta_m^{k, r+l-1}$, where $\phi_m^{k, r+l-1}=\phi^{r},\forall l=1,\cdots,T-1$, since the feature extractor $\phi$ is frozen in calibration rounds. 
+
+However, the feature extractor will be updated every $T$ rounds, which means that we are fusing the historical semantics extracted by the outdated extractor with the latest semantics extracted by the current extractor. This mismatch can lead to confusion. More formally, suppose that at the $\tilde{r}$-th round, the semantics $\mathcal{Z}_m^k$ is generated using the dataset $\mathcal{D}_m^k(\tilde{r})$ and the parameters $\phi^{\tilde{r}}$, then in the $(r+l)$-th round ($r-\tilde{r}\ge T$), the historical semantics $\mathcal{Z}_m^k$ and their correct values ${\mathcal{Z}_{m}^{k}}^{*}$ should be
+\begin{align}
+\nonumber
+&\mathcal{Z}_m^k=h(\mathcal{D}_m^k(\tilde{r}),\phi^{\tilde{r}}), \\
+\nonumber
+&{\mathcal{Z}_m^k}^*=h(\mathcal{D}_m^k(\tilde{r}),\phi^r), \\
+\nonumber
+\text{s.t.~}& r-\tilde{r}\ge T \text{~and~} \phi^{\tilde{r}}\ne\phi^r.
+\end{align}
+Clearly, we have $\mathcal{Z}_m^k\ne{\mathcal{Z}_m^k}^*$ and there exists a gap between them. For ease of understanding, we consider a feature extractor $h(x,\phi)$ composed of fully connected layers or convolutional layers (excluding nonlinear layers), where $\phi=\{\phi_1, \phi_2, \cdots, \phi_L\}$, $\phi_i$ denotes the parameters of the $i$-th layer in $\phi$, and $L=|\phi|$ denotes the number of layers in $\phi$. The forward function $h(x,\phi)$ can be written as follows,
+\begin{equation}
+\nonumber
+h(x,\phi)=x\cdot\phi_1\cdot\phi_2\cdots\phi_L.
+\end{equation}
+To simplify the analysis, we define $\Phi=\prod_{i=1}^{L}{\phi_i}$ and have $h(x,\phi)=x\cdot\Phi$. Then, the gap ${\mathcal{Z}_m^k}^*-\mathcal{Z}_m^k$ can be given by
+\begin{align}
+\nonumber
+{\mathcal{Z}_m^k}^*-\mathcal{Z}_m^k&=h(\mathcal{D}_m^k(\tilde{r}),\phi^r)-h(\mathcal{D}_m^k(\tilde{r}),\phi^{\tilde{r}}) \\
+\nonumber
+&=\mathcal{D}_m^k(\tilde{r})\cdot\Phi^r-\mathcal{D}_m^k(\tilde{r})\cdot\Phi^{\tilde{r}} \\
+&=\mathcal{D}_m^k(\tilde{r})\cdot(\Phi^r-\Phi^{\tilde{r}}) \label{eq:scc-gap-l3}.
+\end{align}
+Nonetheless, Eq. \eqref{eq:scc-gap-l3} still cannot be used to compensate for $\mathcal{Z}_m^k$ because the historical data $\mathcal{D}_m^k(\tilde{r})$ is unknown. Therefore, we define the semantic drift $\Delta$ as the expectation of ${\mathcal{Z}_m^k}^*-\mathcal{Z}_m^k$ and make Assumption \ref{scc-assumption} to bridge the relationship between the historical data $\mathcal{D}_m^k(\tilde{r})$ and the current data $\mathcal{D}_m^k(r+l)$.
+
+\vspace{1mm}
+\begin{assumption}
+\label{scc-assumption}
+For any client $\mathcal{C}_m^k$, the data batches used in any two rounds $r_1,r_2$ have similar distributions in expectation, that is, 
+$\mathbb{E}_{x_i}[\mathcal{D}_m^k(r_1)]=\mathbb{E}_{x_i}[\mathcal{D}_m^k(r_2)]+\Xi,\forall r_1\ne r_2$ where $\Xi$ is a tensor of deviations with $|\Xi|\rightarrow 0$ and $\mathbb{E}_{r}[\Xi]=\boldsymbol{0}$.
+\end{assumption}
+\vspace{1mm}
+
+This assumption is reasonable because the statistical distribution of industrial data is often stable, and dynamic personalization is not the focus of this work. Let Assumption \ref{scc-assumption} hold, the semantic drift $\Delta$ can be written as follows,
+\begin{align}
+\nonumber
+\Delta&=\mathbb{E}_{x_i}[{\mathcal{Z}_m^k}^*-\mathcal{Z}_m^k]=\mathbb{E}_{x_i}[\mathcal{D}_m^k(\tilde{r})\cdot(\Phi^r-\Phi^{\tilde{r}})] \\
+\nonumber
+&=\mathbb{E}_{x_i}[\mathcal{D}_m^k(\tilde{r})]\cdot(\Phi^r-\Phi^{\tilde{r}}) \\
+\nonumber
+&=\mathbb{E}_{x_i}[\mathcal{D}_m^k(r+l)]\cdot(\Phi^r-\Phi^{\tilde{r}})+\Xi\cdot(\Phi^r-\Phi^{\tilde{r}}),
+\end{align}
+then we can use $\Delta$ to compensate for the stored historical semantics $\mathcal{Z}_m^k$,
+\begin{align}
+{\mathcal{Z}_m^k}^{*}&=\mathcal{Z}_m^k+\Delta \label{eq:scc-compensate} \\
+\nonumber
+&=\mathcal{Z}_m^k+\mathbb{E}_{x_i}[\mathcal{D}_m^k(r+l)]\cdot(\Phi^r-\Phi^{\tilde{r}})+o(\Phi^r-\Phi^{\tilde{r}}),
+\end{align}
+where $o(\Phi^r-\Phi^{\tilde{r}})$ is a negligible term close to zero.
+
+\vspace{1mm}
+\textit{(a) Semantic Compensation.} 
+Following the design of Eq. \eqref{eq:scc-compensate}, we backup the outdated parameters $\phi^{\tilde{r}}$ on the client to assist with semantic compensation. It should be noted that not all historical parameters will be backed up. To avoid ambiguity, we use $r_{\mathrm{bak}}$ instead of $\tilde{r}$ to represent the previous (full synchronization) round when the current client was selected, and use $r$ instead of $r+l$ to represent the current (calibration) round. A standard semantic compensation process can be implemented by
+\begin{gather}
+\nonumber
+\mu^r\gets\mathbb{E}_{x_i}[h(x_i,\phi^{r-1})|(x_i, y_i)\in\mathcal{D}_m^k(r)], \\
+\nonumber
+\mu^{r_{\mathrm{bak}}}\gets\mathbb{E}_{x_i}[h(x_i,\phi^{r_{\mathrm{bak}}})|(x_i,y_i)\in\mathcal{D}_m^k(r)], \\
+\nonumber
+{\mathcal{Z}_m^k}^{*}\gets\mathcal{Z}_m^k+(\underbrace{\mu^r - \mu^{r_{\mathrm{bak}}}}_{\Delta}).
+\end{gather}
+
+Furthermore, for a classification task, we can estimate the semantic drift $\Delta_c$ of different classes $c\in\mathcal{F}$ separately for more accurate compensation,
+\begin{gather}
+\mu_c^r\gets\mathbb{E}_{x_i}[h(x_i,\phi^{r-1})|(x_i,y_i)\in\mathcal{D}_m^k(r), y_i=c], \label{eq:scc-compensation-1}\\
+\mu_c^{r_{\mathrm{bak}}}\gets\mathbb{E}_{x_i}[h(x_i,\phi^{r_{\mathrm{bak}}})|(x_i,y_i)\in\mathcal{D}_m^k(r), y_i=c], \\
+{\mathcal{Z}_m^k}^{*}(c)\gets\mathcal{Z}_m^k(c)+(\underbrace{\mu_c^r - \mu_c^{r_{\mathrm{bak}}}}_{\Delta_c}), \forall c\in\mathcal{F}. \label{eq:scc-compensation-3}
+\end{gather}
+
+\vspace{1mm}
+\begin{proposition}
+\label{prop:semantic-drift}
+Given Assumption \ref{scc-assumption} and any two adjacent calibration rounds $r_1$ and $r_2$, there exists $r=kT, k\in\mathbb{Z}^+$ such that $r<r_1<r_2<r+T$ and $\Phi^r=\Phi^{{r_1}-1}=\Phi^{{r_2}-1}$, and then we have the difference of semantic drifts $\Delta^{r_1}-\Delta^{r_2}$,
+\begin{gather}
+\nonumber
+\mathbb{E}_r[\Delta^{r_1}-\Delta^{r_2}]=\boldsymbol{0}, \\
+\nonumber
+\mathrm{Cov}(\Delta^{r_1}-\Delta^{r_2})=(\Phi^r-\Phi^{\tilde{r}})^T\cdot\mathbb{E}_r[\Xi^T\cdot\Xi]\cdot(\Phi^r-\Phi^{\tilde{r}})\rightarrow\boldsymbol{0},
+\end{gather}
+where 
+\begin{align}
+\nonumber
+\Delta^{r_1}&=\mathbb{E}_{x_i}[\mathcal{D}_m^k(r_1)]\cdot(\Phi^{{r_1}-1}-\Phi^{\tilde{r}}), \\
+\nonumber
+\Delta^{r_2}&=\mathbb{E}_{x_i}[\mathcal{D}_m^k(r_2)]\cdot(\Phi^{{r_2}-1}-\Phi^{\tilde{r}}).
+\end{align}
+\end{proposition}
+\vspace{1mm}
+
+\begin{algorithm}[t]
+\normalem
+\caption{Semantic-Compression-and-Compensa-tion (SCC)}\label{alg:lasp}
+\KwIn{Client $\mathcal{C}_m^k$, current round $r$, current dataset $\mathcal{D}_m^k$, interval $T$, storage capacity $Q$.}
+\KwOut{Calibration dataset $\tilde{\mathcal{D}}_m^k$.}
+Freeze the local feature extractor $\phi_m^{k,r-1}$; \\
+Extract the semantics of the current dataset
+$\mathcal{S}_m^k(r)=h(\mathcal{D}_m^k(r),\phi_m^{k,r-1})$; \\
+\% Compensation occurs in the first calibration round. \\
+\If{$r\bmod T=1$}{
+\textsc{Semantic Compensation:} Compensate the historical semantics by Eqs. \eqref{eq:scc-compensation-1}-\eqref{eq:scc-compensation-3} and obtain ${\mathcal{Z}_m^k}^*$; \\
+}
+\Else{Reuse the compensated semantics ${\mathcal{Z}_m^k}^*$;}
+\textsc{Calibration}: Construct the calibration dataset $\tilde{\mathcal{D}}_m^k$ by Eq. \eqref{eq:scc-calibration-dataset}; \\
+\% Update memory in the last calibration round \\
+\If {$(r+1) \bmod T=0$}{
+\textsc{Semantic Storage}: Store the $Q$ semantics of the smallest value of $\delta_i$ in $\mathcal{Q}$, as in Eqs. \eqref{eq:scc-storage-set}-\eqref{eq:scc-storage-distance};
+}
+\Return $\tilde{\mathcal{D}}_m^k$;
+\end{algorithm}
+
+The detailed proof is given in Appendix \ref{proof:prop2}. Proposition \ref{prop:semantic-drift} reveals that two adjacent calibration rounds have a very similar semantic drift. Therefore, the semantic compensation step can be performed only once (i.e., on the first calibration round after each full synchronization) to save computational cost, and the backup parameters $\phi^{r_{\mathrm{bak}}}$ can be removed to release memory.
+
+\vspace{1mm}
+\textit{(b) Calibration.}
+The compensated historical semantics ${\mathcal{Z}_m^k}^{*}$ will be concatenated with the latest semantics $\mathcal{S}_m^k(r)=h(\mathcal{D}_m^k(r),\phi_m^{k,r-1})$ to construct a calibration dataset $\tilde{\mathcal{D}}_m^k(r)$,
+\begin{equation}\label{eq:scc-calibration-dataset}
+\tilde{\mathcal{D}}_m^k(r)=\left[\mathcal{S}_m^k(r)\cup{\mathcal{Z}_m^k}^{*},\mathcal{Y}_m^k(r)\cup{\mathcal{Y}_m^k}^*\right],
+\end{equation}
+where $\mathcal{Y}_m^k(r)$ is the label space of $\mathcal{D}_m^k(r)$ and ${\mathcal{Y}_m^k}^*$ is the label set corresponding to ${\mathcal{Z}_m^k}^{*}$. 
+
+When training the classifier, we freeze the parameters of feature extractor $\phi_m^{k,r-1}$, take $\tilde{\mathcal{D}}_m^k(r)$ as the training dataset (with labels), and use mini-batch SGD or Adam to optimize the classifier as follows,
+\begin{equation}
+\nonumber
+\theta_m^{k,r}\gets\theta_m^{k,r-1}-\frac{\eta}{|\tilde{\mathcal{D}}_m^k(r)|}\nabla_{\theta}\mathcal{L}\left(g(\tilde{\mathcal{D}}_m^k(r), \theta_m^{k,r-1}), \mathcal{Y}_m^k\right).
+\end{equation}
+
+\vspace{1mm}
+\textit{(c) Semantic Storage.}
+The semantic database should be updated at every last round of calibration (i.e., the $(T-1)$-th round after each full synchronization). Looking back at the $T$ rounds just executed, we can construct a union set of candidate semantics $\mathcal{Q}$,
+\begin{equation}\label{eq:scc-storage-set}
+\mathcal{Q}={\mathcal{Z}_m^k}^{*}\cup\left(\bigcup\limits_{i=1}^{T}\mathcal{S}_m^k(r_i)\right),
+\end{equation}
+where $r_1$ is any full synchronization round and $r_2,\cdots,r_T$ are subsequent calibration rounds. We calculate the distance $\delta_i$ of each semantic feature $z_{i}\in\mathcal{Q}$ from its class mean $\mu_c^r$,
+\begin{equation}\label{eq:scc-storage-distance}
+\delta_{i}=|z_{i}-\mu_c^r|_{l_2}.
+\end{equation}
+The $Q$ semantics with the smallest value of $\delta_i$ are considered to be the most representative and are stored. Here, $Q$ is the maximum capacity of the semantic database.
+
+Algorithm \ref{alg:lasp} gives the pseudo-code implementation of SCC that can be invoked by STP as a compatible module.
+
+\subsection{LASP: Layer-wise Alternative Synchronization Protocol}
+Generally, \NAME~consists of two types of synchronization modes: Full synchronization ($\texttt{FULL\_SYNC}$) and calibration ($\texttt{PART\_SYNC}$). Each full synchronization round is followed by $T-1$ calibration rounds. The main difference between them is that the full synchronization round trains the complete model parameters $\omega=\{\phi,\theta\}$, while the calibration round only trains the classifier $\theta$. Therefore, a concise and effective way to reduce communication costs is to synchronize only classifier parameters $\theta$ during calibration rounds, since the shallow layers $\phi$ are frozen and thus redundant.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=.5\textwidth]{pic/lasp.pdf}
+\caption{An example of LASP workflow when the interval $T=3$.}
+\label{fig:lasp}
+\end{figure}
+
+Based on this idea, we propose to synchronize the feature extractor $\phi$ and the classifier $\theta$ with different frequencies. An example is illustrated in Figure \ref{fig:lasp}. Assuming $r$ is a full synchronization round and the interval $T=3$, then $r+kT, \forall k\in\mathbb{Z}^*$ are also full synchronization rounds and $r+kT+1,r+kT+2, \forall k\in\mathbb{Z}^+$ are calibration rounds. In the full synchronization round, the complete model parameters $\omega=\{\phi,\theta\}$ are shared to enhance the semantic representation. Instead, in the calibration round, only classifier parameters $\theta$ are shared to reduce transfer bytes. We refer to this layer-wise and alternative synchronization protocol as LASP.
+
+In summary, LASP has the following three advantages:
+\begin{itemize}
+\item LASP is easy to implement and well-compatible with existing synchronization algorithms.
+\item LASP is a lossless approach that greatly reduces traffic by saving the transmission of redundant parameters. Table \ref{table:params-statistics} shows that 999\textperthousand~of traffic is saved on a typical CNN.
+\item LASP helps to train a more generalized classifier since the classifier was found to be most sensitive to data heterogeneity\cite{luo2021no}.
+\end{itemize}
+
+\begin{table}[t]
+  \caption{Statistics of parameters in a typical CNN model.}
+  \small
+  \label{table:params-statistics}
+  \centering
+  \renewcommand{\arraystretch}{1.2}
+  \begin{tabular}{c|c|c|c|c|c}
+    \hline
+    & \textbf{Layer} & \textbf{Type} & \multicolumn{2}{c|}{\textbf{Num Params}} & \textbf{Ratio} \\
+    \hline\hline
+    \multirow{4}{*}{\makecell[c]{Feature\\Extractor}} & 1 & Conv & 0.8K & \multirow{4}{*}{\makecell[c]{Total:\\6.68M}} & \multirow{4}{*}{999\textperthousand} \\
+    \cline{2-4} & 2 & Conv & 51K & & \\
+    \cline{2-4} & 3 & FullyConnected & 6.4M & & \\
+    \cline{2-4} & 4 & FullyConnected & 205K & & \\
+    \hline
+    \makecell[c]{Classifier} & 5 & FullyConnected & \multicolumn{2}{c|}{\textbf{6.3K}} & \textbf{1\textperthousand} \\
+    \hline
+  \end{tabular}
+\end{table}

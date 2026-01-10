@@ -1,0 +1,102 @@
+\begin{figure*}[t!]
+     \centering
+     \begin{subfigure}[b]{0.49\textwidth}
+         \centering
+         \includegraphics[width=\columnwidth]{figs/Im2wav_Dataset_-_Single_Images_Guided_Generation.png}
+         \caption{\label{fig:accimage}}
+     \end{subfigure}
+     \begin{subfigure}[b]{0.49\textwidth}
+         \centering
+         \includegraphics[width=\columnwidth]{figs/VGG_Sound_Test_Set_-_Video_Guided_Generation.png}
+         \caption{\label{fig:accvideo}}
+     \end{subfigure}
+    \caption{(a) Accuracy per class considering a single image condition from the \imhear{} dataset. (b) Accuracy per class considering a sequence of images (i.e., video) condition from the test-set of VGGSound dataset.\label{fig:acc}}
+\end{figure*}
+
+\vspace{-0.2cm}
+\section{Experiments}
+\label{sec:exps}
+\vspace{-0.1cm}
+
+\subsection{Experimental Setup}
+\label{sec:setup}
+{\noindent \bf Hyper-parameters.}
+In all experiments we evaluate 4 seconds of generated audio, sampled at 16kHz. For the VQ-VAE model, we use a total of 5 convolutional layers with stride 2 for the encoder and the reversed operations for the decoder. The first codebook is applied after three convolutional layers, resulting in a downsampling factor of 8. Then, the second codebook is applied after two additional convolutional layers, resulting in an overall downsampling factor of 32. This corresponds to 2000 tokens per second in the \textsc{Up} model and 500 tokens per second in the \textsc{Low} model. Each codebook contains 2048 codes with embedding size of 128. For the auto-regressive models, we use a Transformer architecture with 48 layers and sparse attention, using a hidden size of 1024 dimensional vectors. For the CLIP model we use the $ViT-B/32$ version. Code is publicly available.
+
+{\noindent \bf Data.}
+We use the VGGSound dataset~\cite{Vggsound} extracted from videos uploaded to YouTube with audio-visual correspondence, containing $\sim$200k 10-second videos. We follow the original VGGSound train/test splits. For the evaluation, every test-set video is used with its initial 4 seconds only. To better evaluate the performance of the proposed method on out-of-distribution samples, we additionally collected 100 images from the web, containing 30 visual classes ($\sim$2-8 images per class), denoted as \imhear, and evaluate our method on it. To ensure our results are statistically significant we generate 120 audios per image class with each image used for an equal number of samples. This dataset is publicly available to support reproducibility and evaluation in future research.
+
+\begin{table}[t!]
+\centering
+\caption{Main results: left part videos - VGGSound test-set \cite{Vggsound}, right part single image - \imhear{}.}
+\label{tab:main}
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lcccc|cc}
+\toprule
+Method & FAD$\downarrow$ & KL$\downarrow$  & CS$\uparrow$ & ACC $\uparrow$ & CS$\uparrow$ & ACC $\uparrow$\\
+\midrule                                       %FAD    KL    CLIP  ACC           CLIP   ACC
+Reference                              &  -    &  -    & \bf 7.61 & \bf 56.93\% & -    & -\\
+\midrule
+\cite{SpecVQGAN_Iashin_2021}~1 Feats   &  6.99 &  3.19 & 4.41 & 12.79\% & 5.54 & 21.92\%\\
+\cite{SpecVQGAN_Iashin_2021}~5 Feats   &  6.81 &  3.13 & 4.54 & 14.44\% & 5.54 & 22.03\%\\
+\cite{SpecVQGAN_Iashin_2021}~212 Feats &  6.64 &  3.10 & 4.62 & 14.44\% & 5.90 & 22.36\%\\
+Ours                                   &  \bf 6.41 &  \bf 2.54 & \bf 7.19 & \bf 35.77\% & \bf 9.53 & \bf 49.14\%\\
+\bottomrule
+\end{tabular}}
+\vspace{-0.1cm}
+\end{table}
+
+{\noindent \bf Evaluated Baselines.} We compare the proposed method to SpecVQGAN~\cite{SpecVQGAN_Iashin_2021}, a state-of-the-art open-domain visually guided audio generation model. We use the pre-trained models provided by the authors, using three ResNet50 Features-based models which were also trained on VGGSound. The difference between the three SpecVQGAN models is the required length of their conditioning image sequence.
+SpecVQGAN operates in 21.5 fps. Therefore, when conditioning the 212 Feats model on 4-second videos, we repeat the last frame in order to reach its required number of frames. The same is done for the 212/5 Feats models when considering single image conditioning.
+
+{\noindent \bf Evaluation Functions.} We evaluate the generated sounds on two aspects, fidelity (FAD) and relevance to the visual condition (KL, Accuracy and Clip-score). 
+
+Adapting the Fr\'echet Inception Distance (FID) metric used to evaluate generative image models fidelity~\cite{fid} to the audio domain, Kilgour et al.~\cite{fad} proposed Fr\'echet Audio Distance (FAD). FAD measures the distance between the generated and real distributions. Features are extracted from both the real and generated data using an audio classifier~\cite{vggish} which was pre-trained on AudioSet~\cite{gemmeke2017audio}. The distributions of the real and generated extracted features are modeled as a multi-variate normal distributions $\mathcal{N}(\mathbf{\mu_{r}}, \mathbf{\Sigma_{r}}), \mathcal{N}(\mathbf{\mu_{g}}, \mathbf{\Sigma_{g})}$, respectively. 
+The FAD is then given by the Fréchet distance between these distributions,
+\begin{equation}
+\label{eq:fad}
+FAD = \twonorm{\mathbf{\mu_{r}} - \mathbf{\mu_{g}}}+\mathrm{tr}(\mathbf{\Sigma_{r}} + \mathbf{\Sigma_{g}}) -2\sqrt{\mathbf{\Sigma_{r}}\mathbf{\Sigma_{g}}}.
+\end{equation}
+
+
+Next, we adapt Clip-Score (CS), which has shown to be highly effective in evaluating image-caption correspondence~\cite{hessel2021clipscore, nichol2021glide}. We replace the CLIP text encoder with Wav2Clip model~\cite{wu2022wav2clip}, which is an audio encoder trained using contrastive loss on corresponding images and audio on top of the frozen CLIP image encoder. We pass both the image and the generated sound through their respective feature extractors. Then, we compute the expectation of cosine similarity of the resultant feature vectors, multiplied by a scaling factor, $\gamma$. We use $\gamma=100$ as in~\cite{nichol2021glide}.
+
+Since a video is a sequence of images, each image CS is independently calculated with the whole audio and then we average the resulting CS. When dealing with longer or semantically complicated videos, we would consider applying this metric on short windows where one can expect a semantic shared by all the images and the audio. When experimenting with replacing the average with median, we observed similar results. This might indicate that a single averaged window is suitable for 4-second VGGSound test-set videos.
+
+Lastly, we use PaSST~\cite{passt} audio classifier trained on AudioSet~\cite{gemmeke2017audio} to obtain a distribution over 527 classes. On top of the classifier output, we compute KL Divergence between the class distribution of the original samples and the generated ones. As we do not have the reference audio for the \imhear{} dataset, we also compute the accuracy of the classifier on the generated audio samples. For completeness, we report the accuracy also for VGGSound considering the \imhear{} classes only.
+
+
+\begin{table}[t!]
+\centering
+\caption{Ablation Study: left part videos - VGGSound test-set \cite{Vggsound}, right part single image - \imhear{}.}
+\label{tab:abbl}
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{ccc|cccc|cc}
+\toprule
+ CFG & \textsc{Up} & \textsc{Every} & FAD$\downarrow$ & KL$\downarrow$ & CS$\uparrow$ & ACC$\uparrow$ & CS$\uparrow$ & ACC $\uparrow$\\
+\midrule                               %FAD     KL    CLIP   ACC       CLIP  ACC
+\ding{55} &  \ding{55}   & \ding{55} & 12.47 & 3.05 & 5.16 & 19.68\% & 7.30 & 26.67\%\\ %start_l0                        
+\ding{55} &  \ding{55}   & \ding{51} & 12.44 & 3.04 & 5.08 & 18.37\% & 7.23 & 23.56\%\\ %video_l0                        
+\ding{51} &  \ding{55}   & \ding{55} & 10.23 & 2.76 & 5.94 & 30.07\% & 8.64 & 39.94\%\\ %cfg_l0                          
+\ding{51} &  \ding{55}   & \ding{51} & 10.13 & 2.72 & 5.99 & 29.81\% & 8.87 & 41.97\%\\ %cfg_video_l0                    
+\ding{55} &  \ding{51}   & \ding{55} & 8.86  & 2.85 & 5.89 & 22.51\% & 7.58 & 30.64\%\\ %start_l1                        
+\ding{55} &  \ding{51}   & \ding{51} & 8.99  & 2.85 & 5.82 & 21.37\% & 7.55 & 29.61\%\\ %video_l1                        
+\ding{51} &  \ding{51}   & \ding{55} &  6.52 & 2.58 & 7.12 & 35.01\% & 9.27 & 46.78\%\\ %cfg_l1                          
+\midrule
+\ding{51} &  \ding{51}   & \ding{51} & \bf 6.41  & \bf 2.54 &  \bf 7.19 & \bf 35.77\% & \bf 9.53 &  \bf 49.14\%\\             
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\vspace{-0.1cm}
+\subsection{Results}
+\label{sec:results}
+
+Table~\ref{tab:main}~summarizes the results for the proposed method and evaluated baselines. Results suggest that the proposed method is superior to the evaluated baselines both in terms of fidelity and relevance. 
+All the evaluated models produce better relevance metrics when conditioned on \imhear{} single images than on VGGSound videos. The different relevance metrics keep the same ranking across the evaluated models. Figure~\ref{fig:acc} show that our model is capable of producing diverse sounds of more classes compared to SpecVQGAN~\cite{SpecVQGAN_Iashin_2021}.
+
+\vspace{-0.2cm}
+\subsection{Ablation study}
+Next, we conduct an ablation study to better understand the effect of the different components of our proposed method summarized in Table~\ref{tab:abbl}. Specifically, we evaluate the effect of CFG, using the \textsc{Up} model, and conditioning on the temporally-corresponding frame at every token, denoted as \textsc{Every}.
+Results suggest that \textsc{Up} has a noticeable effect on fidelity as all models with \textsc{Up} achieve lower FAD than all models without it regardless of CFG or \textsc{Every} usage.
+Results suggest that CFG has a noticeable effect on visual relevance as all models with CFG achieve better relevance metrics than all models without it regardless of \textsc{Up} or \textsc{Every} usage. This fits the notion that the \textsc{Low} level learns the highest degree of abstraction, including the semantics, while the higher resolution \textsc{Up} level refines the abstract foundation to a more natural sound. Finally, the results suggest that \textsc{Every} has a relatively small effect on both fidelity and relevance metrics and improves when combined with CFG.

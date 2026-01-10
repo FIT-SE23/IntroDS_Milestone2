@@ -1,0 +1,48 @@
+\section{Method}
+
+\subsection{Low-Resource Named Entity Recognition}
+\label{sec:fewshot}
+Given a sentence $\mathbf{X} = (x_{1}, x_{2}, \dots x_{N})$ which contains $N$ words, the task is to produce $\mathbf{Y} = (y_{1}, y_{2}, \dots y_{N})$ which is the sequence of entity tags. The tag $y_{i}\in\mathcal{Y}$ (e.g., B-LOC, I-PER, O) denotes the type of entity for each word $x_{i}$, where $\mathcal{Y}$ is a pre-defined set of tags.
+We are given a low-resource NER dataset $\mathcal{D}_{\text{train}}$, where the labeled examples to each NER type (e.g., $<50$) are substantially less than that in the rich-resource NER dataset. Our goal is to train an accurate NER model under this low-resource setting.
+
+Previous methods usually treat NER as a sequence labeling task in which a neural encoder such as LSTM and BERT is used for representing the input sequence, and a softmax or a CRF layer is equipped as the output layer to get the tag sequence.
+Formally, as the standard fine-tuning, NER model $\mathcal{M}$ parameterized by $\theta$ is trained to minimize the cross-entropy loss over token representations $\mathbf{H} = [h_{1}, h_{2}, \dots h_{N}]$ that are generated from the neural encoder as follows:
+\begin{equation}
+\mathcal{L}=-\sum_{i=1}^{N} \log f_{x_{i}, y_{i}}(\mathbf{h} ; \theta),
+\end{equation}
+where $f$ is the model's predicted conditional probability for golden label.
+
+
+
+
+\subsection{Prompt-based Text Entailment}
+%\paragraph{Challenge.}
+Towards the low-resource NER task, a common way is to pre-train the neural encoder and output layer parameters with the rich-resource NER dataset. Another feasible way is to focus on the matching function learned by prototype-based network~\cite{proto1} or nearest neighbor classification~\cite{proto2}. After that, a well-trained matching function can work well in the target tasks.
+However, since the entity category is different, the parameter for the low-resource domain cannot be transferred directly from the source domain. Moreover, the metric-based meta-learning methods assume that training and test tasks are in the same distribution but this assumption may not always be satisfied in practice~\cite{yin2020meta}. 
+
+In this work, we reformulate named entity recognition as the text entailment task. As the NER task is not a standard entailment problem, we convert NER examples into labeled entailment instances. The input includes the original sentence as premise and entity type-specific prompt as a hypothesis (i.e., template). The output is produced by an entailment classifier, predicting a label for each instance.
+The entailment score is the probability of a specific token at the mask position of the prompt. Then, the entity type with the top entailment score is selected as the final label. For example, given a sentence ``\textit{Seoul is the capital of South Korea.}'' and a candidate ``\textit{Seoul}'', we define ``\textit{Seoul is an <entity\_type> entity. [MASK]}'' as prompt for each entity type. Suppose the entailment score of token ``\textit{yes}'' at [MASK] for <location> type is the highest 
+of all entity types, we finally choose ``\textit{location}'' as the predicted label. 
+For training, we sample three types of negative examples (see Appendix \ref{sec:templ}): false positive (i.e., replace the correct label with others), null label (i.e., replace the correct label with null), and non-entity replacement (i.e., replace golden entity with non-entity span). For example,  ``\textit{Seoul is not a named entity. [MASK]}'' is one prompt of ``false positive'' example (i.e., the [MASK] label is \textit{no}, and it exists entities). During training and inference, we can enumerate all possible text spans in the input sentence as named entity candidates~\cite{templatener}. 
+To further reduce time complexity in generating candidates by n-grams enumeration, we inject tagging labels (e.g., I-location means the tag is inside a entity) into prompts and treat words as basic units instead of text spans during training and inference. In other words, we consider prompts ``\textit{<candidate\_entity\_word> is the part of a <entity\_type> entity. [MASK]}'' (e.g., ``\textit{Seoul is the part of a location entity. [MASK]''}). As PTE treats words as basic units for decoding, it optimizes time complexity at inference to O(L), which is in line with previous NER methods. It optimizes quadratic costs at inference to linear. We also apply the Viterbi algorithm at inference, where transitions are computed on the training set \cite{DBLP:conf/acl/HouCLZLLL20}. The computational complexity of n-grams enumeration is O($L^2$), increasing quadratically with sequence length L.  Overall, our method provides a unified entailment framework as the model shares the same inference pattern across different domains.
+
+\subsection{Pattern Exploiting Training Framework} \label{sec:pet}
+The basic framework of \texttt{PTE} is from {\ADAPET} \cite{ADAPET} which is a variant of  {\PET} \cite{schick2020exploiting, schick2020s}. Compared with {\PET}, {\ADAPET} uses more supervision by decoupling the losses for the label tokens and a label-conditioned MLM objective over the total original input~\cite{ADAPET}.  We introduce it by describing how to convert one example into a cloze-style question. The query-form in {\ADAPET} is defined by a Pattern-Verbalizer Pair (PVP). Each PVP consists of one pattern which describes how to convert the inputs into a cloze-style question with masked out tokens, and one verbalizer which describes the way to convert the classes into the output space of tokens. The PVP can be manually generated \cite{auxiliary-absa,lama} or obtained by using an automatic search algorithm \cite{schick-etal-2020-automatically, gao2020making}. 
+% In this paper, we create a list of PVP for each task. 
+After that, {\ADAPET} obtains logits from the model $G_m(x)$. Given the space of output tokens $\mathcal{Y}$, {\ADAPET} computes a softmax over $y \in \mathcal{Y}$, using the logits from $G_m(x)$. The final loss is shown as follows: 
+
+{\small
+\begin{align}
+    q(y|x) &= \frac{\exp([\![G_m(x)]\!]_{y})}{\sum\limits_{y' \in \mathcal{Y}} \exp([\![G_m(x)]\!]_{y'})}, \\
+    \La &= \texttt{Cross\_entropy} (q(y^*|x), y^*). \ 
+    \label{eq:pet}
+\end{align}
+}%
+
+
+ 
+
+\subsection{Cross Task and Domain Transfer}
+\label{sec:template}
+To address the challenge when few labeled examples are available, we further train the sentence encoder on the TE datasets (e.g., MNLI) and apply it to the NER task. Then, our method can perform more knowledge transfer between the rich-resource NER dataset and the low-resource NER dataset. Since there is no domain-related fully connected layer for fine-tuning, all parameters can be transferred in different domains even if the entity category does not match. Specially, we apply the text entailment method to the low-resource domain after firstly pre-training the NER model in the rich-resource domain. This process is simple but can effectively transfer label knowledge. As the output of our method is model-agnostic words (not tag index), the tag vocabulary with rich-resource and low-resource is a shared pre-trained language model vocabulary set. It allows our method to use the correlation of tags to enhance the effect of cross-domain transfer learning.
+

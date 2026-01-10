@@ -1,0 +1,1412 @@
+\documentclass[lettersize,journal]{IEEEtran}
+
+\usepackage[caption=false,font=normalsize,labelfont=sf,textfont=sf]{subfig}
+
+\usepackage{url}
+\usepackage{cite}
+\usepackage{tikz}
+\usepackage{xcolor}
+\usepackage{stfloats}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{multicol}
+\usepackage{tabularx}
+\usepackage{steinmetz}
+\usepackage{mathtools}
+\usepackage{booktabs}
+\usepackage{textcomp}
+\usepackage{wrapfig}
+\usepackage{subfig}
+\usepackage{pifont}
+\usepackage{verbatim}
+\newtheorem{proposition}{Proposition}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{remark}{Remark}
+\newtheorem{assumption}{Assumption}
+\usepackage{multirow}
+
+\usepackage{graphicx}
+\graphicspath{ {./images/} }
+\usepackage[justification = centering]{caption}
+
+\newcommand*\circled[1]{\tikz[baseline=(char.base)]{
+            \node[shape=circle,fill,inner sep=1pt] (char) {\footnotesize \textcolor{white}{#1}};}}
+            
+\usepackage[colorlinks,
+            linkcolor=red,
+            anchorcolor=red,
+            citecolor=red]{hyperref}  
+            
+\hyphenation{op-tical net-works semi-conduc-tor IEEE-Xplore}
+% updated with editorial comments 8/9/2021
+\usepackage{hyperref}
+\DeclareUnicodeCharacter{2061}{}
+\usepackage{algorithm}
+% \usepackage{algorithmic}
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+\usepackage{array}
+\floatname{algorithm}{Algorithm}
+\renewcommand{\algorithmicrequire}{\textbf{INPUT:}}
+\renewcommand{\algorithmicensure}{\textbf{OUTPUT:}}
+
+
+\begin{document}
+
+\title{Efficient Traffic State Forecasting using Spatio-Temporal Network Dependencies: A Sparse Graph Neural Network Approach}
+
+
+\author{Bin Lei,~\IEEEmembership{Student Member,~IEEE}, Shaoyi Huang,~\IEEEmembership{Student Member,~IEEE,} 
+ Caiwen Ding,~\IEEEmembership{Member,~IEEE}, Monika Filipovska†,~\IEEEmembership{Member,~IEEE}.
+ \IEEEcompsocitemizethanks{\IEEEcompsocthanksitem  
+ \IEEEcompsocthanksitem †: Corresponding author
+ \IEEEcompsocthanksitem  Bin Lei, Shaoyi Huang, Caiwen Ding  are with the  Department  of  Computer  Science  and  Engineering  at the University of Connecticut, Storrs, CT, USA.
+ \IEEEcompsocthanksitem Monika Filipovska is with the  Department of Civil and Environmental Engineering  at the University of Connecticut, Storrs, CT, USA.
+% note need leading \protect in front of \\ to get a newline within \thanks as
+% \\ is fragile and will error, could use \hfil\break instead.
+(E-mail: \{bin.lei, shaoyi.huang, caiwen.ding, monika.filipovska\}@uconn.edu).
+
+ }}
+
+% The paper headers
+% \markboth{Journal of \LaTeX\ Class Files,~Vol.~14, No.~8, August~2021}%
+% {Shell \MakeLowercase{\textit{et al.}}: A Sample Article Using IEEEtran.cls for IEEE Journals}
+
+% \IEEEpubid{0000--0000/00\$00.00~\copyright~2021 IEEE}
+% Remember, if you use this you must call \IEEEpubidadjcol in the second
+% column for its text to clear the IEEEpubid mark.
+
+\maketitle
+
+\begin{abstract}
+% Traffic state forecasting is an important problem in Intelligent Transportation Systems (ITS) since 
+Traffic state prediction in a transportation network is paramount for effective traffic operations and management, as well as informed user and system-level decision-making. However, long-term traffic prediction (beyond 30 minutes into the future) remains challenging in current research. In this work,  we integrate the spatio-temporal dependencies in the transportation network from network modeling, together with the graph convolutional network (GCN) and graph attention network (GAT).  To further tackle the dramatic computation and memory cost caused by the giant model size (i.e., number of weights) caused by multiple cascaded layers, we propose sparse training to  mitigate the training cost, while preserving the prediction accuracy.  It is a process of training using a fixed number of nonzero weights in each layer in each iteration. 
+
+
+
+We consider the problem of long-term traffic speed forecasting for a real large-scale transportation network data from the California Department of Transportation (Caltrans) Performance Measurement System (PeMS). Experimental results show that the proposed GCN-STGT and GAT-STGT models achieve low prediction errors on short-, mid- and long-term prediction horizons, of 15, 30 and 45 minutes in duration, respectively. Using our sparse training,
+we could train from scratch
+% using a 
+% fixed pruning mask to obtain a 
+with high sparsity (e.g., up to 90\%), equivalent to 10$\times$ floating point operations per second (FLOPs) reduction on computational cost using the 
+% we could bring reduction throughout the training process,
+and same epochs as dense training,
+% prior to training 
+and arrive at a model with very small accuracy loss compared with the original dense training.
+
+\end{abstract}
+
+\begin{IEEEkeywords}
+% Article submission, IEEE, IEEEtran, journal, \LaTeX, paper, template, typesetting.
+Graph Neural Network, Spatio-Temporal, Traffic State Forecasting, Sparse Training, Efficient
+\end{IEEEkeywords}
+
+\section{Introduction}
+\IEEEPARstart {T}{raffic} state forecasting is a central problem in Intelligent Transportation Systems (ITS) since predictions of the state of traffic in a transportation network is paramount for effective traffic operations and management, as well as informed user and system-level decision-making \cite{luttrell2008predicting}. In recent years, traffic forecasting has been enabled by the increasing quantity and quality of available traffic data. However, accurate modeling and prediction of traffic state, especially across large-scale networks, is a highly nonlinear and complex problem. The network performance is susceptible to fluctuations due to a combination of factors including traffic incidents, weather conditions, work zones, user choices, etc \cite{chen2019operational}. Furthermore, the effects of these factors on traffic spread spatially through the transportation network, and often in a temporally lagged manner as traffic propagates through the network.
+
+ Short-term traffic state prediction approaches are common in the literature, with both statistical and  machine learning methods performing well for 1 to 5-minute prediction horizons \cite{nagy2018survey}. However, longer-term traffic prediction, for example beyond 30 minutes into the future, presents a more difficult problem. This is expected, since it is more difficult to anticipate how traffic patterns will spread spatially and temporally over longer prediction horizons, and the potential effects of a range of measurable and immeasurable external factors become more uncertain \cite{filipovska2021tt}. 
+ 
+ In the literature on traffic state prediction, common early approaches come from time-series analysis \cite{ahmed1979analysis, williams2003modeling, tavana2000estimation}. The immediate limitation of time-series approaches is their singular focus on the temporal component, without accounting for spatial effects. Thus, time-series-based approaches are often applied to individual road segments or small isolated sequences of road segments. However, previous work has shown the importance of incorporating both spatially and temporally lagged features in traffic prediction \cite{filipovska2019, filipovska2020traffic}. Furthermore, with the growing availability of traffic data, machine learning methods are becoming more common and necessary for traffic prediction tasks, due to their ability to capture more complex phenomena. 
+ 
+ This study considers the problem of long-term traffic speed forecasting for a real large-scale transportation network, via an approach that integrates the understanding of spatio-temporal dependencies in the transportation network from network modeling, together with graph-based neural network approaches suitable for large-scale data analysis and complex modeling. Several strategies have been proposed for modeling temporal dynamics and spatial dependencies in the literature, and we focus on two architectures based on graph neural networks (GNNs), the graph convolutional network (GCN) \cite{bruna2014GCN} and graph attention network (GAT) \cite{Velickovic2018GraphAN}. An important consideration for implementing GNN models in real-world large-scale graphs for internet-of-things (IoT) applications is the outsized training computational cost as GNN model sizes continue to grow. Training such large-scale GNNs requires high-end servers with expensive GPUs that are difficult to maintain. A recent study shows that it can take 1600 GPU days to train a GNN model  with 10.7 million parameters \cite{hu2021forcenet}. The computational challenges of training massive GNNs with billions of parameters on large-scale graphs is an important and emerging problem in the machine learning community.
+ 
+ The contribution of this paper is three-fold. (1) It proposes a spatio-temporal GNN-based approach for traffic prediction that used the underlying structure of the transportation network to extract spatio-temporal features traffic speed data throughout the network. (2) To accelerate the GNN training and inference, we use a sparse training method, which converts the computation from dense to sparse by removing large portion of the weights (say, up to 90\%), thus reducing the memory consumption and the total amount of computation with small accuracy loss. (3) The numerical experiments demonstrate the applicability of the proposed approach to a large-scale transportation network and its transferability to time periods not seen during training. 
+
+\section{Background}
+\subsection{Statistical Approaches for Traffic Prediction}
+Traffic state forecasting problems focus on predicting traffic during a given time interval or prediction horizon in terms of aggregate macroscopic characteristics of traffic flow: speed, density, or flow. Speed is most often used as the quantity of interest in prediction, as a more user-centric measure of traffic state compared to flow or density. Prediction of traffic flow levels is also common as it can offer insights into the level of congestion. Earlier studies use time-series analysis approaches to model the evolution of traffic state over time as a time-series, as introduced by Ahmed and Cook\cite{ahmed1979analysis} and use time-series forecasting methods for prediction such as ARIMA \cite{williams2003modeling,van1996combining,tavana2000estimation} and Kalman filtering methods \cite{whittaker1997tracking}. These approaches initially focused on univariate prediction at a given location, and were later extended to multi-variate problems that aim to simultaneously capture traffic state at various locations with approaches such as space-time ARIMA (STARIMA) \cite{stathopoulos2003multivariate, kamarianakis2003forecasting}, and combined with adaptive Kalman filtering \cite{guo2014adaptive}.
+
+\subsection{Machine Learning for Traffic Prediction}
+With the increase of data availability in transportation systems, data-driven machine learning approaches for traffic forecasting have become more common in recent years. Many of the initial studies focus on short term prediction, such as \cite{hosseini2012short} using multi-layer perceptron models, as the simplest form of neural networks, \cite{jia2016traffic, huang2014deep} employing deep belief networks. Wu and Tan \cite{wu2016short} present an approach for short-term traffic flow forecasting with spatio-temporal correlation in a hybrid deep-learning framework combining convolutional neural networks (CNN) and long short-term memory (LSTM) networks. Tahlyan et al.\cite{tahlyan2021meta} present a meta-learner ensemble framework for real-time short-term traffic speed forecasting. Some recent studies also focus on longer-term prediction, such as \cite{lv2014traffic} presenting a deep learning stacked auto-encoder approach for a prediction horizon of up to 60 minutes, and \cite{ma2015long} suing an LSTM neural network to capture long-term temporal dependence. 
+ 
+ While all of the studies referenced above consider traffic prediction from a primarily temporal aspect at isolated locations, a few recent studies consider the problem of spatio-temporal traffic state prediction. Li et al.\cite{li2017diffusion} propose a diffusion convolutional recurrent neural network (RNN) to capture spatial dependency in traffic state predictions. Yu et al. \cite{yu2017spatiotemporal} consider the problem of large-scale network-wide traffic speed prediction and implement a spatiotemporal recurrent convolutional network (SRCN) approach for short term prediction. Ma et al. \cite{ma2017learning} approach a similar problem using a convolutional neural-network (CNN) model aiming to capture spatiotemporal traffic dynamics, which was shown to be well suited for short to medium-term prediction of 10 to 20 minutes. 
+ 
+ The recent emergence of GNNs has helped advance the methods for spatio-temporal traffic forecasting across networks. For mid- and long-term prediction tasks across space, \cite{yu2017spatio} introduce a graph convolutional network (GCN), referred to as spatio-temporal GCN (STGCN), while \cite{zhang2019spatial} and \cite{kong2020stgat} both present a spatial-temporal graph attention network (STGAT) approach. The key difference between the STGCN and STGAT approaches is the use of a graph convolutional network (GCN) in the former and a graph attention network (GAT) in the latter. GAT modifies the convolution operation in a GCN with an attention mechanism whose purpose is to perform node classification of graph-structured data by computing hidden representations of each node in the graph by attending over the node’s neighbors. Thus, GAT performs the functions of a GCN while attuning itself to the particular features that are most important in the network. GAT also promises efficient (parallelizable) operations, application to graph nodes with different degrees, and applicability to inductive learning problems including models that are generalizable to previously unseen graphs. Details on the GAT architecture can be found in the original work \cite{velivckovic2017graph}. 
+ 
+ An important limitation of the spatio-temporal models in recent studies \cite{yu2017spatio,zhang2019spatial,kong2020stgat} is that they do not take into account the underlying transportation road network. Instead, they construct artificial distance-based adjacency matrices using Euclidean distance to infer the connections between locations and generate the graphs. Thus, the spatial component does not account for the structure of the transportation network and the actual flow of traffic over space, but is simply based on the spatial proximity of the locations where data is observed.
+ 
+\subsection{Weight Sparsification in Graph Neural Network}
+State-of-the-art deep neural networks have large model size and computational requirements, which limits their ability to provide a user-friendly experience \cite{he2016deep, gpt3,huang2022sparse,huang2022automatic,huang2021hmc}. To address the challenges, weight sparsification has been investigated.  The key idea is to represent a neural network with a much simpler model (set a group of weight values to be zero), therefore bringing acceleration in computation and reduction in memory~\cite{chen2021re,peng2021accelerating,peng2022length,qi2021accelerating,qi2021accommodating,peng2022towards,manu2021co}. Recent work by Chen \cite{Chen2021AUL} proposes a weight sparcification framework for GNNs, called Unified GNN Sparsification (UGS), that pruned the input graph as well as the model weights using the well-studied \textit{lottery ticket hypothesis} weight pruning method \cite{frankle2018lottery}. However, these work mainly focus on generating on the inference efficiency, and often need to use more training epoches on training.
+
+%  \textcolor{red}{MHF: Can we add some background / brief literature review about the sparsity component?}
+
+
+\section{Problem definition}
+The problem considered in this paper is as follows. Given the observations of aggregate traffic speeds across a number of spatially distributed road segments in a transportation network for a historical time horizon $H$, the goal is to predict the aggregate traffic speed for the same locations over a future time horizon $T$. The road segments at which traffic speeds are observed are connected to one another to form the transportation network on which traffic flows between these spatially distributed locations. 
+ Towards this goal, we define the underlying transportation network as a graph $G(N,A,W)$ where $N$ is the set of nodes (i.e., vertices), A are the set of links (i.e., edges) connecting those vertices and $W \in \mathbb{R}^{|N| \times |N|}$ is a weighted adjacency matrix for network. Typical representations of transportation networks model the intersections as nodes connected by road segments which are modeled as links in the graph. However, in defining this problem, there is a need to model the traffic monitoring stations (i.e. sensors at fixed locations) on road segments as the set of nodes $N$ and use the links $A$ to model the connections between those road segments. Therefore, $G(N,A,W)$ is a transformed version of the road network, so that the nodes $i \in N$ correspond to the $|N|$ observation locations, i.e., the stations yielding traffic speed measurements and the links $(i,j) \in A$ are constructed where there are direct station-to-station connections on the road network. Thus, if $(i,j) \in A$ then the stations $i$ and $j$ are consecutive or connected by a consecutive sequence of road segments on which traffic flows directly from $i$ to $j$, with no intermediate stations along the way. The weight matrix supplies additional information regarding the connections between nodes. Firstly, let $w_{ij} \in W$ denote the $i$, $j$ element of the $|N|\times |N|$ matrix, and
+
+\begin{equation}
+\label{eq:1}
+w_{ij} = 
+\begin{cases}
+w(i,j) & if(i,j) \in A\\
+0 & otherwise
+\end{cases}
+\end{equation}
+where function $w\text{:}(i,j)\in A \rightarrow \mathbb{R}$ is a measure of closeness between the connected nodes $i$ and $j$. The measure of closeness is often inversely related to distance denoting the relatedness between observations at nodes $i$ and $j$.
+
+ To define this problem mathematically, suppose that time is discretized into short fixed-duration intervals $\delta$, which will be referred to as time steps, so that the historical horizon $H$ consists of $|H|$ time steps and the horizon $T$ consists of $|T|$ time steps. Suppose $N$, as defined above, is the set of locations where traffic is observed, numbering $|N|$ locations. Then an observation of traffic speeds for a single time step $t$ is a vector of size $|N|$ denoted $\boldsymbol{V_{t}} =[v_t^0,...,v_t^{|N|}] \in \mathbb{R}^{|N|}$ where
+$v_t^i \in \mathbb{R}$ is a scalar value for the speed at location $i \in N$. Thus, at a current time $t$ the goal is to find $\hat{\boldsymbol{V}}_{t+1},\hat{\boldsymbol{V}}_{t+2},...\hat{\boldsymbol{V}}_{t+|T|}$ based on the observed $\hat{\boldsymbol{V}}_{t-|H|+1},...\hat{\boldsymbol{V}}_{t-1},\hat{\boldsymbol{V}}_{t}$ to maximize:
+% \begin{tiny}
+\begin{equation}
+\label{eq:2}
+% \begin{split}
+%\mathop{\arg\max}_{\hat{\boldsymbol{V}}_{t+1},
+% \hat{\boldsymbol{V}}_{t+2},...\hat{\boldsymbol{V}}_{t+|T|}}
+{log P(\hat{\boldsymbol{V}}_{t+1},
+% \hat{\boldsymbol{V}}_{t+2},
+...\hat{\boldsymbol{V}}_{t+|T|}| \\  \hat{\boldsymbol{V}}_{t+1-|H|},...,\hat{\boldsymbol{V}_{t-1}},\hat{\boldsymbol{V}_{t})}}
+% \end{split}
+\end{equation}
+% \end{tiny}
+
+where $P(\cdot)$ denotes the unknown, dynamic, data-generating process. 
+% \begin{list}{}{}
+% \item{\url{http://www.latex-community.org/}} 
+% \item{\url{https://tex.stackexchange.com/} }
+% \end{list}
+
+\section{Methods}
+\subsection{Preliminaries}
+% See \cite{ref1,ref2,ref3,ref4,ref5} for resources on formatting math into text and additional help in working with \LaTeX .
+As seen above, traffic state prediction can be seen as a time-series forecasting problem, where the traffic state in future time intervals is predicted based on observations during past time-intervals. However, traffic in the transportation network evolves both over space and time, and temporal patterns are not independent of spatial dependencies due to the flow of traffic across the network. This paper presents a deep learning approach that predicts traffic state across a transportation network and over medium to long-term prediction horizons. The proposed solution approach should be able to capture and employ knowledge of the spatio-temporal dependencies in traffic state, thus it uses the graph representation of the underlying transportation network as the basis for the GNN-bases model. The transportation network is transformed into a graph, as described in the previous section, with a weighted adjacency matrix determined via Equation \ref{eq:1} where the weights are computed as $w(i,j)=e^{-\omega d_{ij}}$ where $d_{ij}$ is the road-network distance between stations $i,j\in N$ and $\omega$ is a scaling weight factor.
+%\subsection{Background on Graph Neural Networks}
+
+%Although traditional deep learning methods have been applied to extract features from Euclidean space data with great success, many real-world application scenarios generate data from non-Euclidean spaces, and the performance of traditional deep learning methods in processing non-Euclidean space data is still unsatisfactory. For example, in e-commerce, a Graph-based learning system can use the interaction between users and products to make very accurate recommendations, but the complexity of graphs makes existing deep learning algorithms face great challenges in processing them. This is due to the irregularity of graphs, since each graph has an unordered node of variable size, and each node in the graph has a different number of neighboring nodes. Thus, some important operations (e.g., convolution) that are easy to compute on images (Image) are no longer suitable for direct use on graphs. Moreover, a core assumption of existing deep learning algorithms is that data samples are independent of each other. However, this is not the case for graphs, where each data sample (node) in the graph will have edges related to other real data samples (nodes) in the graph, and this information can be used to capture the interdependencies between instances.
+% Currently, graph neural networks can be classified into five main categories, namely, Graph Convolution Networks, Graph Attention Networks, Graph Autoencoders, Graph Generative Networks, and Graph Spatial-temporal Networks.
+
+\subsection{Proposed Model Architecture}
+The proposed spatio-temporal GNN-based traffic prediction approach (STGT) combines neural network components intended to capture spatial and temporal features and patterns in traffic data. The input to the model is the multi-dimensional time-series of the traffic speeds observed over the past $|H|$ time intervals in a historical time horizon across $|N|$ observation locations, denoted $V_t=[v_t^0,...,v_t^{|N|}]\in R^{|N|}$. This input feeds into a spatial GNN-based block that extracts and learns the spatial features. We implement two versions of the model, where the spatial GNN-based component can be a GCN or GAT block, which will be referred to as GCN-STGT and GAT-STGT, respectively. This is followed by an RNN block using a two-layer long short-term memory (LSTM) network to preform temporal feature extraction. Finally, the RNN outputs passes through a fully-connected network to generate the final predictions. 
+%The spatial GAT block employed in this model is based on the architecture proposed in \cite{velivckovic2017graph}, where a multi-head attention mechanism is employed to enable the learning of spatial dependencies through multiple independent attention blocks. 
+%Since building deep GAT blocks can be computationally expensive and not necessary for the feature extraction, the GAT output feeds into an LSTM block. 
+The model architecture is shown in Figure \ref{Model Architecture}, and the details of the model are described below. 
+
+\begin{figure}
+\centering
+\includegraphics[scale=0.4]{Figure_Model2.pdf}
+\caption{Spatio-Temporal Graph Convolutional Network Model Architecture}     \label{Model Architecture}
+\vspace{-4mm}
+\end{figure}
+
+\subsubsection{Spatio-temporal Representation of Traffic Data}
+While GNN models are able to leverage node features to capture spatial dependency of a graph, there are demonstrated challenges in employing them with traffic data. Specifically, Zhang et al. \cite{zhang2019spatial} show that it can be difficult to find proper feature representation of time-series data over space and propose a Speed-to-Vector (Speed2Vec) data embedding mechanism to define feasible feature representations of the time-series data to be used within GNNs. The present study adopts the Speed2Vec representation, where the speed observations at a given node in a fixed-duration historical time horizon are taken as the hidden feature at a time step, embedded in a vector $h_t=[v_{t-F+1},v_{t-F+2},…,v_t]$ where $h_t \in \mathbb{R}^F$ and $F$ is the duration of the historical time horizon in terms of number of time steps. Then, these vectors are used to create the network-wide input $H_S^N$ to the spatial GAT block, such that: 
+\begin{equation}
+\label{eq:3}
+H_S^N = 
+\begin{bmatrix} h_1^1 &\cdots& h_S^1 \\
+\vdots & \ddots & \vdots \\
+h_1^{|N|} & \cdots &h_S^{|N|} \end{bmatrix}
+\end{equation}
+where $H_S^{N} \in \mathbb{R}^{S\times{|N|}\times F}$, $S$ is the length of the temporal sequence, and $|N|$ is the number of nodes (i.e., stations generating traffic observations). The historical horizon duration $F$ can vary depending on the specific dataset and application of the approach. For example, if 1-minute observations are collected, the historical horizon might contain a larger number of time-steps compared to cases when 5-minute data is available. Similarly, the historical horizon might need to be adjusted depending on the desired prediction horizon $T$, as specified in the problem definition.
+
+\subsubsection{Spatial Feature Extraction} 
+The proposed model architecture is tested with two types of GNNs for spatial feature extraction: a GCN and a GAT block. The architecture is implemented according to the original GAT implementation by \cite{Velickovic2018GraphAN} where the GAT version employs a multi-head attention mechanism to enable the model to jointly learn spatial dependencies through multiple attention blocks. The GAT uses the provided graph structure, in this case the transportation road network, and performs self-attention over the nodes $i\in N$ to compute the so-called attention coefficients $e_ij$ for each of its neighboring nodes $j\in N$ s.t. $(i,j)\in A$, which indicate the importance of node $j$'s features to node $i$. Therefore, the GAT learns a weight matrix for the relatedness between the graph nodes. On the other hand, the GCN architecture is simpler, in that the weight matrix is assumed to be as provided to the model, in this case the inverse-distance-based weight matrix defined previously. Comparing the performance of GCN-STGT and GAT-STGT model architectures will allow for an understanding how much of the attention information can be captured by the interpretable inverse-distance-based weight matrix in the GCN-STGT, and how much improvement can be brought on by the attention mechanism employed in GAT-STGT. 
+
+\subsubsection{Temporal Feature Extraction}  
+The traffic state data, with its distinct time-series format is suitable for use with recurrent neural networks (RNNs) which can be leveraged to learn temporal dependencies for time-series prediction. In particular, LSTM networks are the most commonly used RNNs, especially when long-term dependencies need to be captured \cite{yu2019review}. The LSTM architecture uses gating units and cell states for the flow of information for long-term time series prediction. While the cell states store memory information and pass through all the time iterations, the gating units are used to decide whether to add or remove information for a cell state. Additionally, LSTM uses so-called forget gates which decide which information can be removed from a cell state. More details and the mathematical expressions of an LSTM with a forget gate are presented in the original work by Gers et al. \cite{gers2000learning}. 
+%\subsubsection{Convolutional Neural Networks for Deep Learning of Spatial Dependencies} 
+%Given the complexity of the GAT layers, efficient model architectures avoid deep learning with large numbers of GAT layers. Allowing the GAT block to extract the spatial dependencies, we then implement a deeper convolutional neural network (CNN) which continues to perform convolutions, similarly to GAT, and extract spatial dependency features but without the need to learn the importance of those features via any attention mechanisms. CNNs have the superiority of fast training and simple structures and implementing them as the last learning block in the model architecture allows for further parametrization and improvements in training having already extracted the spatial and temporal features from the GAT and LSTM blocks, respectively. 
+% To make use of the graph structure within a deep learning network, this study uses graph-convolution layers, like those introduced by (Yu et al., 2017), incorporated within a neural network architecture composed of several spatio-temporal convolutional blocks. In summary, the methodology employed in this study makes use of the following convolutional neural network (CNN) components:
+%\begin{itemize}
+%\item  Graph CNNs are used for extracting spatial features from the transportation network’s graph structure. As proposed by Yu et al. (2017), the connectivity and globality of the network are maintained through a graph CNN which extracts the patterns and features in the spatial domain. In this study, the graph structure is modified so as to correspond to the underlying transportation network, and network-based distances, which is further described in the section on numerical experiments.
+%\item  Gated CNNs are used for extracting temporal features. The gated CNNs are employed via convolutional structures on the time axis, according to Gehring et al. (2017), to capture temporal dynamics of traffic patterns. 
+%\item  Finally, the spatial and temporal domains are fused via a spatio-temporal convolutional block to jointly process the graph-structured time-series. The purpose of this component is to coherently extract spatial features over time and temporal features across space. This component employs a gated temporal convolutional layer and a graph convolutional layer, as presented by Kong et al. (2020). In this study, all graph-convolutional layers are implemented using a weighted adjacency matrix obtained by adjusting the transportation network structure. 
+%\end{itemize}
+% The use of convolutional structures is an important aspect of this model that allows for parallelization with fewer parameters and shorter training speed. Furthermore, this type of architecture is key for applying graph neural networks over large-scale networks and for long-term traffic state prediction. 
+
+\subsection{Sparse Model Structure}
+To reduce the amount of arithmetic operations to be performed and the number of weights to be stored on GCN-STGT  and GAT-STGT, we will sparsify our model by removing some of the neuronal connections. In general, sparsifying the model can reduce the computing time significantly with almost no loss of accuracy.\cite{hoefler2021sparsity}
+The details of the approach are shown in Figure \ref{fig:sparetraining}, where first a random sparse model is initialized, then at regular intervals $n$ weights with the lowest absolute value of gradient are dropped, while $n$ weights with the highest value are grown.   
+
+
+\begin{figure*}[htpb!]
+    %  \vspace{-.1in}
+\centering
+\captionsetup{justification=centering}
+ \includegraphics[width = 0.99\linewidth]{training_process_iccd.pdf}
+ \centering
+     \caption{Iterative drop \& grow based sparse training process.}
+     \vspace{-4mm}
+     \label{fig:sparetraining}
+\end{figure*}
+
+% \begin{algorithm}
+% \caption{Sparse training algorithm}\label{alg:alg1}
+% \begin{algorithmic}
+% \Require Weight of each layer $W^l$, Sparse matrix of each layer $M^l$, The number of data $N$, Update frequency $f$, Death rate $k$, Sparsity degree $d$
+%  \Ensure Updated sparse matrix $M_{new}^l$, Updated weight matrix $W_{new}^l$
+% \If {$N ==0$} %\# Sparse the net at the  beginning
+% \State $M^l \gets Initialize()$
+% \EndIf
+% \If {$N \% f ==0$} %\# Update the sparse matrix of each layer
+% \For{$\textit{each layer}\in model$} %\# Disconnect some nodes
+% \State $W^l_{Sorted} \gets Sort(W^l.view(-1))$ %\# Sort the weight matrix
+% \For{$M^l_{ij}\in M^l$}
+% \If{$W^l_{ij} \ge W^l_{Sorted}[len(W^l_{Sorted})\times k]$}
+% \State $M^l_{ij}\gets 1$
+% \Else
+% \State $M^l_{ij}\gets 0$
+% \EndIf
+% \EndFor
+% \EndFor
+% \For{$\textit{each layer}\in model$} %\# Connect some nodes
+% \State $g^{W^l} \gets W^l.grad.clone() $ %\# Get the gradient matrix
+% \State $g^{W^l}_{Sorted} \gets Sort(g^{W^l}.view(-1))$ %\# Sort the gradient matrix
+% \State $g^{W^l}_{Sorted} \gets g^{W^l}_{Sorted}\bigodot M^l$ %\# Avoid selecting already existing connections 
+% \For{$M^l_{ij}\in M^l$}
+% \If{$g^{W^l} \ge g^{W^l}_{Sorted}[len(W^l_{Sorted})\times (1-k)]$}
+% \State $M^l_{ij}\gets 1$
+% \EndIf
+% \EndFor
+% \EndFor
+% \For{$\textit{each layer}\in model$} %\# Update the layers weight in the model
+% \State $W^l\gets W^l\bigodot M^l$
+% \EndFor
+% \EndIf
+% \State \Return{$W^l, M^l$}
+% \end{algorithmic}
+% \end{algorithm}
+Dynamic sparse training is the process of training with fixed number of nonzero weights in each neural network layer. We use a toy example to illustrate the sparse training dataflow. For simplicity, we use the matrix with a size of $4 \times 4$ to represent a weight tensor in the neural network. The sparse training is comprised of 4 steps as follows. 
+
+\begin{itemize}
+\item \protect\circled{1} The weight tensor is random sparsified as $W^0$ at a given sparsity $S = 0.5$, which means 50\% of weights will be deactivated (set as zeros) and others remain activate (non-zero). 
+\item \protect\circled{2} The sparsified tensor will be trained $\Delta T - 1$ iterations, where $\Delta T$ is the drop-and-grow frequency. During the $\Delta T - 1$ epochs, the non-zero elements in weight tensor are updated following the standard training process, while the zero elements will remain as zero. At the $i$-th iteration, the weight tensor is denoted as $W^i$, while the gradient is denoted as $G^i$. 
+\item \protect\circled{3} At the $\Delta T$-th iteration, we first drop $k$ weights that are closed to zero or set the weights that have the least $k$ absolute magnitude as zeros ($k = 2$). Then, 
+\item \protect\circled{4} we grow the weights with the highest $k$ absolute gradients back to nonzero (updating the weights with the highest $k$ absolute gradients to nonzero in the following weights updating iteration). During the process, the number of activated weights are kept the same, i.e., the newly activated (non-zero) weights are the same amount as the previously deactivated (zero) weights. 
+\end{itemize}
+
+\protect\circled{2}\protect\circled{3}\protect\circled{4} will be repeated until the end of the training.
+
+See Algorithm \ref{alg:alg1} for detailed algorithm.
+\begin{algorithm}
+% \scriptsize
+\small
+\caption{Sparse training algorithm}\label{alg:alg1}
+\begin{algorithmic}[1]
+\Require Weight of each layer $W^l$, Sparse matrix of each layer $M^l$, The number of data $N$, Update frequency $f$, Drop rate $k$, Sparsity rate $d$
+\Ensure Updated sparse matrix $M_{new}^l$, Updated weight matrix $W_{new}^l$
+
+\If {$N ==0$} %\# Sparse the net at the  beginning
+ \State $M^l \gets Initialize()$
+\EndIf
+\If {$N \% f ==0$} %\# Update the sparse matrix of each layer
+\For{$\textit{each layer}\in model$} %\# Disconnect some nodes
+\State $W^l_{Sorted} \gets Sort(W^l.view(-1))$ %\# Sort the weight matrix
+\For{$M^l_{ij}\in M^l$}
+\If{$W^l_{ij} \ge W^l_{Sorted}[len(W^l_{Sorted})\times k]$}
+\State $M^l_{ij}\gets 1$
+\Else
+\State $M^l_{ij}\gets 0$
+\EndIf
+\EndFor
+\EndFor
+\For{$\textit{each layer}\in model$} %\# Connect some nodes
+\State $g^{W^l} \gets W^l.grad.clone() $ %\# Get the gradient matrix
+\State $g^{W^l}_{Sorted} \gets Sort(g^{W^l}.view(-1))$ %\# Sort the gradient matrix
+\State $g^{W^l}_{Sorted} \gets g^{W^l}_{Sorted}\bigodot M^l$ %\# Avoid selecting already existing connections 
+\For{$M^l_{ij}\in M^l$}
+\If{$g^{W^l} \ge g^{W^l}_{Sorted}[len(W^l_{Sorted})\times (1-k)]$}
+\State $M^l_{ij}\gets 1$
+\EndIf
+\EndFor
+\EndFor
+\For{$\textit{each layer}\in model$} %\# Update the layers weight in the model
+\State $W^l\gets W^l\bigodot M^l$
+\EndFor
+\EndIf
+\State \Return{$W^l, M^l$}
+\end{algorithmic}
+\end{algorithm}
+
+% \subsection{Theoretical Analysis}
+% % \textcolor{red}{(CD: @shaoyi, please provide some error bound proof of sparse training here.)}
+
+% We use $G(\bm{W}) = \mathbb{E}_{x\sim \mathcal{X}} g(x; W) $ to denote the loss function of sparse training where $\mathcal{X}$ is the input data. We denote the learning rate as $\alpha$. $\nabla g(x;W)$ and $\nabla G(W)$ are denoted as the stochastic and gradients, respectively. Each sparse training round ($\Delta T$ steps), we apply the drop-and-grow policy and update the mask. We denote $W^{[q]}$ and $M^{[q]}$ as the weights after $q-1$ rounds and mask grown at the q-th round, respectively. We have the following assumptions \cite{ma2021effective}:
+
+
+% \subsubsection{Assumption}
+
+% We introduce several assumptions on the loss function and gradient, which follow the setting of \cite{ma2021effective} and are popular used in the literature.
+
+% \begin{assumption}
+% \label{assu 1}
+% (Smoothness). We assume the objective function $G(W)$ is L-smooth, i.e.,
+% \begin{align}
+%     || \nabla G(W+h) - \nabla G(W)|| \leq L ||h||, \quad h \in \mathbb{R}^{d}.
+% \end{align}
+% This assumption implies that
+% \begin{align}
+%     || \nabla G(W_1) - \nabla G(W_2)|| \leq L ||W_1-W_2||.
+% \end{align}
+% or equivalently,
+% \begin{align}
+%     G(W_1) - G(W_2) &\leq \langle G(W_2),W_1-W_2\rangle + \frac{L}{2} || W_1-W_2 ||^2,
+% \end{align}
+% where $W_1,W_2 \in \mathbb{R}^{d}$.
+% \end{assumption}
+
+
+% \begin{assumption}
+% \label{assu 2}
+% (Gradient noise) We assume for any t and q that
+% \begin{align}
+%     \mathbb{E} [\nabla g(x_t^{[q]};W)] &= \nabla G(W),\\
+%     \mathbb{E} [||\nabla g(x_t^{[q]};W) - \nabla G(W)||^2] &\leq \sigma^2 \label{eq: ass2 2}
+% \end{align}
+% where $\sigma > 0$ and $x_t^{[q]}$ is independent of each other for any $t$ and $q$.
+% \end{assumption}
+
+% \begin{assumption}
+% \label{assu 3}
+% (Mask-incurred error) We assume that
+% \begin{align}
+%     ||W_t^{[q]} \odot M^{[q]} - W_t^{[q]}||^2 \leq \tau^2 ||W_t^{[q]}||^2
+% \end{align}
+% where $\tau \in [0,1).$
+% \end{assumption}
+
+% \subsubsection{Convergence Analysis}
+% We establish the convergence property of sparse training. 
+
+
+% \begin{lemma}
+% \label{lemma: 1}
+% (Decent Lemma after each Inner-Iteration) Under assumptions \ref{assu 1}-\ref{assu 3}, it holds for each $t$ and $q$ that
+% \begin{align}
+%     \label{eq: lemma: 1}
+%     \mathbb{E} [G(W_t^{[q]})] \leq & \mathbb{E} [G(W_{t-1}^{[q]})] - \frac{\alpha}{3} \mathbb{E} || \nabla G(W_{t-1}^{[q]} )||^2  \nonumber\\
+%     & + \frac{\alpha L \sigma^2}{2} + \frac{2\alpha L^2\tau^2}{3} \mathbb{E} ||W_{0}^{[q]}||^2.
+% \end{align}
+% \end{lemma}
+
+% % \begin{remark}
+% % As shown in Lemma \ref{lemma: 1}, the loss value can decrease by $\frac{\alpha}{3} \mathbb{E} || \nabla F(W_{t-1}^{[q]} ||^2$. However, two additional errors will be added which is due to the stochastic gradient and inexact search of mask.
+% % \end{remark}
+
+
+% \begin{lemma}
+% (Decent Lemma after each Round) Under Assumptions \ref{assu 1}-\ref{assu 3}, it holds for each $q$ that
+% \begin{align}
+% \label{eq: lemma 2}
+%     \mathbb{E} [G(W_{0}^{[q+1]})] \leq & \mathbb{E} [G(W_{0}^{[q]})] - \frac{\alpha}{3} \sum_{t=1}^{\Delta T} \mathbb{E}|| \nabla G(W_{t-1}^{[q]})||^2 \nonumber\\
+%     & + \frac{\alpha^2L \sigma^2 \Delta T}{2} +\frac{2\alpha L^2 \tau^2 \Delta T}{3} \mathbb{E} ||W_{0}^{[q]}||^2.
+% \end{align}
+% \end{lemma}
+
+% \begin{lemma}
+% (Decent Lemma $\uppercase\expandafter{\romannumeral2}$ after each Round) Under Assumptions \ref{assu 1}-\ref{assu 3}, it holds for each $q$ that
+% \begin{align}
+%     \mathbb{E} [G(W_{0}^{[q+1]})] \leq & \mathbb{E} [G(W_{0}^{[q]})] - \frac{\alpha \Delta T}{12} \mathbb{E} || \nabla G(W_{0}^{[q]}) ||^2 \nonumber\\
+%     & + \frac{\alpha^2 L \sigma^2 \Delta T^2}{2} + \frac{2\alpha L^2 \tau^2 \Delta T^2}{3} \mathbb{E}|| W_{0}^{[q]} ||^2.
+% \end{align}
+% \end{lemma}
+
+
+% Based on the lemmas above, we establish the convergence theorem of sparse training.
+% \begin{theorem}
+% Under Assumptions \ref{assu 1}-\ref{assu 3}, if the learning rate $\alpha=1/(16LT\sqrt{Q})$, it holds that
+% \begin{align}
+%     \frac{1}{Q} \sum_{q=1}^Q \mathbb{E}|| \nabla & G(W_0^{[q]} \odot M^{[q]}) ||^2 = \frac{C}{\sqrt{Q}} \nonumber\\
+%     &+ \frac{10L^2\Delta T\tau^2}{Q} \sum_{q=1}^Q \mathbb{E}|| W_0^{[q]}||^2,
+% \end{align}
+% \end{theorem}
+% where $C$ is a constant
+
+
+% % \begin{assumption}
+% % \label{assu 1}
+% % (SMOOTHNESS). We assume the objective function $G(W)$ is partition-wise L-smooth, i.e.,
+% % \begin{align*}
+% %     || \nabla G(W+h) - \nabla G(W)|| \leq L ||h||,
+% % \end{align*}
+% % where $h$ has same size as $W$.
+% % \end{assumption}
+
+% % \begin{assumption}
+% % \label{assu 2}
+% % (GRADIENT NOISE) We assume for any t and q that
+% % \begin{align*}
+% %     \mathbb{E} [\nabla g(x_t^{(q)}&;W)] = \nabla G(W),\\
+% %     \mathbb{E} [||\nabla g(x_t^{(q)}&;W) - \nabla G(W)||^2] \leq \sigma^2 \label{eq: ass2 2}
+% % \end{align*}
+% % where $\sigma > 0$ and $x_t^{(q)}$ is independent of each other for any $t$ and $q$.
+% % \end{assumption}
+
+% % \begin{assumption}
+% % \label{assu 3}
+% % (MASK-INDUCED ERROR) We assume that
+% % \begin{align*}
+% %     ||W_t^{(q)} \odot M^{(q)} - W_t^{(q)}||^2 \leq \tau^2 ||W_t^{(q)}||^2
+% % \end{align*}
+% % where $\tau \in [0,1).$
+% % \end{assumption}
+
+
+
+
+
+% % establish Proposition \ref{proposition: 1} to show the loss decrease in each round. Then, we get Proposition \ref{pro: conv} to show that our sparse training algorithm converges to the stationary model at rate $O(1/\sqrt{Q})$ under the proper learning rate.
+
+% % \begin{proposition}
+% % \label{proposition: 1} Under assumptions \ref{assu 1}-\ref{assu 3}, it holds for each $q$ that
+% % \begin{align}
+% %     \mathbb{E} [G(W^{[q+1]}&)]  \leq  \mathbb{E}  [G(W^{[q]})] - \frac{\alpha \Delta T}{12} \mathbb{E} || \nabla G(W^{[q]}) ||^2 \nonumber\\
+% %      + &\frac{\alpha^2 L \sigma^2 \Delta T^2}{2} + \frac{2\alpha L^2 \tau^2 \Delta T^2}{3} \mathbb{E}|| W^{[q]} ||^2.
+% % \end{align}
+% % \end{proposition}
+
+
+
+% % For Proposition \ref{proposition: 1}, we make the following remark
+% % \begin{remark}
+% % In each round of our sparse training, the loss value can decrease by $\frac{\alpha \Delta T}{12} \mathbb{E} || \nabla G(W^{[q]}) ||^2$. However, two additional errors will be added and slow the convergence, which is due to the stochastic gradient and inexact search of the mask.
+% % \end{remark}
+
+% % \begin{proposition}
+% % \label{pro: conv}
+% % If the learning rate $\alpha=1/(16L\Delta T\sqrt{Q})$, it holds that:
+% % \begin{align}
+% % \label{eq: pro1}
+% %     &\frac{1}{Q} \sum_{q=1}^Q \mathbb{E}|| \nabla  G(W^{[q]} \odot M^{[q]}) ||^2 \\ =  \nonumber 
+% %     &O\bigg{(}\frac{C}{\sqrt{Q}} + \frac{\tau^2}{Q} \sum_{q=1}^Q \mathbb{E}|| W^{[q]}||^2\bigg{)}
+% % \end{align}
+% % where $C$ is a constant.
+% % \end{proposition}
+
+
+
+% % In regard to Proposition \ref{pro: conv}, we make the following remarks:
+% % \begin{remark}
+% % During dense training, we do not have error introduced by the mask selected and have $\tau^2=0$. As shown in Eq. (\ref{eq: pro1}), we will have $\mathbb{E}(\nabla ||G(W^{[Q]}\odot M^{[Q]}))|| \rightarrow 0$, indicating that the sparse training will converge to a stationary point as Q increases to infinity. 
+% % \end{remark}
+% % \begin{remark}
+% % During sparse training, the error $\tau^2$ introduced by the mask selected will directly influence the model's performance. Our algorithm can improve mask search through a better balance between exploitation and exploration, which leads to a more accurate model.
+% % \end{remark}
+
+
+\section{Experiments}
+
+\subsection{Data Description}
+The numerical experiments use data from the California Department of Transportation (Caltrans) Performance Measurement System (PeMS), which collects real-time information from nearly 40,000 sensor stations across the freeway system of California and provides an Archived Data User Service (ADUS) containing over 10 years of data for historical analysis. 
+Traffic state prediction in this study is performed using the 5-minute station data, which include aggregate information regarding the traffic speed, flow, and occupancy on road segments at sensor locations. Specifically, we select the stations located in District 7, encompassing the Los Angeles metropolitan area, shown on the map in Fig. \ref{Locations of 2471}. 
+ 
+ The primary data for this analysis were the 5-minute data from district 7 stations for May and June of 2019. Data for six additional months were also obtained to test the transferability of the model across time periods when significant changes in demand and traffic patterns may have occurred. The station metadata for district 7 were used to obtain the location, corresponding road and direction of travel for each sensor station. This information was combined with the California Road System (CRS) web map and functional classification of roads. 
+ 
+ The original data contained information from a total of 4,854 sensor stations within the area of district 7. In the pre-processing stage, two types of missing data patterns were found: (1) some days had no observations (or had only nan value observations) for all or most stations, and (2) certain stations had missing data for multiple full days in the specified time period. The data were cleaned by first removing all days where the information for more than half of the stations was missing and then keeping only the set of working stations across the remaining days. After processing, 2,471 working stations remained to be used across all of the 8 months, with a few days of data removed for each month as needed. The locations of these working stations are represented with the yellow pins on the map in Figure \ref{Locations of 2471}.
+ 
+ The process for combining the PeMS Station Metadata with the CRS data to create a graph structure based on the underlying network structure are outlined briefly, following the approach described in the problem definition. First, a set of nodes were created at all road intersections to capture the connectedness of the road network. Second, detectors were matched to the nearest location on the corresponding road, and the graph nodes $N$ were created at these locations. Third, a set of graph edges $A$ were created along the roads and across intersections to connect any two adjacent detector locations. The roads connecting the stations are shown as purple lines in Figure \ref{Locations of 2471}, where only relevant roads containing at least one sensor station are displayed. 
+This information was used to generate a weighted matrix $\textbf{A}$, where for each pair of nodes as described previously. The weights were computed using distances along the network roads (i.e., not Euclidean or aerial distances), for the adjacent roads only.
+\begin{figure}
+\centering
+\includegraphics[scale=0.5]{Picture1.pdf}
+\caption{Locations of 2471 working sensor stations in district on the corresponding road network }     \label{Locations of 2471}
+\end{figure}
+
+\subsection{Experiment Design}
+The numerical experiments are designed for training, validation, and testing of the proposed STGT approach using 60 minutes of historical speed data from all 2,471 working sensors as input for the prediction of the traffic speed for the next 15 to 45 minutes across the same stations. Specifically, the models of the two types, GCN-STGT and GAT-STGT were trained for short-, mid- and long-term prediction of 15, 30 and 45-minutes in duration, respectively. The models are trained on data from the 53 available days in May and June of 2019, which will be referred to as the training time period 0, abbreviated TP0. Training is performed across 200 epochs with validation, and then test on a separate subset of the data not used for training or validation.
+
+ We conduct our GNN sparse training on an Intel Xeon Gold 5218 machine at 2.30 GHz with Ubuntu 18.04 using an Nvidia Quadro RTX 6000 GPU with 24 GB GPU memory. We use python 3.10.8, CUDA 11.6, pytorch 1.12.1 to setup the code.
+ We set the total number of epochs to 200 and the batch size equals to 242. For sparse training: The model initialization sparse method is \textit{Erd˝os-R´enyi-Kernel} (ERK) method\cite{evci2020rigging}. We set the death rate as 0.5 and drop-and-grow frequency as 1000 batch iterations. We set the model sparsity as 0.025, 0.05, 0.1, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 0.9, 0.95, 0.975 to evaluate the performance of the sparse training method and the float point operations (FLOPS) compared with dense model. The performance of the approach is measured using Mean Absolute Errors (MAE), Mean Absolute Percentage Errors (MAPE), and Root Mean Squared Errors (RMSE). 
+
+ To further evaluate the performance of the models on unseen and potentially different traffic patterns, the models are tested via zero-shot transfer with data from different time periods. A total of 3 testing scenarios (time periods) are created: 
+\begin{itemize}
+\item Testing time period 1 (TP1) during July and August 2019, immediately following the training period. Shifts in traffic patterns are possible in this period due to changes in lifestyle and travel needs during the summer. 
+\item Testing time period 2 (TP2) during December 2019 and January 2020, i.e. the following winter season. Though weather changes may not be significant in southern California, shifts in traffic patterns could occur due to seasonal shifts in travel demand. 
+\item Testing time period 3 (TP3) during May and June 2020, exactly a year after TP0 which would be expected to be most similar to TP0 due to the typical seasonality in transportation data. However, some important changes could have occurred due to the impacts of the COVID-19 pandemic causing shifts in activity and travel patterns. 
+% \item Testing time period 4 (TP4) contains data from December 2020 to January 2021, two months in the winter season during the pandemic.  
+% \item Testing time period 5 (TP5) contains data from May to June 2021, recorded two years after the data used for training, when the short-term effect f the pandemic may have passed, but long-term changes in traffic patters are persisting.  
+\end{itemize}
+
+
+\subsection{Evaluation Results}
+
+The primary results from the numerical experiments are shown in Table \ref{tbl:table1} and \ref{tbl:table2}, where each table includes the error measures for the GCN-STGT and GAT-STGT with three different prediction horizons and across all four time periods described above, for the original models and with 90\% sparsity level, respectively. Overall, comparing the error values between GCN-STGT and GAT-STGT, it can be observed that the use of GAT helps reduce the MAPE by 1 percentage point in most cases. This indicates that the inverse-distance based weights derived from the road network are able to capture some of the spatial dependencies and allow for a relatively well performing model, however the self-attuning mechanism can help further improve its performance. Comparing the values in Tables \ref{tbl:table1} and \ref{tbl:table2}, we observe very small increase in error values, indicating the the models' accuracy is preserved while introducing a significant level of sparsity. For the sake of brevity, the error measurement with respect to sparsity are showed for only two cases, the GCN-STGT and GAT-STGT models for a 45-minute prediction horizon, in Figures \ref{GCN 45min} and \ref{GAT 45min}, respectively. 
+
+\subsubsection{Temporal Prediction Performance}
+In Table \ref{tbl:table1}, before introducing the model sparsity, each model's performance can be compared across the 3 prediction horizons for a given dataset. For TP0, the GCN-STGT prediction error is highest for the 45-minute horizon, however the performance is not significantly different between the three prediction horizons. With the GAT-STGT approach, the prediction errors are lower than those achieved by GCN-STGT, and the differences in the prediction error for the horizons in the range from 15 to 45 minutes is no longer significant. These results indicate that the proposed approach is suitable for both mid- and long-term traffic prediction. 
+
+Considering the zero-shot transfer tests with the datasets from different prediction horizons, some interesting observations can be made. As expected, errors are lowest when testing on a subset of the training dataset within the original time period (TP0), with MAPE averaging close to 4\% with GCN-STGT and 3\% with GAT-STGT. However, the models' transferability differs between three testing time periods. Namely, the MAPE values for TP3 are consistently the lowest, averaging close to 10\% with GCN-STGT and 9\% with GAT-STGT. This indicates that zero-shot transfer is possible for TP3. However, the MAPE values for TP2 are close to 22\% with GCN-STGT and 21\% with GAT-STGT, while for TP1 the highest error values are observed, with MAPE near 24\% for both model types. This indicates that the models may need to retrained for TP1 and TP2. This lack of transferrability over time, especially for the nearest time period (TP1), reinforces the need for a model that can be trained efficiently, which in this case is made possible by the sparsity techniques discussed in the following section.
+
+\subsubsection{Sparse Training Accuracy Evaluation}
+Tables \ref{tbl:table1} and \ref{tbl:table2} show the comparison of GCN-STGT and GAT-STGT on TP1, TP2 and TP3 for three different time steps (15min, 30min, 45min) with 0\% sparsity and with the sparsity level at 90\%, respectively. We use three error measurements: MAE, RMSE and MAPE. The test results on the three datasets show that, for the most cases, the average error of the GAT-STGT method is lower than that of the GCN-STGT method.
+The difference between the two approaches is more significant under the 30min and 15min predictions. 
+
+Using typical training time (total training epochs is 200), there is almost no accuracy loss compared to the dense model even at sparsity of 90\% on all three different datasets. For the GCN-STGT method, the error increases slightly until the sparsity reaches 85\%. For the GAT-STGT method, the accuracy-sparsity curve has the Occam’s Hill \cite{rasmussen2000occam} property where the accuracy first increases with increasing sparsity and then decreases. Therefore, the embedding sparsification is favorable for this specific task. 
+% For most of the evaluated datasets and tasks, the embeddings sparsification technique provides a significant training FLOPs reduction benefit and has little impact on accuracy.
+
+% \begin{table*}[!t]
+% \caption{An Example of a Table\label{tab:table1}}
+% \centering
+% % \begin{tabular}{ |p{2cm}||p{2cm}|p{2cm}|p{2cm}|  }
+%   \begin{tabular}{lSSSSS}
+%     \toprule
+%     \multicolumn{2}{c|}{\multirow{2}{*}{Dataset}}  &
+%       \multicolumn{2}{c}{A (\%)} \\&
+%       \multicolumn{2}{c}{B (\%)} &
+%       \multicolumn{2}{c}{C (\%)} \\
+%     & GCN & GAT & GCN & GAT & GCN & GAT\\
+%       \midrule
+%   \multirow{2}*{text31}      & t311 &text312 & text313  \\
+%        & t312 & text322 & text323 \\
+%     \bottomrule
+%   \end{tabular}
+% \end{table*}
+\begin{table*}[htbp]
+% \renewcommand\arraystretch{2}
+  \caption{Comparison of the error values of GCN-STGT and GAT-STGT for different prediction horizons with 0\% sparsity}\label{tab:table1}
+  \centering
+  \setlength{\tabcolsep}{5.7mm}{
+  \begin{tabular}{|c|c|ccc|ccc|}
+    \hline
+    \multirow{2}{*}{\centering{Dataset}}
+    &\multirow{2}{*}{\centering{Error}}
+    &\multicolumn{3}{c}{GCN-STGT}
+    &\multicolumn{3}{|c|}{GAT-STGT} \\
+     \cline{3-8}
+     {} &{} & 45min & 30min & 15min & 45min & 30min & 15min  \\\hline
+    \multirow{3}{*}{\centering{Training (TP0)}}  
+    & MAE & 2.053 &  1.945 &  1.988 & 1.829 & 1.870 & 1.951 
+     \\\cline{2-8}    
+    &RMSE & 4.325 & 3.77 & 3.897 & 3.657 & 3.861 & 3.803
+    \\\cline{2-8}
+   & MAPE & 4.194 & 3.350 & 3.407 & 3.121 & 3.379 & 3.319  \
+   \\
+   \hline
+  \multirow{3}{*}{\centering{Time period 1 }}  
+  & MAE & 8.051 &  10.67 &  9.515 & 8.082 & 7.585 & 7.468  
+  \\\cline{2-8}    
+    &RMSE & 11.95 &  12.78 &  13.21 & 10.46 & 11.76 & 11.69  
+    \\\cline{2-8}
+   & MAPE & 24.73 &  24.02 &  24.91 & 24.58 & 24.16 & 23.85  \
+   \\
+   \hline  
+     \multirow{3}{*}{\centering{Time period 2}}  
+     & MAE & 7.410 & 9.618 & 8.687 & 7.280 & 6.910 & 6.798  
+     \\\cline{2-8}    
+    &RMSE & 11.27 & 11.56 & 12.39 & 10.63 & 10.87 & 10.83
+    \\\cline{2-8}
+   & MAPE & 22.03 & 21.00 & 22.11 & 21.76 & 21.28 & 21.12  \
+   \\
+   \hline
+     \multirow{3}{*}{\centering{Time period 3}}  
+     & MAE & 4.246 & 5.450 & 5.091 & 4.056 & 4.043 & 4.053
+     \\\cline{2-8}    
+    &RMSE & 7.031 & 7.698 & 7.484 & 6.249 & 6.753 & 6.653
+    \\\cline{2-8}
+   & MAPE & 9.978 & 10.01 & 10.48 & 9.273 & 9.250 & 9.216  \
+   \\
+   \hline
+  \end{tabular}}
+  \label{tbl:table1}
+\end{table*}
+
+\begin{table*}[htbp]
+% \renewcommand\arraystretch{2}
+  \caption{Comparison of the error values of GCN-STGT and GAT-STGT for different prediction horizons with 90\% sparsity}\label{tab:table2}
+  \centering
+  \setlength{\tabcolsep}{5.7mm}{
+  \begin{tabular}{|c|c|ccc|ccc|}
+    \hline
+    \multirow{2}{*}{\centering{Dataset}}
+    &\multirow{2}{*}{\centering{Error}}
+    &\multicolumn{3}{c}{GCN-STGT}
+    &\multicolumn{3}{|c|}{GAT-STGT} \\
+     \cline{3-8}
+     {} &{} & 45min & 30min & 15min & 45min & 30min & 15min  \\\hline
+    \multirow{3}{*}{\centering{Training (TP0)}}  & MAE & 2.786 &  2.664 &  2.318 &  3.189 & 2.500 &  2.146 
+     \\\cline{2-8}    
+    &RMSE & 4.850 & 4.776 & 4.575 & 5.404 & 4.616 & 4.621
+    \\\cline{2-8}
+   & MAPE & 5.647 & 5.418 & 4.938 & 6.319 & 5.247 & 4.787  \
+   \\
+   \hline
+  \multirow{3}{*}{\centering{Time period 1 }}  & MAE & 8.273 &  10.07 &  9.947 & 8.246 &  8.463 &  8.608  
+  \\\cline{2-8}    
+    &RMSE & 12.14 &  14.85 &  13.85 &  12.589 & 12.26 &  12.36  
+    \\\cline{2-8}
+   & MAPE & 24.51 &  26.25 &  25.41 &  24.87 & 25.10 &  24.88  \
+   \\
+   \hline  
+     \multirow{3}{*}{\centering{Time period 2}}  & MAE & 7.477 & 10.25 & 9.214 & 7.468 & 7.633 & 7.873  
+     \\\cline{2-8}    
+    &RMSE & 11.24 & 13.89 & 12.93 & 11.10 & 11.29 & 11.44
+    \\\cline{2-8}
+   & MAPE & 21.71 & 23.67 & 22.88 & 21.71 & 22.15 & 22.09  \
+   \\
+   \hline
+     \multirow{3}{*}{\centering{Time period 3}}  & MAE & 4.552 & 6.024 & 5.471 & 4.563 & 4.642 & 4.789
+     \\\cline{2-8}    
+    &RMSE & 6.954 & 8.054 & 7.843 & 6.956 & 7.040 & 7.130
+    \\\cline{2-8}
+   & MAPE & 9.900 & 12.19 & 11.03 & 9.921 & 10.09 & 10.23  \
+   \\
+   \hline
+  \end{tabular}}
+  \label{tbl:table2}
+\end{table*}
+
+% The full comparison for the evaluation of the accuracy performance of the sparse training for different model sparsity were not included for the sake of brevity, but 
+% representative results are shown in 
+Figures \ref{GCN 45min} and \ref{GAT 45min} show the evaluation of the accuracy performance of the sparse training for different model sparsity. We observe that the error is generally stabilized until the sparsity reaches 85\% or even 90\%.
+% , although the overall trend is increasing. 
+% For the GAT method, there is a minimum value of error when the sparsity reaches about 30 percent.
+The turning point (marked as red circles) appears When the sparsity reaches about 85 percent. Therefore, as long as we keep the sparsity below 85\%, there is negligible significant impact on the accuracy of the training model, while we could introduce significant computational reduction and memory footprint reduction in computer system.
+
+\begin{figure*}[htbp]
+\centering
+\includegraphics[scale=0.5]{GCN_45min.pdf}
+\caption{Mean absolute error(MAE), Root-mean-square(RMS), Mean absolute percentage error(MAPE) vs. sparsity for testing time period 1, testing time period 2, testing time period 3, using GCN-STGT with a 45-minute prediction horizon} \label{GCN 45min}
+\end{figure*}
+
+%\begin{figure*}[htbp]
+%\centering
+%\includegraphics[scale=0.5]{Figures/GCN 30min.pdf}
+%\caption{Mean absolute error(MAE), Root-mean-square(RMS), Mean absolute percentage error(MAPE) vs. sparsity on testing time period 1, testing time period 2, testing time period 3 datasets. Using GCN method to predict 6 timesteps (30min)} \label{GCN 30min}
+%\end{figure*}
+
+%\begin{figure*}[htbp]
+%\centering
+%\includegraphics[scale=0.5]{Figures/GCN 15min.pdf}
+%\caption{Mean absolute error(MAE), Root-mean-square(RMS), Mean absolute percentage error(MAPE) vs. sparsity on testing time period 1, testing time period 2, testing time period 3 datasets. Using GCN method to predict 3 timesteps (15min)} \label{GCN 15min}
+%\end{figure*}
+
+\begin{figure*}[htbp]
+\centering
+\includegraphics[scale=0.5]{GAT_45min.pdf}
+\caption{Mean absolute error(MAE), Root-mean-square(RMS), Mean absolute percentage error(MAPE) vs. sparsity for testing time period 1, testing time period 2, testing time period 3, using GAT-STGT with a 45-minute prediction horizon} \label{GAT 45min}
+\end{figure*}
+
+%\begin{figure*}[htbp]
+%\centering
+%\includegraphics[scale=0.5]{Figures/GAT 30min.pdf}
+%\caption{Mean absolute error(MAE), Root-mean-square(RMS), Mean absolute percentage error(MAPE) vs. sparsity on testing time period 1, testing time period 2, testing time period 3 datasets. Using GAT method to predict 6 timesteps (30min)} \label{GAT 30min}
+%\end{figure*}
+
+%\begin{figure*}[htbp]
+%\centering
+%\includegraphics[scale=0.5]{Figures/GAT 15min.pdf}
+%\caption{Mean absolute error(MAE), Root-mean-square(RMS), Mean absolute percentage error(MAPE) vs. sparsity on testing time period 1, testing time period 2, testing time period 3 datasets. Using GAT method to predict 3 timesteps (15min)} \label{GAT 15min}
+%\end{figure*}
+
+\subsubsection{Training FLOPs Evaluation}
+
+We use floating point operations per second (FLOPs) to compare the number of operations between the sparse training version and dense training version (i.e., 0\% sparsity) for both GCN-STGT and GAT-STGT.
+The ratio of FLOPs of the sparse model to the dense model has the following relationship:
+\begin{align}
+    \frac{FLOPs_{sparse}}{FLOPs_{dense}} = \frac{3\Delta T - 3d\Delta T - 2d + 3}{3(\Delta T + 1)}
+\end{align}
+where $\Delta T$ is the drop-and-grow frequency, and $d$ is the sparsity rate.
+
+The calculation of FLOPS is shown below:
+\begin{gather} 
+\intertext{Let:}\Theta^{flop}_{M_{1 \times j} , M_{j \times 1}} = \xi
+\intertext{Where $\Theta^{flop}_{M_{1 \times j}, M_{j \times 1}}$ means calculating the asymptotic bounds for the FLOPs of multiplication between matrix $M_{1 \times j}$ and matrix $M_{j \times 1}$}
+\intertext{So:}\Theta^{flop}_{M_{i\times j}, M_{j \times k}} = ik\xi
+\intertext{For simple fully connected layers:}\Theta^{flop}_{\textit{fully connected}} = IO \xi
+\intertext{where $I$ is the input dimensionality and $O$ is the output dimensionality.}
+\intertext{For convolutional kernels:}\Theta^{flop}_{\textit{convolutional}} = L_hL_wC_{in}C_{out}K^{2}\xi
+\intertext{where $L_h$, $L_w$ and $C_{in}$ are height, width and number of channels of the input feature map, K is the kernel width (assumed to be symmetric), and $C_{out}$ is the number of output channels}
+\intertext{Training a neural network mainly consist of three steps: calculate loss, calculate gradient, calculate weights. In the estimation process, it is assumed that all three require the same amount of FLOPs. Thus, for sparse training: the total amount is 3$f_s$, where the $f_s$ is the FLOPs for one step in sparse training. For dense training : the total amount is 3$f_d$, where the $f_d$ is the FLOPs for one step in dense training. In our model: the total FLOPs is:}
+FLOPs = \frac{3f_s\Delta T + 2f_s + f_d}{\Delta T + 1}
+\intertext{We need to calculate the dense gradients for updating connections every $\Delta T$ iteration.}
+\intertext{When there are more fully connected layer nodes and a larger number of layers:}
+\Theta^{flop}_{\textit{model}} =\sum_{i=1}^{L} I_{i}O_{i} \xi
+\intertext{where $i$ means the $i$-th layer}
+\intertext{For the sparse model:}
+\Theta^{flop}_{\textit{model}} =\sum_{i=1}^{L} I_{i}O_{i} \xi (1-d)
+\intertext{where $d$ denoted the sparsity rate}
+\intertext{Thus the connection between $f_d$ and $f_s$ approximately equal to}
+f_s = f_d \times (1-d)
+\intertext{Hence:}
+FLOPs =f_d \frac{3\Delta T - 3d\Delta T - 2d + 3}{\Delta T + 1}
+\end{gather}
+The ratio of FLOPs of the sparse models with respect to different sparsity is shown in Fig. \ref{fig.3}. Under a certain update frequency (1,000 iterations/time in our model), the sparsity is linearly related to FLOPS. According to Fig.~\ref{GCN 45min} and Fig.~\ref{GAT 45min}, our sparse training method could stabilize the prediction accuracy when sparsity is up to 90\%. Therefore, we could bring 10$\times$ FLOPs reduction throughout the training process, when the training epochs are the same. This can increase the speed of operations by nearly ten times.
+% , before there is a significant increase in error.
+
+\begin{figure}
+\centering
+\includegraphics[scale=0.5]{FLOPs_ratio.pdf}
+\caption{The relationship between sparsity and  FLOPs ratio for sparse training.} \label{fig.3} 
+\end{figure}
+% When the model sparsity is 0.9, the dense model requires 10$\times$ FLOPs than the sparse model.
+
+
+% \section{Discussion}
+\section{Conclusion}
+
+% The predictions of the state of traffic in a transportation network is paramount for effective traffic operations and management, as well as informed user and system-level decision-making. However, long-term traffic prediction (beyond 30 minutes into the future) remains challenging in current research. 
+In this work, to mitigate the long-term traffic prediction challenge, we integrate the spatio-temporal dependencies in the transportation network from network modeling, together with the GCN and GAT. To further tackle the dramatic computation and memory cost caused by the giant model size (i.e., number of weights) caused by multiple cascaded layers, we propose sparse training to mitigate the training cost, while preserving the prediction accuracy.  We test the proposed methods on a real large-scale transportation network data, Archived Data User Service (ADUS), from California Department of Transportation (Caltrans) Performance Measurement System (PeMS). Experimental results show that the proposed GCN-STGT and GAT-STGT methods achieve very low prediction error for short-, mid- and long-term prediction horizons. Using our sparse training,
+we could train from scratch
+% using a 
+% fixed pruning mask to obtain a 
+with high sparsity (e.g., 90\%), equivalent to 10 times saving on computational cost using the same epochs as dense training,
+% prior to training 
+and arrive at a model with very small accuracy loss compared with the original dense training.
+
+% we could bring 10×
+% FLOPs reduction throughout the training process, when the
+% training epochs are the same.
+
+% \section{Acknowledgments}
+% This research is in part supported by the 
+% \section{Author Contributions}
+% Onseque sequaes rectur autate minullore nusae nestiberum, sum voluptatio. Et ratem sequiam quaspername nos rem repudandae volum consequis nos eium aut as molupta tectum ulparumquam ut maximillesti consequas quas inctia cum volectinusa porrum unt eius cusaest exeritatur? Nias es enist fugit pa vollum reium essusam nist et pa aceaqui quo elibusdandis deligendus que nullaci lloreri bla que sa coreriam explacc atiumquos simolorpore, non prehendunt lam que occum\cite{ref6} si aut aut maximus eliaeruntia dia sequiamenime natem sendae ipidemp orehend uciisi omnienetus most verum, ommolendi omnimus, est, veni aut ipsa volendelist mo conserum volores estisciis recessi nveles ut poressitatur sitiis ex endi diti volum dolupta aut aut odi as eatquo cullabo remquis toreptum et des accus dolende pores sequas dolores tinust quas expel moditae ne sum quiatis nis endipie nihilis etum fugiae audi dia quiasit quibus.
+% \IEEEpubidadjcol
+% Ibus el et quatemo luptatque doluptaest et pe volent rem ipidusa eribus utem venimolorae dera qui acea quam etur aceruptat.
+% Gias anis doluptaspic tem et aliquis alique inctiuntiur?
+
+% Sedigent, si aligend elibuscid ut et ium volo tem eictore pellore ritatus ut ut ullatus in con con pere nos ab ium di tem aliqui od magnit repta volectur suntio. Nam isquiante doluptis essit, ut eos suntionsecto debitiur sum ea ipitiis adipit, oditiore, a dolorerempos aut harum ius, atquat.
+
+% Rum rem ditinti sciendunti volupiciendi sequiae nonsect oreniatur, volores sition ressimil inus solut ea volum harumqui to see\eqref{deqn_ex1a} mint aut quat eos explis ad quodi debis deliqui aspel earcius.
+
+% \begin{equation}
+% \label{deqn_ex1a}
+% x = \sum_{i=0}^{n} 2{i} Q.
+% \end{equation}
+
+% Alis nime volorempera perferi sitio denim repudae pre ducilit atatet volecte ssimillorae dolore, ut pel ipsa nonsequiam in re nus maiost et que dolor sunt eturita tibusanis eatent a aut et dio blaudit reptibu scipitem liquia consequodi od unto ipsae. Et enitia vel et experferum quiat harum sa net faccae dolut voloria nem. Bus ut labo. Ita eum repraer rovitia samendit aut et volupta tecupti busant omni quiae porro que nossimodic temquis anto blacita conse nis am, que ereperum eumquam quaescil imenisci quae magnimos recus ilibeaque cum etum iliate prae parumquatemo blaceaquiam quundia dit apienditem rerit re eici quaes eos sinvers pelecabo. Namendignis as exerupit aut magnim ium illabor roratecte plic tem res apiscipsam et vernat untur a deliquaest que non cus eat ea dolupiducim fugiam volum hil ius dolo eaquis sitis aut landesto quo corerest et auditaquas ditae voloribus, qui optaspis exero cusa am, ut plibus.
+
+
+% \section{Some Common Elements}
+% \subsection{Sections and Subsections}
+% Enumeration of section headings is desirable, but not required. When numbered, please be consistent throughout the article, that is, all headings and all levels of section headings in the article should be enumerated. Primary headings are designated with Roman numerals, secondary with capital letters, tertiary with Arabic numbers; and quaternary with lowercase letters. Reference and Acknowledgment headings are unlike all other section headings in text. They are never enumerated. They are simply primary headings without labels, regardless of whether the other headings in the article are enumerated. 
+
+% \subsection{Citations to the Bibliography}
+% The coding for the citations is made with the \LaTeX\ $\backslash${\tt{cite}} command. 
+% This will display as: see \cite{ref1}.
+
+% For multiple citations code as follows: {\tt{$\backslash$cite\{ref1,ref2,ref3\}}}
+%  which will produce \cite{ref1,ref2,ref3}. For reference ranges that are not consecutive code as {\tt{$\backslash$cite\{ref1,ref2,ref3,ref9\}}} which will produce  \cite{ref1,ref2,ref3,ref9}
+
+% \subsection{Lists}
+% In this section, we will consider three types of lists: simple unnumbered, numbered, and bulleted. There have been many options added to IEEEtran to enhance the creation of lists. If your lists are more complex than those shown below, please refer to the original ``IEEEtran\_HOWTO.pdf'' for additional options.\\
+
+% \subsubsection*{\bf A plain  unnumbered list}
+% \begin{list}{}{}
+% \item{bare\_jrnl.tex}
+% \item{bare\_conf.tex}
+% \item{bare\_jrnl\_compsoc.tex}
+% \item{bare\_conf\_compsoc.tex}
+% \item{bare\_jrnl\_comsoc.tex}
+% \end{list}
+
+% \subsubsection*{\bf A simple numbered list}
+% \begin{enumerate}
+% \item{bare\_jrnl.tex}
+% \item{bare\_conf.tex}
+% \item{bare\_jrnl\_compsoc.tex}
+% \item{bare\_conf\_compsoc.tex}
+% \item{bare\_jrnl\_comsoc.tex}
+% \end{enumerate}
+
+% \subsubsection*{\bf A simple bulleted list}
+% \begin{itemize}
+% \item{bare\_jrnl.tex}
+% \item{bare\_conf.tex}
+% \item{bare\_jrnl\_compsoc.tex}
+% \item{bare\_conf\_compsoc.tex}
+% \item{bare\_jrnl\_comsoc.tex}
+% \end{itemize}
+
+
+
+
+
+% \subsection{Figures}
+% Fig. 1 is an example of a floating figure using the graphicx package.
+%  Note that $\backslash${\tt{label}} must occur AFTER (or within) $\backslash${\tt{caption}}.
+%  For figures, $\backslash${\tt{caption}} should occur after the $\backslash${\tt{includegraphics}}.
+
+% \begin{figure}[!t]
+% \centering
+% \includegraphics[width=2.5in]{fig1}
+% \caption{Simulation results for the network.}
+% \label{fig_1}
+% \end{figure}
+
+% Fig. 2(a) and 2(b) is an example of a double column floating figure using two subfigures.
+%  (The subfig.sty package must be loaded for this to work.)
+%  The subfigure $\backslash${\tt{label}} commands are set within each subfloat command,
+%  and the $\backslash${\tt{label}} for the overall figure must come after $\backslash${\tt{caption}}.
+%  $\backslash${\tt{hfil}} is used as a separator to get equal spacing.
+%  The combined width of all the parts of the figure should do not exceed the text width or a line break will occur.
+% %
+% \begin{figure*}[!t]
+% \centering
+% \subfloat[]{\includegraphics[width=2.5in]{fig1}%
+% \label{fig_first_case}}
+% \hfil
+% \subfloat[]{\includegraphics[width=2.5in]{fig1}%
+% \label{fig_second_case}}
+% \caption{Dae. Ad quatur autat ut porepel itemoles dolor autem fuga. Bus quia con nessunti as remo di quatus non perum que nimus. (a) Case I. (b) Case II.}
+% \label{fig_sim}
+% \end{figure*}
+
+% Note that often IEEE papers with multi-part figures do not place the labels within the image itself (using the optional argument to $\backslash${\tt{subfloat}}[]), but instead will
+%  reference/describe all of them (a), (b), etc., within the main caption.
+%  Be aware that for subfig.sty to generate the (a), (b), etc., subfigure
+%  labels, the optional argument to $\backslash${\tt{subfloat}} must be present. If a
+%  subcaption is not desired, leave its contents blank,
+%  e.g.,$\backslash${\tt{subfloat}}[].
+
+
+ 
+
+% \section{Tables}
+% Note that, for IEEE-style tables, the
+%  $\backslash${\tt{caption}} command should come BEFORE the table. Table captions use title case. Articles (a, an, the), coordinating conjunctions (and, but, for, or, nor), and most short prepositions are lowercase unless they are the first or last word. Table text will default to $\backslash${\tt{footnotesize}} as
+%  the IEEE normally uses this smaller font for tables.
+%  The $\backslash${\tt{label}} must come after $\backslash${\tt{caption}} as always.
+ 
+% \begin{table}[!t]
+% \caption{An Example of a Table\label{tab:table1}}
+% \centering
+% \begin{tabular}{|c||c|}
+% \hline
+% One & Two\\
+% \hline
+% Three & Four\\
+% \hline
+% \end{tabular}
+% \end{table}
+
+% \section{Algorithms}
+% Algorithms should be numbered and include a short title. They are set off from the text with rules above and below the title and after the last line.
+
+% \begin{algorithm}[H]
+% \caption{Weighted Tanimoto ELM.}\label{alg:alg1}
+% \begin{algorithmic}
+% \STATE 
+% \STATE {\textsc{TRAIN}}$(\mathbf{X} \mathbf{T})$
+% \STATE \hspace{0.5cm}$ \textbf{select randomly } W \subset \mathbf{X}  $
+% \STATE \hspace{0.5cm}$ N_\mathbf{t} \gets | \{ i : \mathbf{t}_i = \mathbf{t} \} | $ \textbf{ for } $ \mathbf{t}= -1,+1 $
+% \STATE \hspace{0.5cm}$ B_i \gets \sqrt{ \textsc{max}(N_{-1},N_{+1}) / N_{\mathbf{t}_i} } $ \textbf{ for } $ i = 1,...,N $
+% \STATE \hspace{0.5cm}$ \hat{\mathbf{H}} \gets  B \cdot (\mathbf{X}^T\textbf{W})/( \mathbb{1}\mathbf{X} + \mathbb{1}\textbf{W} - \mathbf{X}^T\textbf{W} ) $
+% \STATE \hspace{0.5cm}$ \beta \gets \left ( I/C + \hat{\mathbf{H}}^T\hat{\mathbf{H}} \right )^{-1}(\hat{\mathbf{H}}^T B\cdot \mathbf{T})  $
+% \STATE \hspace{0.5cm}\textbf{return}  $\textbf{W},  \beta $
+% \STATE 
+% \STATE {\textsc{PREDICT}}$(\mathbf{X} )$
+% \STATE \hspace{0.5cm}$ \mathbf{H} \gets  (\mathbf{X}^T\textbf{W} )/( \mathbb{1}\mathbf{X}  + \mathbb{1}\textbf{W}- \mathbf{X}^T\textbf{W}  ) $
+% \STATE \hspace{0.5cm}\textbf{return}  $\textsc{sign}( \mathbf{H} \beta )$
+% \end{algorithmic}
+% \label{alg1}
+% \end{algorithm}
+
+% Que sunt eum lam eos si dic to estist, culluptium quid qui nestrum nobis reiumquiatur minimus minctem. Ro moluptat fuga. Itatquiam ut laborpo rersped exceres vollandi repudaerem. Ulparci sunt, qui doluptaquis sumquia ndestiu sapient iorepella sunti veribus. Ro moluptat fuga. Itatquiam ut laborpo rersped exceres vollandi repudaerem. 
+% \section{Mathematical Typography \\ and Why It Matters}
+
+% Typographical conventions for mathematical formulas have been developed to {\bf provide uniformity and clarity of presentation across mathematical texts}. This enables the readers of those texts to both understand the author's ideas and to grasp new concepts quickly. While software such as \LaTeX \ and MathType\textsuperscript{\textregistered} can produce aesthetically pleasing math when used properly, it is also very easy to misuse the software, potentially resulting in incorrect math display.
+
+% IEEE aims to provide authors with the proper guidance on mathematical typesetting style and assist them in writing the best possible article. As such, IEEE has assembled a set of examples of good and bad mathematical typesetting \cite{ref1,ref2,ref3,ref4,ref5}. 
+
+% Further examples can be found at \url{http://journals.ieeeauthorcenter.ieee.org/wp-content/uploads/sites/7/IEEE-Math-Typesetting-Guide-for-LaTeX-Users.pdf}
+
+% \subsection{Display Equations}
+% The simple display equation example shown below uses the ``equation'' environment. To number the equations, use the $\backslash${\tt{label}} macro to create an identifier for the equation. LaTeX will automatically number the equation for you.
+% \begin{equation}
+% \label{deqn_ex1}
+% x = \sum_{i=0}^{n} 2{i} Q.
+% \end{equation}
+
+% \noindent is coded as follows:
+% \begin{verbatim}
+% \begin{equation}
+% \label{deqn_ex1}
+% x = \sum_{i=0}^{n} 2{i} Q.
+% \end{equation}
+% \end{verbatim}
+
+% To reference this equation in the text use the $\backslash${\tt{ref}} macro. 
+% Please see (\ref{deqn_ex1})\\
+% \noindent is coded as follows:
+% \begin{verbatim}
+% Please see (\ref{deqn_ex1})\end{verbatim}
+
+% \subsection{Equation Numbering}
+% {\bf{Consecutive Numbering:}} Equations within an article are numbered consecutively from the beginning of the
+% article to the end, i.e., (1), (2), (3), (4), (5), etc. Do not use roman numerals or section numbers for equation numbering.
+
+% \noindent {\bf{Appendix Equations:}} The continuation of consecutively numbered equations is best in the Appendix, but numbering
+%  as (A1), (A2), etc., is permissible.\\
+
+% \noindent {\bf{Hyphens and Periods}}: Hyphens and periods should not be used in equation numbers, i.e., use (1a) rather than
+% (1-a) and (2a) rather than (2.a) for subequations. This should be consistent throughout the article.
+
+% \subsection{Multi-Line Equations and Alignment}
+% Here we show several examples of multi-line equations and proper alignments.
+
+% \noindent {\bf{A single equation that must break over multiple lines due to length with no specific alignment.}}
+% \begin{multline}
+% \text{The first line of this example}\\
+% \text{The second line of this example}\\
+% \text{The third line of this example}
+% \end{multline}
+
+% \noindent is coded as:
+% \begin{verbatim}
+% \begin{multline}
+% \text{The first line of this example}\\
+% \text{The second line of this example}\\
+% \text{The third line of this example}
+% \end{multline}
+% \end{verbatim}
+
+% \noindent {\bf{A single equation with multiple lines aligned at the = signs}}
+% \begin{align}
+% a &= c+d \\
+% b &= e+f
+% \end{align}
+% \noindent is coded as:
+% \begin{verbatim}
+% \begin{align}
+% a &= c+d \\
+% b &= e+f
+% \end{align}
+% \end{verbatim}
+
+% The {\tt{align}} environment can align on multiple  points as shown in the following example:
+% \begin{align}
+% x &= y & X & =Y & a &=bc\\
+% x' &= y' & X' &=Y' &a' &=bz
+% \end{align}
+% \noindent is coded as:
+% \begin{verbatim}
+% \begin{align}
+% x &= y & X & =Y & a &=bc\\
+% x' &= y' & X' &=Y' &a' &=bz
+% \end{align}
+% \end{verbatim}
+
+
+
+
+
+% \subsection{Subnumbering}
+% The amsmath package provides a {\tt{subequations}} environment to facilitate subnumbering. An example:
+
+% \begin{subequations}\label{eq:2}
+% \begin{align}
+% f&=g \label{eq:2A}\\
+% f' &=g' \label{eq:2B}\\
+% \mathcal{L}f &= \mathcal{L}g \label{eq:2c}
+% \end{align}
+% \end{subequations}
+
+% \noindent is coded as:
+% \begin{verbatim}
+% \begin{subequations}\label{eq:2}
+% \begin{align}
+% f&=g \label{eq:2A}\\
+% f' &=g' \label{eq:2B}\\
+% \mathcal{L}f &= \mathcal{L}g \label{eq:2c}
+% \end{align}
+% \end{subequations}
+
+% \end{verbatim}
+
+% \subsection{Matrices}
+% There are several useful matrix environments that can save you some keystrokes. See the example coding below and the output.
+
+% \noindent {\bf{A simple matrix:}}
+% \begin{equation}
+% \begin{matrix}  0 &  1 \\ 
+% 1 &  0 \end{matrix}
+% \end{equation}
+% is coded as:
+% \begin{verbatim}
+% \begin{equation}
+% \begin{matrix}  0 &  1 \\ 
+% 1 &  0 \end{matrix}
+% \end{equation}
+% \end{verbatim}
+
+% \noindent {\bf{A matrix with parenthesis}}
+% \begin{equation}
+% \begin{pmatrix} 0 & -i \\
+%  i &  0 \end{pmatrix}
+% \end{equation}
+% is coded as:
+% \begin{verbatim}
+% \begin{equation}
+% \begin{pmatrix} 0 & -i \\
+%  i &  0 \end{pmatrix}
+% \end{equation}
+% \end{verbatim}
+
+% \noindent {\bf{A matrix with square brackets}}
+% \begin{equation}
+% \begin{bmatrix} 0 & -1 \\ 
+% 1 &  0 \end{bmatrix}
+% \end{equation}
+% is coded as:
+% \begin{verbatim}
+% \begin{equation}
+% \begin{bmatrix} 0 & -1 \\ 
+% 1 &  0 \end{bmatrix}
+% \end{equation}
+% \end{verbatim}
+
+% \noindent {\bf{A matrix with curly braces}}
+% \begin{equation}
+% \begin{Bmatrix} 1 &  0 \\ 
+% 0 & -1 \end{Bmatrix}
+% \end{equation}
+% is coded as:
+% \begin{verbatim}
+% \begin{equation}
+% \begin{Bmatrix} 1 &  0 \\ 
+% 0 & -1 \end{Bmatrix}
+% \end{equation}\end{verbatim}
+
+% \noindent {\bf{A matrix with single verticals}}
+% \begin{equation}
+% \begin{vmatrix} a &  b \\ 
+% c &  d \end{vmatrix}
+% \end{equation}
+% is coded as:
+% \begin{verbatim}
+% \begin{equation}
+% \begin{vmatrix} a &  b \\ 
+% c &  d \end{vmatrix}
+% \end{equation}\end{verbatim}
+
+% \noindent {\bf{A matrix with double verticals}}
+% \begin{equation}
+% \begin{Vmatrix} i &  0 \\ 
+% 0 & -i \end{Vmatrix}
+% \end{equation}
+% is coded as:
+% \begin{verbatim}
+% \begin{equation}
+% \begin{Vmatrix} i &  0 \\ 
+% 0 & -i \end{Vmatrix}
+% \end{equation}\end{verbatim}
+
+% \subsection{Arrays}
+% The {\tt{array}} environment allows you some options for matrix-like equations. You will have to manually key the fences, but there are other options for alignment of the columns and for setting horizontal and vertical rules. The argument to {\tt{array}} controls alignment and placement of vertical rules.
+
+% A simple array
+% \begin{equation}
+% \left(
+% \begin{array}{cccc}
+% a+b+c & uv & x-y & 27\\
+% a+b & u+v & z & 134
+% \end{array}\right)
+% \end{equation}
+% is coded as:
+% \begin{verbatim}
+% \begin{equation}
+% \left(
+% \begin{array}{cccc}
+% a+b+c & uv & x-y & 27\\
+% a+b & u+v & z & 134
+% \end{array} \right)
+% \end{equation}
+% \end{verbatim}
+
+% A slight variation on this to better align the numbers in the last column
+% \begin{equation}
+% \left(
+% \begin{array}{cccr}
+% a+b+c & uv & x-y & 27\\
+% a+b & u+v & z & 134
+% \end{array}\right)
+% \end{equation}
+% is coded as:
+% \begin{verbatim}
+% \begin{equation}
+% \left(
+% \begin{array}{cccr}
+% a+b+c & uv & x-y & 27\\
+% a+b & u+v & z & 134
+% \end{array} \right)
+% \end{equation}
+% \end{verbatim}
+
+% An array with vertical and horizontal rules
+% \begin{equation}
+% \left( \begin{array}{c|c|c|r}
+% a+b+c & uv & x-y & 27\\ \hline
+% a+b & u+v & z & 134
+% \end{array}\right)
+% \end{equation}
+% is coded as:
+% \begin{verbatim}
+% \begin{equation}
+% \left(
+% \begin{array}{c|c|c|r}
+% a+b+c & uv & x-y & 27\\
+% a+b & u+v & z & 134
+% \end{array} \right)
+% \end{equation}
+% \end{verbatim}
+% Note the argument now has the pipe "$\vert$" included to indicate the placement of the vertical rules.
+
+
+% \subsection{Cases Structures}
+% Many times cases can be miscoded using the wrong environment, i.e., {\tt{array}}. Using the {\tt{cases}} environment will save keystrokes (from not having to type the $\backslash${\tt{left}}$\backslash${\tt{lbrace}}) and automatically provide the correct column alignment.
+% \begin{equation*}
+% {z_m(t)} = \begin{cases}
+% 1,&{\text{if}}\ {\beta }_m(t) \\ 
+% {0,}&{\text{otherwise.}} 
+% \end{cases}
+% \end{equation*}
+% \noindent is coded as follows:
+% \begin{verbatim}
+% \begin{equation*}
+% {z_m(t)} = 
+% \begin{cases}
+% 1,&{\text{if}}\ {\beta }_m(t),\\ 
+% {0,}&{\text{otherwise.}} 
+% \end{cases}
+% \end{equation*}
+% \end{verbatim}
+% \noindent Note that the ``\&'' is used to mark the tabular alignment. This is important to get  proper column alignment. Do not use $\backslash${\tt{quad}} or other fixed spaces to try and align the columns. Also, note the use of the $\backslash${\tt{text}} macro for text elements such as ``if'' and ``otherwise.''
+
+% \subsection{Function Formatting in Equations}
+% Often, there is an easy way to properly format most common functions. Use of the $\backslash$ in front of the function name will in most cases, provide the correct formatting. When this does not work, the following example provides a solution using the $\backslash${\tt{text}} macro:
+
+% \begin{equation*} 
+%   d_{R}^{KM} = \underset {d_{l}^{KM}} {\text{arg min}} \{ d_{1}^{KM},\ldots,d_{6}^{KM}\}.
+% \end{equation*}
+
+% \noindent is coded as follows:
+% \begin{verbatim}
+% \begin{equation*} 
+%  d_{R}^{KM} = \underset {d_{l}^{KM}} 
+%  {\text{arg min}} \{ d_{1}^{KM},
+%  \ldots,d_{6}^{KM}\}.
+% \end{equation*}
+% \end{verbatim}
+
+% \subsection{ Text Acronyms Inside Equations}
+% This example shows where the acronym ``MSE" is coded using $\backslash${\tt{text\{\}}} to match how it appears in the text.
+
+% \begin{equation*}
+%  \text{MSE} = \frac {1}{n}\sum _{i=1}^{n}(Y_{i} - \hat {Y_{i}})^{2}
+% \end{equation*}
+
+% \begin{verbatim}
+% \begin{equation*}
+%  \text{MSE} = \frac {1}{n}\sum _{i=1}^{n}
+% (Y_{i} - \hat {Y_{i}})^{2}
+% \end{equation*}
+% \end{verbatim}
+
+% \section{Conclusion}
+% The conclusion goes here.
+
+
+% \section*{Acknowledgments}
+% This should be a simple paragraph before the References to thank those individuals and institutions who have supported your work on this article.
+
+
+
+% {\appendix[Proof of the Zonklar Equations]
+% Use $\backslash${\tt{appendix}} if you have a single appendix:
+% Do not use $\backslash${\tt{section}} anymore after $\backslash${\tt{appendix}}, only $\backslash${\tt{section*}}.
+% If you have multiple appendixes use $\backslash${\tt{appendices}} then use $\backslash${\tt{section}} to start each appendix.
+% You must declare a $\backslash${\tt{section}} before using any $\backslash${\tt{subsection}} or using $\backslash${\tt{label}} ($\backslash${\tt{appendices}} by itself
+%  starts a section numbered zero.)}
+
+
+
+% %{\appendices
+% %\section*{Proof of the First Zonklar Equation}
+% %Appendix one text goes here.
+% % You can choose not to have a title for an appendix if you want by leaving the argument blank
+% %\section*{Proof of the Second Zonklar Equation}
+% %Appendix two text goes here.}
+
+
+
+% \section{References Section}
+% You can use a bibliography generated by BibTeX as a .bbl file.
+%  BibTeX documentation can be easily obtained at:
+%  http://mirror.ctan.org/biblio/bibtex/contrib/doc/
+%  The IEEEtran BibTeX style support page is:
+%  http://www.michaelshell.org/tex/ieeetran/bibtex/
+ 
+%  argument is your BibTeX string definitions and bibliography database(s)
+% \bibliography{IEEEabrv,../bib/paper}
+
+% \section{Simple References}
+% You can manually copy in the resultant .bbl file and set second argument of $\backslash${\tt{begin}} to the number of references
+%  (used to reserve space for the reference number labels box).
+
+% \begin{thebibliography}{1}
+% \bibliographystyle{IEEEtran}
+
+% \bibitem{ref1}
+% Filipovska, M., and H. S. Mahmassani. Traffic Flow Breakdown Prediction Using Machine Learning Approaches.{\it{Transportation research record}}, Vol. 2674, No. 10, 2020, pp. 560–570.
+
+% \bibitem{ref2}
+% Ahmed, M. S., and A. R. Cook. Analysis of Freeway Traffic Time-Series Data by Using Box-Jenkins Techniques. No. 722, 1979.
+
+% \bibitem{ref3}
+% Williams, B. M., and L. A. Hoel. Modeling and Forecasting Vehicular Traffic Flow as a Seasonal ARIMA Process: Theoretical Basis and Empirical Results. {\it{Journal of Transportation Engineering}}, Vol. 129, No. 6, 2003, pp. 664–672. https://doi.org/10.1061/(ASCE)0733-947X(2003)129:6(664).
+
+% \bibitem{ref4}
+% Van Der Voort, M., M. Dougherty, and S. Watson. Combining Kohonen Maps with ARIMA Time Series Models to Forecast Traffic Flow. {\it{Transportation Research Part C: Emerging Technologies}}, Vol. 4, No. 5, 1996, pp. 307–318. https://doi.org/10.1016/S0968-090X(97)82903-8.
+
+% \bibitem{ref5}
+% Tavana, H., and H. S. Mahmassani.{\it{Estimation and Application of Dynamic Speed-Density Relations by Using Transfer Function Models.}}
+
+% \bibitem{ref6}
+% Whittaker, J., S. Garside, and K. Lindveld. Tracking and Predicting a Network Traffic Process.{\it{International Journal of Forecasting}}, Vol. 13, No. 1, 1997, pp. 51–61. https://doi.org/10.1016/S0169-2070(96)00700-5.
+
+% \bibitem{ref7}
+% Stathopoulos, A., and M. G. Karlaftis. A Multivariate State Space Approach for Urban Traffic Flow Modeling and Prediction.{\it{Transportation Research Part C: Emerging Technologies}}, 2003. https://doi.org/10.1016/S0968-090X(03)00004-4.
+
+% \bibitem{ref8}
+% Kamarianakis, Y., and P. Prastacos. {\it{Forecasting Traffic Flow Conditions in an Urban Network Comparison of Multivariate and Univariate Approaches.}}
+
+% \bibitem{ref9}
+% Guo, J., W. Huang, and B. M. Williams. Adaptive Kalman Filter Approach for Stochastic Short-Term Traffic Flow Rate Prediction and Uncertainty Quantification. {\it{Transportation Research Part C: Emerging Technologies}}, 2014. https://doi.org/10.1016/j.trc.2014.02.006.
+
+% \bibitem{ref10}
+% Hosseini, S. H. {\it{Short-Term Traffic Flow Forecasting by Mutual Information and Artificial Neural Networks.}}2012.
+
+% \bibitem{ref11}
+% Jia, Y., J. Wu, and Y. Du. {\it{Traffic Speed Prediction Using Deep Learning Method; Traffic Speed Prediction Using Deep Learning Method.}} 2016. 
+
+% \bibitem{ref12}
+% Huang, W., G. Song, H. Hong, and K. Xie. Deep Architecture for Traffic Flow Prediction: Deep Belief Networks With Multitask Learning. {\it{IEEE TRANSACTIONS ON INTELLIGENT TRANSPORTATION SYSTEMS}}, Vol. 15, No. 5, 2014. https://doi.org/10.1109/TITS.2014.2311123.
+
+% \bibitem{ref13}
+% Yuankai, W., and T. Huachun. {\it{Short-Term Traffic Flow Forecasting with Spatial-Temporal Correlation in a Hybrid Deep Learning Framework.}} 2016.
+
+% \bibitem{ref14}
+% Tahlyan, D., E. Kim, and H. S. Mahmassani. A Meta-Learner Ensemble Framework for Real-Time Short-Term Traffic Speed Forecasting. 2021.
+
+% \bibitem{ref15}
+% Lv, Y., Y. Duan, W. Kang, Z. Li, and F. Y. Wang. Traffic Flow Prediction with Big Data: A Deep Learning Approach. {\it{IEEE Transactions on Intelligent Transportation Systems,}} 2015. https://doi.org/10.1109/TITS.2014.2345663.
+
+% \bibitem{ref16}
+% Ma, X., Z. Tao, Y. Wang, H. Yu, and Y. Wang. Long Short-Term Memory Neural Network for Traffic Speed Prediction Using Remote Microwave Sensor Data. {\it{Transportation Research Part C: Emerging Technologies,}} Vol. 54, 2015, pp. 187–197. https://doi.org/10.1016/J.TRC.2015.03.014.
+
+% \bibitem{ref17}
+% Li, Y., R. Yu, C. Shahabi, and Y. Liu. Diffusion Convolutional Recurrent Neural Network: Data-Driven Traffic Forecasting. {\it{6th International Conference on Learning Representations, ICLR 2018 - Conference Track Proceedings,}} 2017.
+
+% \bibitem{ref18}
+% Yu, H., Z. Wu, S. Wang, Y. Wang, and X. Ma. Spatiotemporal Recurrent Convolutional Networks for Traffic Prediction in Transportation Networks. https://doi.org/10.3390/s17071501.
+
+% \bibitem{ref19}
+% Ma, X., Z. Dai, Z. He, J. Ma, Y. Wang, and Y. Wang. Learning Traffic as Images: A Deep Convolutional Neural Network for Large-Scale Transportation Network Speed Prediction. 2017. https://doi.org/10.3390/s17040818.
+
+% \bibitem{ref20}
+% Yu, B., H. Yin, and Z. Zhu. {\it{Spatio-Temporal Graph Convolutional Networks: A Deep Learning Framework for Traffic Forecasting.}} 2018.
+
+% \bibitem{ref21}
+% Zhang, C., J. J. Q. Yu, and Y. I. Liu. Spatial-Temporal Graph Attention Networks: A Deep Learning Approach for Traffic Forecasting. {\it{IEEE Access,}} Vol. 7, 2019, pp. 166246–166256. https://doi.org/10.1109/ACCESS.2019.2953888.
+
+% \bibitem{ref22}
+% Kong, X., W. Xing, X. Wei, P. Bao, J. Zhang, and W. Lu. STGAT: Spatial-Temporal Graph Attention Networks for Traffic Flow Forecasting. {\it{IEEE Access,}} Vol. 8, 2020, pp. 134363–134372. https://doi.org/10.1109/ACCESS.2020.3011186.
+
+% \bibitem{ref23}
+% Veličković, P., G. Cucurull, A. Casanova, A. Romero, P. Lì, and Y. Bengio. {\it{GRAPH ATTENTION NETWORKS.}}
+
+% \bibitem{ref24}
+% Yu, Y., X. Si, C. Hu, and J. Zhang. A Review of Recurrent Neural Networks: LSTM Cells and Network Architectures. {\it{Neural computation,}} Vol. 31, No. 7, 2019, pp. 1235–1270. https://doi.org/10.1162/NECO\_A\_ 01199.
+
+% \bibitem{ref25}
+% Gers, F. A., J. Schmidhuber, and F. Cummins. Learning to Forget: Continual Prediction with LSTM. {\it{Neural Computation,}} Vol. 12, No. 10, 2000, pp. 2451–2471. https://doi.org/10.1162/089976600300015015.
+
+% \end{thebibliography}
+
+
+% \newpage
+
+% \section{Biography Section}
+% If you have an EPS/PDF photo (graphicx package needed), extra braces are
+%  needed around the contents of the optional argument to biography to prevent
+%  the LaTeX parser from getting confused when it sees the complicated
+%  $\backslash${\tt{includegraphics}} command within an optional argument. (You can create
+%  your own custom macro containing the $\backslash${\tt{includegraphics}} command to make things
+%  simpler here.)
+ 
+% \vspace{11pt}
+
+% \bf{If you include a photo:}\vspace{-33pt}
+% \begin{IEEEbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{fig1}}]{Michael Shell}
+% Use $\backslash${\tt{begin\{IEEEbiography\}}} and then for the 1st argument use $\backslash${\tt{includegraphics}} to declare and link the author photo.
+% Use the author name as the 3rd argument followed by the biography text.
+% \end{IEEEbiography}
+
+% \vspace{11pt}
+
+% \bf{If you will not include a photo:}\vspace{-33pt}
+% \begin{IEEEbiographynophoto}{John Doe}
+% Use $\backslash${\tt{begin\{IEEEbiographynophoto\}}} and the author name as the argument followed by the biography text.
+% \end{IEEEbiographynophoto}
+
+
+
+
+% \vfill
+\bibliographystyle{ieeetr}
+\bibliography{ref}
+
+\newpage
+\section{Biography Section}
+
+% If you have an EPS/PDF photo (graphicx package needed), extra braces are
+%  needed around the contents of the optional argument to biography to prevent
+%  the LaTeX parser from getting confused when it sees the complicated
+%  $\backslash${\tt{includegraphics}} command within an optional argument. (You can create
+%  your own custom macro containing the $\backslash${\tt{includegraphics}} command to make things
+%  simpler here.)
+ 
+% \vspace{-33pt}
+
+% \bf{If you include a photo:}\vspace{-33pt}
+\vspace{-200pt}
+\begin{IEEEbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{BinLei.pdf}}]{Bin Lei}
+% Use $\backslash${\tt{begin\{IEEEbiography\}}} and then for the 1st argument use $\backslash${\tt{includegraphics}} to declare and link the author photo.
+is a Master student in the Department of Computer Science and Engineering at University of Connecticut, Storrs, Connecticut, USA.
+His research interests include machine learning and algorithms.
+
+\end{IEEEbiography}
+\vspace{-200pt}
+\begin{IEEEbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{Shaoyi_Huang.pdf}}]{Shaoyi Huang} (Student Member, IEEE)
+% Use $\backslash${\tt{begin\{IEEEbiography\}}} and then for the 1st argument use $\backslash${\tt{includegraphics}} to declare and link the author photo.
+is a third year Ph.D. student in the Department of Computer Science and Engineering at University of Connecticut, Storrs, Connecticut, USA.
+Her research interests include deep learning, efficient AI, software / hardware co-design, natural language processing, computer vision.
+
+%\vspace{-33pt}
+\end{IEEEbiography}
+\vspace{-200pt}
+
+\begin{IEEEbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{Dr.Ding_Biograph.pdf}}]{Caiwen Ding}
+% Use $\backslash${\tt{begin\{IEEEbiography\}}} and then for the 1st argument use $\backslash${\tt{includegraphics}} to declare and link the author photo.
+is an assistant professor in the Department of Computer Science \& Engineering at the University of Connecticut. He received his Ph.D. degree from Northeastern University (NEU), Boston in 2019.
+% , supervised by Prof. Yanzhi Wang. 
+His interests include machine learning systems; computer architecture and heterogeneous computing (FPGAs/GPUs); computer vision, natural language processing; non-von Neumann computing and neuromorphic computing; privacy-preserving machine learning.
+%His work has been frequently published in high-impact conferences (e.g., DAC, ICCAD, ASPLOS, ISCA, MICRO, HPCA, SC, FPGA, MLSys, AAAI, ACL, EMNLP, IJCAI, DATE). His work on Block-Circulant Matrix-based Smartphone Acceleration received the Best Paper Award Nomination at DATE 2018; his work on ReRAM-based In-Memory Computing for DNN Acceleration received the Best Paper Award Nomination at DATE 2021.
+
+%\vspace{-33pt}
+
+\end{IEEEbiography}
+\vspace{-200pt}
+
+\begin{IEEEbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{Dr.Monika_Biograph.pdf}}]{Monika Filipovska}
+% Use $\backslash${\tt{begin\{IEEEbiography\}}} and then for the 1st argument use $\backslash${\tt{includegraphics}} to declare and link the author photo.
+is an assistant professor in the Department of Civil and Environmental Engineering at the University of Connecticut. She received her Ph.D. in transportation systems from Northwestern University. Her research focuses on predictive and prescriptive analytics for dynamic transportation networks and intelligent transportation systems, including applications of emerging vehicle and infrastructure technologies.
+
+%\vspace{-33pt}
+
+\end{IEEEbiography}
+
+%\vspace{11pt}
+
+% \bf{If you will not include a photo:}\vspace{-33pt}
+% \begin{IEEEbiographynophoto}{John Doe}
+% Use $\backslash${\tt{begin\{IEEEbiographynophoto\}}} and the author name as the argument followed by the biography text.
+% \end{IEEEbiographynophoto}
+
+% \vspace{11pt}
+
+\end{document}
+
+
+

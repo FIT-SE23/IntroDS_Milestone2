@@ -1,0 +1,153 @@
+\input{figs/overview}
+\section{CrossFlow Framework}
+%https://people.eecs.berkeley.edu/~ysshao/assets/papers/shao2015-toppicks.pdf
+%
+%Overview
+%\subsection{Modeling Methodology}
+%\subsection{Performance Modeling Engine}
+%\subsection{Accelerator Design Engine}
+%As an input, ADE gets total power, area and perimeter for the entire system and breakdown across different hardware components as an input from user.
+%We find the best hardware deisgn specified power budget and area budget
+%\subsection{Node Placement}
+%\subsection{Optimization Engine}
+%\subsection{Validation}
+%\subsection{Limitations/Future Directions}
+%The current work only looks at a homogeneous network of accelerators. There are much more opportunity by specializing hardware to each layer. We leave that as a future work.  
+Figure~\ref{fig:overview} shows an overview of the CrossFlow framework. CrossFlow needs the following set of inputs: (1) Architecture template of the accelerator node, which includes different components (e.g., compute cores, levels of memory hierarchy model), specification of each component (e.g., throughput of each compute core, number of compute cores sharing a set of register files, dataflow execution model, and characteristics and scope of different levels of memory hierarchy), (2) System level organization in the form of the system graph (e.g., number of accelerators/nodes per package, number of packages in the system, the network topology connecting nodes within a package and across the package), (3) Technology parameter specification of each hardware component (4) Design budgets for accelerator node design (area, power, perimeter) (5) ML model specification in the form of a high-level compute graph, parameters of each compute node (kernel type, tensor dimensions), (6) Parallelism strategy (data, model, kernel, and/or pipeline parallelism dimensions) which distributes the compute graph across the entire system. 
+
+\input{figs/transformation.tex}
+Given these inputs, CrossFlow predicts the end-to-end performance of one iteration (i.e., single batch) of the ML model. To do so, CrossFlow breaks the problem into the following phases: (1) uArchitecture generator engine which estimates microarchitecture parameters for the accelerator node under design constraints dictated by technology and resource budget (2) Compute graph transformation engine which replicates the compute graph along different dimensions in the parallelism space and adjust kernel dimensions to reflect the parallelism strategy (3) Device mapping engine which maps compute graph to system graph (4) Compute graph component prediction engine which estimates the time for all the vertices and the edges in the compute graph, and (5) An event-driven simulator to estimate the time to completion of one iteration through the graph, respecting resource scheduling constraints.
+
+
+%performance prediction engine predicts time foreach node and each edge within the graph individually. Havingtime for each node and each edge within the compute graph, we  will  use  an  event-driven  simulator  that  walks  over  thegraph and triggers new event dictated by data dependency andresource mapping schedule.
+\vspace{-0.15in}
+\subsection{Compute Graph Transformation and Device Mapping Engine}
+
+%Given the ML model description (in form of a compute graph), the system topology (in form of a system graph) and the parallelization strategy, we use device mapping engine to map the vertices of the compute graph (kernels) onto the vertices of the system graph (nodes) and map the edges of the compute graph (data dependency edges) to the edges of the system graph (physical network links). However, before the mapping happens, we transform the compute graph to reflect the parallelism strategy specified by the user.
+
+Given the ML model description (in form of a compute graph), and the parallelization strategy, we first transform the compute graph to reflect the parallelism strategy. Next, we use device mapping engine to map the vertices of the compute graph (kernels) onto the vertices of the system graph (accelerator nodes) and map the edges of the compute graph (data dependency edges) to the edges of the system graph (physical network links).
+
+\vspace{0.1in}
+\textbf{Transformation}
+Figure~\ref{fig:transformation} shows an example of graph transformation. Data parallelism, would result in replicating the graph and connecting the corresponding compute vertices in a fashion consistent with the reduction algorithm. For example, in case of ring-all-reduce, the corresponding vertices would be connected in a ring fashion. Note that the new edges that will be added to the graph will be marked as \textit{cross-edge} to capture the fact that they connect compute vertices belonging to different data parallel shards placed on separate devices.
+%
+Model/kernel parallelism would result in replacing each vertex in the compute graph with sub-vertices and adjusting the problem size for each device and connecting the sub-vertices in a manner consistent with the parallelism strategy and the reduction algorithm.  
+Much similar to data parallelism, the new edges would be marked as \textit{cross-edge}.
+%
+Similarly pipeline parallelism slices the compute graph in to multiple sub-graphs such that each sub-graph could be placed on to a separate device such that the computation across consecutive batches can be pipelined.
+%Pipeline parallelism, unlike other forms, does not result in replication or replacement of graph nodes. It simply modifies the edge type between nodes across layers that are mapped to different pipeline stages to capture their cross-connection nature. 
+
+\vspace{0.1in}
+\textbf{Mapping}
+Depending on the parallelism strategy, the transformed compute graph can take the form of a 5D/4D/3D hypercube. However, the underlying system topology may be a 2D or 3D hypercube. This means that multiple edges in the compute graph would need to be mapped in to one edge/link of the system graph. The number of logical edges that are mapped into a physical edge is an important metric as it captures the effect of link bandwidth sharing which ultimately affects the communication overhead. Based on link sharing, we allocate the derated/partial link bandwidth to the edges of the compute graph. In order to find a mapping that minimizes the maximum number of edges that is mapped in to each network link, we use a greedy heuristic. Our heuristic works as follows: starting with one axis in the parallelization space, we map the vertices along that axis as close as possible, before moving to the vertices in the second axis. We repeat this for different permutations of axes and choose the one which minimizes the communication overhead.
+
+%\todosaptadeep{These different parallelism strategies have major implications on end-to-end performance and stress different resources of the system. As an example, very large models often wouldn't fit in the main memory capacity of a single accelerator device, and therefore model and/or pipeline parallelism needs to be employed. Model parallelism on the other hand, can stress inter-node network characteristics.}
+
+\subsection{Performance Prediction Engine}
+We estimate the end-to-end performance in a hierarchical manner. In the first step, we predict the performance of each kernel on the hardware node that is mapped onto. Having all compute nodes performance in place, we follow an event-driven simulation to capture the end-to-end timing. We explain these two steps in more details.
+
+\subsubsection{Estimation of the Compute Graph Components}
+
+Crossflow uses hierarchical roofline analysis to predict the execution time of each kernels in the transformed compute graph. The edge component, i.e., the inter-device communication overhead is calculated based on a simple throughput model.
+
+\vspace{0.1in}
+\textbf{Hierarchical Roofline Model}
+Roofline model is an analytical model that relies on accurate estimation of operational intensity (OI) to predict if an application is memory-bound or compute-bound. Once this is known, it uses a simple throughput analysis to estimate timing (\#flops/compute throughput if compute-bound, or \# memory accesses/memory bandwidth if memory-bound).
+Hierarchical roofline analysis much similar to roofline analysis relies on operation intensity estimation to measure OI wrt. different levels of memory hierarchy to predict if an application is compute-bound, L1-bound, L2-bound, etc. 
+Operational intensity would be different for different levels of memory hierarchy, controlled by the number of accesses to each level. Hence, our performance estimation very much depends on accurate estimation of number of accesses to each levels of memory hierarchy, which in turn depends on the tiling choices at each level. 
+%Once the tile sizing and roofline estimations for each level of memory hierarchy is in place, the overall performance is dictated by the slowest performing component. 
+
+\vspace{0.1in}
+\textbf{Memory Hierarchy Modeling}
+%re-streaming coupled with tiling
+%As we pointed out before, the success of roofline analysis very much depends on the accurate estimation of the number of accesses to each level of memory hierarchy. 
+The number of accesses to each level of memory hierarchy is a function of the underlying hardware (memory capacity at each level) and the algorithmic implementations (tiling strategies). For each level of memory hierarchy, we explore $N$ different tiling strategies that meets the hardware constraints (memory capacity at that level), where $N$ is a tunable parameter in the framework. 
+For an architecture, with $L$ levels of memory hierarchy, this requires searching over the space of $N^L$ tiling combinations. Empirically, we found that for $L=3$, $N \approx 20$ results in a reasonably accurate estimation. 
+
+%For any given tiling strategy, we find the number of times each tile needs to be re-streamed from the next (lower) level of memory hierarchy. We start from the lowest level of memory hierarchy (e.g. L2 cache in the case of a GPU-like architecture) and walk upward to estimate the number of accesses to each level and propagate the re-streaming factor upward. Refer to Alg.~\ref{alg:}. 
+%Within each level (say $L_{(i)}$), the number of accesses from the higher-level $L_{(i-1)}$ is dictated by the tiling parameters at the current level ($T_{(i)}$) and the higher level ($T_{(i-1)}$). $T_{(i)}$ itself is a triplet that captures tiling along the input, output and inner dimension at level $i$.
+
+%%%%%%%%
+\vspace{0.1in}
+\textbf{DataFlow Modeling} 
+The number of accesses to each level of memory hierarchy, except for level 0 (i.e. register files) is dictated by the tiling parameters at the current and higher levels. The number of accesses to register file will be determined by the number of instructions executed in the execution engine and the dataflow strategy governing mapping and communication between those engines (e.g. weight stationary ($WS$), activation stationary ($AS$) and output stationary~\cite{eyeriss,timeloop}). 
+The execution engine structure dictates how many times a piece of data could be reused internally before accessing the register file. We refer to this number as \textit{reuse factor (K)}.
+For example, in the case of an execution engine being a single Fused Multiply Add (FMA), each data element will be reused only once. 
+In the case of a 2-D systolic array with size $N_x$ and $N_y$, each data element could be reused $T_x/N_x$ or $T_y/N_y$ or $T_z/N_z$ times, depending on the choice of dataflow strategy and tile size (i.e. $T_x$, $T_y$ and $T_z$).
+
+%We model three different dataflow strategies, weight stationary ($WS$), activation stationary ($AS$) and output stationary ($OS$) and allow users to pick their desired strategy from one of the $\{WS$, $AS$, $OS$, best$\}$ choices. Here, the \textit{best} will selects the best strategy among the three choices.
+
+%We use the following equation to calculate number of accesses to register files:
+
+%\begin{equation*}
+%    \#L_0\_accesses = \#Flops \times \frac{N_x.N_y + K. N_x + K. N_y}{2.K.N_x. N_y}
+%\end{equation*}
+
+%Where $K$ is the reuse factor whose value is determined by the dataflow strategy (explained above).
+
+\vspace{0.1in}
+\textbf{Inter-device Communication Modeling}
+%Once the transformed compute graph is mapped down to the system graph, we calculate the number of bytes that needs to be transferred through each edge ($D_e$). On the other hand, 
+Compute graph to system graph mapping engine generates the information about logical edge to physical link mapping.  Based on how many edges share a link, we find the portion of the bandwidth of the physical link that is allocated for every edge sharing that link.
+For edges which are allocated multi-hop paths, the physical link with the minimum bandwidth allocation becomes the bottleneck. We use the bottleneck bandwidth for each edge to estimate transfer time for that edge.
+%( equation~\ref{eqn:bandwidth_derating_factor}). 
+%For edges which are allocated multi-hop paths, the physical link with the minimum bandwidth allocation becomes the bottleneck. We then use the bandwidth allocated in the bottleneck link (equation~\ref{eqn:bottleneck_link}) to estimate the total time ($T_e$) taken to transfer the tensors from one device node to the other.
+
+%\begin{equation}
+%    \label{eqn:bandwidth_derating_factor}
+%    B^l_e = \frac{B^l}{\sum_{e \in E} X^l_e} ~~~~\forall l\in L
+%\end{equation}
+%\begin{equation}
+%    \label{eqn:bottleneck_link}
+%    \displaystyle{B_e = \min_{l}(B^l_e)}
+%\end{equation}
+%\begin{equation}
+%    T_e = \frac{D_e}{B_e}
+%\end{equation}
+%where $X^l_e$ is 1 if edge $e$ is assigned to link $l$, otherwise 0.
+
+%%%%%%%%%%%
+\ignore{
+\subsection{Parallelism Modeling} 
+Once the dataflow strategy is decided, we \textit{transform} our graph to reflect the impact of different forms of parallelism strategies, such as data, model and pipeline parallelism. Figure~\ref{fig:} shows an example of such transformation.
+
+%
+Data parallelism would result in replicating the graph and connecting corresponding compute nodes in a fashion consistent with the reduction algorithm. For example, in case of ring-all-reduce, the corresponding nodes would be connected in a ring fashion. Note that the new edges that will be added to the graph will be marked as \textit{cross-edge} to capture the fact that they connect nodes belonging to different accelerators.
+
+%
+Model parallelism would result in replacing each compute node with sub-nodes and adjusting the problem size within each node and connecting the sub-components in a manner consistent with the parallelism strategy and the reduction algorithm.  
+Much similar to data parallelism, the new edges would be marked as \textit{cross-edge}.
+
+%
+Pipeline parallelism, unlike othems, does not result in replication or replacement of graph nodes. It simply modifies the edge type between nodes across layers that are mapped to different pipeline stages to capture their cross-connection nature.  
+% 
+
+
+%%%%%%%%%%%
+\vspace{0.1in}
+\textbf{Network Modeling} 
+So far we discussed how performance prediction engine predicts the time for each node within the compute graph. Here, we look deeply into how to model performance for each edge.
+%
+Recall that depending on the choice of parallelism strategy, the transformed compute graph can be a 5D/4D/3D hyper-cube (refer to Figure~\ref{fig:}).
+%
+However, 5D/4D/3D hyper-cube is not realizable in hardware. Physically speaking, the interconnection network across several nodes is usually structured hierarchically. Compute nodes that sit on a wafer are usually connected through one network topology and nodes across wafers are connected through another network topology. 
+%
+For example Nvidia DGX box consists of 8 GPUs, with one GPU on each wafer and wafers organized in a 3D hyper-cube on a ... substrate. 
+%
+In this paper, we are interested in wafer-scale integration, hence we study cases where we can fit more than one GPU/accelerator on one wafer. For connecting nodes on one wafer,  we assume a 2D mesh network topology, and for nodes across wafers, we assume a 2-D torus. This is similar to what recent wafer-scale hardware accelerators like Cerebras are adopting.
+
+Note the mismatch between physical and logical network topology (5D/4D/3D vs. 2D). This indicates that multiple edge in logical graph can be mapped into one edge on physical layout. The number of logical edges that are mapped into a physical edge is an important metric as it captures the number of virtual channels required to simulate the connection in logical graph. The number of virtual channels per edge dictates the factor by which we have to derate the physical connection to capture the actual bandwidth. Overall bandwidth is dictated by the slowest link. So our goal is to find an optimal mapping that minimizes the maximum number of edges that is mapped into each edge across all edges. We use greedy heuristics to find such mappings. Our heuristic works as follow: starting with one axis, we try to map the nodes along that axis as close as possible, before moving to elements along the second axis and we repeat this until we map all axes. We repeat this for different permutations of axes. Figure~\ref{fig:} shows an example of a 4D to 2D mapping.
+}
+
+%%%%%%%%%%
+\subsubsection{End-to-End Time Estimation}\label{subsec:end2end}
+%include discussion around pipeline parallelism and 
+In prior subsection, we discussed how we start with the original compute graph ($G_0$) and transform it into an extended form ($G_3$) that captures different forms of parallelism strategies that are specified by the user. 
+%Each node in the final transformed graph captures a model shard with a data shard. 
+%This transformation is necessary to find an accurate estimation of edge timing after physical mapping. 
+After the mapping stage, timings for all edges in the transformed graph would be available and after per-component time estimation, timings for all nodes would be available.
+Once we have all the timings for all sub-kernels and edges in place, we calculate the end-2-end time by collapsing the transformed graph into its original form. As we move in opposite order, we annotate each node in the compute graph with the updated time. Once the graph is back in its original form ($G_0^'$), the only parallelism strategy that still needs to be taken care of would be pipeline parallelism. 
+Once the resource mapping is decided, the overall time measurement would be a matter of graph traversal while respecting the resource constraints.
+Here, resources would be compute nodes and communication links.
+We assume each resource can be allocated to one node or one edge at a time. Once each edge or node computation is over, it would be back to the resource pool for grab. Overall, pipeline parallelism is simulated in an event-driven manner.
+
